@@ -43,7 +43,10 @@ and on where the path physically lands, so a symlink in the project
 (`notes.txt → .env`, `cfg → .ouija`) cannot read or write what the name hides —
 the `grep` walk skips protected files and never follows symlinks, and a bash
 command that merely *names* a protected path
-(`cat .env`, `~/.ssh/id_rsa`) is refused with an explanatory message. The bash
+(`cat .env`, `~/.ssh/id_rsa`) is refused with an explanatory message. Each word
+is judged by its value after the shell's quote removal (`cat .e""nv` is
+`cat .env`) and by where it physically lands from the project root, so a
+symlink (`cat notes.txt` with `notes.txt → .env`) is refused too. The bash
 scan accepts occasional false positives (e.g. a commit message that literally
 contains `.env`) — it fails closed, never open. An explicit sandbox-escape
 approval still outranks the policy: that is a per-path user consent shown in

@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -476,5 +478,82 @@ func TestBashEnvSanitizationApplied(t *testing.T) {
 	}
 	if strings.Contains(res.Data, "supersecret") {
 		t.Fatal("secret env var leaked to bash subprocess")
+	}
+}
+
+// Quoting is a free way around a lexical scan: the shell removes the quotes,
+// so the scan must judge each word by its value, not its spelling.
+func TestBashProtectedPathRefsSurviveQuoting(t *testing.T) {
+	denied := []string{
+		`cat .e""nv`,
+		`cat '.e'nv`,
+		`cat .e\nv`,
+		`cat ~/.s"s"h/id_rsa`,
+		`cat "/e"tc/passwd`,
+		`cat < .e''nv`,
+		`cat $(echo .e""nv)`,
+		`cat $'\x2eenv'`,
+	}
+	for _, c := range denied {
+		t.Run(c, func(t *testing.T) {
+			if _, found := commandRefsProtectedPath(c); !found {
+				t.Errorf("commandRefsProtectedPath(%q) = false; want the quoted protected path refused", c)
+			}
+		})
+	}
+	allowed := []string{
+		`echo "hello world"`,
+		`git commit -m 'fix: handle env'`,
+		`grep -rn "TODO" .`,
+		`printf '%s\n' a b`,
+	}
+	for _, c := range allowed {
+		t.Run(c, func(t *testing.T) {
+			if ref, found := commandRefsProtectedPath(c); found {
+				t.Errorf("commandRefsProtectedPath(%q) = %q; want allowed", c, ref)
+			}
+		})
+	}
+}
+
+// A symlink in the project must not let bash reach a protected file that the
+// file tools refuse.
+func TestBashProtectedPathRefsThroughSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root := t.TempDir()
+	for rel, content := range map[string]string{".env": "SECRET=1", ".ouija/config.json": "{}", "README.md": "hi"} {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for link, target := range map[string]string{"notes.txt": ".env", "cfg": ".ouija", "readme": "README.md"} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, c := range []string{"cat notes.txt", "cat ./notes.txt", "cat cfg/config.json", "tar czf /tmp/x.tgz cfg"} {
+		if _, found := commandRefsProtectedPathIn(root, c); !found {
+			t.Errorf("%q reached a protected file through a symlink", c)
+		}
+	}
+	for _, c := range []string{"cat readme", "cat README.md", "ls -la", "git status"} {
+		if ref, found := commandRefsProtectedPathIn(root, c); found {
+			t.Errorf("%q refused (%q); want allowed", c, ref)
+		}
+	}
+
+	// End to end: the ToolRunner gate refuses it even under Allow.
+	eng := newTestEngine(&mockProvider{}, root)
+	eng.SetPermissionConfig(NewPermissionConfig(Allow))
+	res := eng.runner.Run(context.Background(), "t", ToolCall{ID: "1", Name: "bash", Input: map[string]any{"command": "cat notes.txt"}}, nil, nil)
+	if res.Error == nil || strings.Contains(fmt.Sprint(res.Data), "SECRET") {
+		t.Fatalf("bash read .env through a symlink: %+v", res)
 	}
 }

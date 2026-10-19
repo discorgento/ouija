@@ -124,7 +124,11 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					Message: "command matches a dangerous pattern and is blocked by the denylist.",
 				}}
 			}
-			if ref, found := commandRefsProtectedPath(cmd); found {
+			root := ""
+			if r.tools != nil {
+				root = r.tools.Root()
+			}
+			if ref, found := commandRefsProtectedPathIn(root, cmd); found {
 				if span != nil {
 					span.SetError("protected path")
 				}

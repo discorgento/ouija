@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/discorgento/ouija/schema"
 
+	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -634,26 +636,96 @@ const pathTokenTrim = "'\"`" + "(){}[],;:&|<>!?*$"
 // False positives are accepted by design: a command word that names `.env`
 // or `~/.ssh/…` is rejected with an explicit message instead of being run.
 func commandRefsProtectedPath(cmd string) (string, bool) {
-	segs := ExtractCommands(cmd)
-	if len(segs) == 0 {
-		segs = []string{cmd}
-	}
-	for _, seg := range segs {
-		for _, w := range strings.Fields(seg) {
-			candidates := []string{w}
-			if eq := strings.IndexByte(w, '='); eq > 0 {
-				candidates = append(candidates, w[eq+1:]) // of=/dev/…, KEY=.env value…
-			}
-			for _, c := range candidates {
-				c = strings.Trim(c, pathTokenTrim)
-				if c == "" || strings.HasPrefix(c, "-") {
-					continue
-				}
-				if isProtectedPath(c) {
-					return c, true
-				}
+	return commandRefsProtectedPathIn("", cmd)
+}
+
+// commandRefsProtectedPathIn is commandRefsProtectedPath for a command that
+// runs in root. Besides the raw tokens it checks each word's value after quote
+// removal (`cat .e""nv` is `cat .env` to the shell) and, when root is set,
+// where each word physically lands: a symlink in the project
+// (`notes.txt → .env`) is refused like the file it points to.
+func commandRefsProtectedPathIn(root, cmd string) (string, bool) {
+	for _, c := range protectedPathCandidates(cmd) {
+		if isProtectedPath(c) {
+			return c, true
+		}
+		if root != "" {
+			if p := physicalCandidate(root, c); p != "" && isProtectedPath(p) {
+				return c, true
 			}
 		}
 	}
 	return "", false
+}
+
+// protectedPathCandidates lists the path-like words of cmd: the raw tokens of
+// each command segment, trimmed of shell punctuation, plus every shell word's
+// value after quote removal. A `KEY=value` word also yields its value.
+func protectedPathCandidates(cmd string) []string {
+	segs := ExtractCommands(cmd)
+	if len(segs) == 0 {
+		segs = []string{cmd}
+	}
+	var words []string
+	for _, seg := range segs {
+		words = append(words, strings.Fields(seg)...)
+	}
+	words = append(words, shellWordValues(cmd)...)
+
+	var out []string
+	for _, w := range words {
+		candidates := []string{w}
+		if eq := strings.IndexByte(w, '='); eq > 0 {
+			candidates = append(candidates, w[eq+1:]) // of=/dev/…, KEY=.env value…
+		}
+		for _, c := range candidates {
+			c = strings.Trim(c, pathTokenTrim)
+			if c == "" || strings.HasPrefix(c, "-") {
+				continue
+			}
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// shellWordValues returns the value every word of cmd has after quote removal,
+// as the shell would pass it (`.e""nv`, `'.e'nv` and `.e\nv` are all `.env`).
+// Nothing is executed: a word needing a real expansion (command substitution)
+// is skipped, while the words inside the substitution are still visited.
+func shellWordValues(cmd string) []string {
+	f, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return nil
+	}
+	var out []string
+	syntax.Walk(f, func(n syntax.Node) bool {
+		if w, ok := n.(*syntax.Word); ok {
+			// Fields, not Literal: argument semantics, so an unquoted
+			// backslash is removed too. A nil config never globs or runs.
+			if vs, err := expand.Fields(nil, w); err == nil {
+				out = append(out, vs...)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// physicalCandidate resolves a command word to the path it would open from
+// root — `~` is the home directory, a relative word is relative to root — with
+// its symlinks resolved. Words that are not paths simply resolve to a
+// harmless location under root.
+func physicalCandidate(root, word string) string {
+	switch {
+	case word == "~" || strings.HasPrefix(word, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		word = filepath.Join(home, word[1:])
+	case !filepath.IsAbs(word):
+		word = filepath.Join(root, word)
+	}
+	return physicalPath(word)
 }
