@@ -1,6 +1,7 @@
-// Package models provides the canonical list of providers and their available
-// models. Edit defaultModels() in this file to add/remove providers and models.
-// No file I/O — models live in memory only. Safe for concurrent use.
+// Package models lists providers and their models: each provider's own list
+// from its API (live.go, cached under the user cache dir), with a small
+// built-in catalog as the offline fallback. Safe for concurrent use: the
+// catalog never changes after it is built.
 package models
 
 import (
@@ -22,15 +23,12 @@ type ProviderDef struct {
 	Label string
 	// Models is a map of model ID → metadata.
 	Models map[string]ModelDef
-	// DefaultModel overrides the first model or one marked default:true.
-	DefaultModel string
 }
 
 // ModelDef describes a single model within a provider.
 type ModelDef struct {
 	Label         string
 	ContextWindow int
-	Default       bool
 }
 
 // ─── Singleton ────────────────────────────────────────────────────────────
@@ -43,7 +41,6 @@ var Load = sync.OnceValue(func() *Store {
 // Store holds the canonical models list, immutable after init.
 // For testability, construct directly: &Store{data: &ModelsFile{...}}.
 type Store struct {
-	mu   sync.RWMutex
 	data *ModelsFile
 }
 
@@ -59,7 +56,7 @@ func defaultModels() *ModelsFile {
 			"anthropic": {
 				Label: "Anthropic (Claude)",
 				Models: map[string]ModelDef{
-					"claude-opus-5-5":   {Label: "Claude Opus 5.5", ContextWindow: 1_000_000, Default: true},
+					"claude-opus-5-5":   {Label: "Claude Opus 5.5", ContextWindow: 1_000_000},
 					"claude-sonnet-5-5": {Label: "Claude Sonnet 5.5", ContextWindow: 1_000_000},
 					"claude-haiku-5-5":  {Label: "Claude Haiku 5.5", ContextWindow: 1_000_000},
 					"claude-fable-5-1":  {Label: "Claude Fable 5.1", ContextWindow: 1_000_000},
@@ -68,7 +65,7 @@ func defaultModels() *ModelsFile {
 			"openai": {
 				Label: "OpenAI (GPT)",
 				Models: map[string]ModelDef{
-					"gpt-4o":      {Label: "GPT-4o", ContextWindow: 128_000, Default: true},
+					"gpt-4o":      {Label: "GPT-4o", ContextWindow: 128_000},
 					"gpt-4o-mini": {Label: "GPT-4o Mini", ContextWindow: 128_000},
 					"o3-mini":     {Label: "o3 Mini", ContextWindow: 200_000},
 				},
@@ -82,7 +79,7 @@ func defaultModels() *ModelsFile {
 					"qwen/qwen3-coder:free":        {Label: "Qwen 3 Coder (free)"},
 					"openrouter/owl-alpha":         {Label: "OWL Alpha (free)"},
 					"openai/gpt-oss-120b:free":     {Label: "GPT-OSS 120B (free)"},
-					"openrouter/free":              {Label: "OpenRouter Free (fallback)", Default: true},
+					"openrouter/free":              {Label: "OpenRouter Free (fallback)"},
 				},
 			},
 			"opencode": {
@@ -90,7 +87,7 @@ func defaultModels() *ModelsFile {
 				// ("can only be used from within OpenCode") to other clients.
 				Label: "OpenCode Zen (its free tier only works inside the OpenCode app)",
 				Models: map[string]ModelDef{
-					"big-pickle":             {Label: "Big Pickle", Default: true},
+					"big-pickle":             {Label: "Big Pickle"},
 					"deepseek-v4-flash-free": {Label: "DeepSeek V4 Flash"},
 					"mimo-v2.5-free":         {Label: "MiMo V2.5"},
 					"north-mini-code-free":   {Label: "North Mini Code"},
@@ -100,7 +97,7 @@ func defaultModels() *ModelsFile {
 			"ollama": {
 				Label: "Ollama (local, free)",
 				Models: map[string]ModelDef{
-					"qwen2.5-coder": {Label: "Qwen 2.5 Coder", Default: true},
+					"qwen2.5-coder": {Label: "Qwen 2.5 Coder"},
 					"llama3.2":      {Label: "Llama 3.2"},
 					"mistral":       {Label: "Mistral"},
 				},
@@ -111,35 +108,6 @@ func defaultModels() *ModelsFile {
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
-// Providers returns the sorted list of provider names.
-func (s *Store) Providers() []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.data == nil {
-		return nil
-	}
-	return slices.Sorted(maps.Keys(s.data.Providers))
-}
-
-// ProvidersWithLabels returns provider names and their display labels.
-func (s *Store) ProvidersWithLabels() (names []string, labels []string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.data == nil {
-		return nil, nil
-	}
-	names = slices.Sorted(maps.Keys(s.data.Providers))
-	labels = make([]string, len(names))
-	for i, name := range names {
-		if pd := s.data.Providers[name]; pd.Label != "" {
-			labels[i] = pd.Label
-		} else {
-			labels[i] = name
-		}
-	}
-	return
-}
-
 // ProvidersFor returns the provider picker list restricted to the providers
 // that actually exist at runtime. `registered` is the registry's name list:
 // catalog entries whose provider is not registered are dropped (selecting one
@@ -147,8 +115,6 @@ func (s *Store) ProvidersWithLabels() (names []string, labels []string) {
 // from the catalog are appended so they stay reachable. Labels come from the
 // catalog when known, else the name itself.
 func (s *Store) ProvidersFor(registered []string) (names, labels []string) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 
 	reg := make(map[string]struct{}, len(registered))
 	for _, name := range registered {
@@ -193,8 +159,6 @@ func (s *Store) ProvidersFor(registered []string) (names, labels []string) {
 // Models returns the sorted list of model names for the given provider.
 // Returns nil if the provider is unknown.
 func (s *Store) Models(provider string) []string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if s.data == nil {
 		return nil
 	}
@@ -205,60 +169,8 @@ func (s *Store) Models(provider string) []string {
 	return slices.Sorted(maps.Keys(pd.Models))
 }
 
-// ModelExists reports whether the model exists for the given provider.
-func (s *Store) ModelExists(provider, model string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.data == nil {
-		return false
-	}
-	pd, ok := s.data.Providers[provider]
-	if !ok {
-		return false
-	}
-	_, ok = pd.Models[model]
-	return ok
-}
-
-// DefaultModel returns the default model for the given provider.
-// Precedence: provider.defaultModel > model marked default:true > first model.
-// Returns "" if the provider is unknown.
-func (s *Store) DefaultModel(provider string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.data == nil {
-		return ""
-	}
-	pd, ok := s.data.Providers[provider]
-	if !ok {
-		return ""
-	}
-
-	// 1) Explicit defaultModel.
-	if pd.DefaultModel != "" {
-		if _, ok := pd.Models[pd.DefaultModel]; ok {
-			return pd.DefaultModel
-		}
-	}
-
-	// 2) Any model marked default:true.
-	for name, md := range pd.Models {
-		if md.Default {
-			return name
-		}
-	}
-
-	// 3) First model (map iteration is random — any is acceptable).
-	for name := range pd.Models {
-		return name
-	}
-	return ""
-}
-
 // ModelInfo returns the metadata for a specific model, if it exists.
 func (s *Store) ModelInfo(provider, model string) (ModelDef, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	if s.data == nil {
 		return ModelDef{}, false
 	}
@@ -268,12 +180,4 @@ func (s *Store) ModelInfo(provider, model string) (ModelDef, bool) {
 	}
 	md, ok := pd.Models[model]
 	return md, ok
-}
-
-// Replace atomically swaps the entire models store. Useful for tests or
-// future hot-reload from an external source.
-func (s *Store) Replace(data *ModelsFile) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.data = data
 }

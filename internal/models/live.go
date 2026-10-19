@@ -1,6 +1,7 @@
 package models
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"os"
@@ -43,7 +44,7 @@ func (s *Store) List(ctx context.Context, provider string, p engine.Provider) []
 				known, _ := s.ModelInfo(provider, info.ID)
 				live[i] = Model{
 					ID:            info.ID,
-					Label:         firstNonEmpty(info.Label, known.Label),
+					Label:         cmp.Or(info.Label, known.Label),
 					ContextWindow: max(info.ContextWindow, known.ContextWindow),
 				}
 			}
@@ -107,11 +108,4 @@ func writeLiveCache(provider string, list []Model) {
 		return
 	}
 	_ = atomicfile.Write(path, b, 0o600, false) // a cache: best effort
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
