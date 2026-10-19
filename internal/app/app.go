@@ -14,6 +14,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
+	"github.com/discorgento/ouija/internal/models"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/registry"
 )
@@ -184,6 +185,9 @@ func applyProjectConfig(cfg *engine.Config, projectCfg *engine.Config, cfgPath s
 	if projectCfg.StreamTimeout != def.StreamTimeout {
 		cfg.StreamTimeout = projectCfg.StreamTimeout
 	}
+	if projectCfg.ContextWindow > 0 {
+		cfg.ContextWindow = projectCfg.ContextWindow
+	}
 	if projectCfg.SystemPrompt != def.SystemPrompt {
 		cfg.SystemPrompt = projectCfg.SystemPrompt
 	}
@@ -352,6 +356,9 @@ func SetupEngine(ctx context.Context, configPath string, trace bool) (*Outcome, 
 	prov, err := BuildProvider(cfg.Provider, cfg.APIKey)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.ContextWindow <= 0 { // an explicit contextWindow wins
+		cfg.ContextWindow = models.Load().ContextWindow(cfg.Provider, cfg.Model, nil)
 	}
 	tr := engine.NewTracer(trace)
 

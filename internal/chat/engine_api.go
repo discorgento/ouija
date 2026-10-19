@@ -33,6 +33,8 @@ type EngineAPI interface {
 	// SetModel / SetProvider switch the active model/provider (/model, /provider).
 	SetModel(name string)
 	SetProvider(p engine.Provider)
+	// SetContextWindow sets the model's context size in tokens (0 = unknown).
+	SetContextWindow(tokens int)
 	// SaveConfigAt persists config changes back to disk.
 	SaveConfigAt(path string) error
 	// SetLogger routes the engine's logs (/debug sends them to a file: the

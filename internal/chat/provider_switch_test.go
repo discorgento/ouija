@@ -35,6 +35,7 @@ func (f *switchEngine) SetProvider(p engine.Provider) {
 }
 func (f *switchEngine) SaveConfigAt(string) error { return nil }
 func (f *switchEngine) SetLogger(*slog.Logger)    {}
+func (f *switchEngine) SetContextWindow(n int)    { f.cfg.ContextWindow = n }
 
 type namedProvider struct{ name string }
 

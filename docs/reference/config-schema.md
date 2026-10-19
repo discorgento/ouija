@@ -137,6 +137,7 @@ combination of built-in defaults + global config + project config.
 | `costPer1MInput` | `float64` | `0` | Input price per 1M tokens (set it to make maxUSD effective) |
 | `costPer1MOutput` | `float64` | `0` | Output price per 1M tokens (set it to make maxUSD effective) |
 | `streamTimeout` | `int` | `120` | Longest silence, in seconds, allowed from the provider during a streamed call (an idle timeout, not a deadline: an answer that keeps streaming is never cut) |
+| `contextWindow` | `int` | from the model | The model's context size in tokens. Each tool result is cut to about a quarter of it and older history is shrunk to fit; by default it comes from the model catalog (4096 for Ollama, its default `num_ctx` — raise it here if your Ollama runs a larger one). |
 | `tools.bash.allowlist` | `[]string` | `null` | Pre-approved bash commands (no prompt); guard rail when `bash` level is `allow` (see below) |
 | `tools.bash.sandbox` | `object` | off | OS confinement of every bash command (Linux Landlock); see below |
 | `modelSuggestions` | `map[string][]string` | `null` | Suggested models per provider for the TUI picker autocomplete |

@@ -170,6 +170,29 @@ func (s *Store) Models(provider string) []string {
 }
 
 // ModelInfo returns the metadata for a specific model, if it exists.
+// ollamaDefaultContext is Ollama's default context size (num_ctx) when the
+// model's own is not known: a model may support more, but Ollama runs it with
+// this unless configured otherwise.
+const ollamaDefaultContext = 4096
+
+// ContextWindow is the context size, in tokens, to plan a run for with model:
+// from list (a provider's fetched list) when it says, else the catalog, else
+// Ollama's default for ollama, else 0 (unknown).
+func (s *Store) ContextWindow(provider, model string, list []Model) int {
+	for _, m := range list {
+		if m.ID == model && m.ContextWindow > 0 {
+			return m.ContextWindow
+		}
+	}
+	if info, ok := s.ModelInfo(provider, model); ok && info.ContextWindow > 0 {
+		return info.ContextWindow
+	}
+	if provider == "ollama" {
+		return ollamaDefaultContext
+	}
+	return 0
+}
+
 func (s *Store) ModelInfo(provider, model string) (ModelDef, bool) {
 	if s.data == nil {
 		return ModelDef{}, false

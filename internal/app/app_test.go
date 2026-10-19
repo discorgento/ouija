@@ -593,3 +593,26 @@ func TestProviderFactoryScopesProjectKey(t *testing.T) {
 		}
 	}
 }
+
+// The context window comes from the project config when set, else the model
+// catalog, else Ollama's default; a model the catalog does not know stays 0.
+func TestSetupEngineContextWindow(t *testing.T) {
+	isolateGlobalConfig(t)
+	for body, want := range map[string]int{
+		`{"provider":"ollama","model":"llama3"}`:                           4096,
+		`{"provider":"ollama","model":"llama3","contextWindow":32768}`:     32768,
+		`{"provider":"openrouter","model":"x/unknown","apiKey":"sk-test"}`: 0,
+	} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ".ouija", "config.json")
+		writeProjectConfig(t, path, body)
+		out, err := SetupEngine(context.Background(), path, false)
+		if err != nil {
+			t.Fatalf("%s: %v", body, err)
+		}
+		if got := out.Config.ContextWindow; got != want {
+			t.Errorf("%s: window %d, want %d", body, got, want)
+		}
+		out.Engine.Close()
+	}
+}

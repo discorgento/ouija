@@ -77,6 +77,12 @@ func (m *model) providerModels(provider string) []models.Model {
 	return models.Load().Catalog(provider)
 }
 
+// setContextWindow tells the engine the new model's context size, so tool
+// results and history keep fitting it after a /model or /provider switch.
+func (m *model) setContextWindow(provider, model string) {
+	m.eng.SetContextWindow(models.Load().ContextWindow(provider, model, m.providerModels(provider)))
+}
+
 // modelListMsg carries a provider's fetched model list (err: it fell back).
 type modelListMsg struct {
 	provider string
@@ -362,6 +368,7 @@ func (m *model) handleSlash(input string) bool {
 			newModel := parts[1]
 			old := m.eng.Config().Model
 			m.eng.SetModel(newModel)
+			m.setContextWindow(m.eng.Config().Provider, newModel)
 			m.say("assistant", fmt.Sprintf("✓ model changed: %s → %s", old, newModel))
 			m.persistConfig()
 		}
@@ -383,6 +390,7 @@ func (m *model) handleSlash(input string) bool {
 				old := m.eng.Config().Provider
 				m.eng.SetProvider(p)
 				m.eng.SetModel(newModel)
+				m.setContextWindow(newProv, newModel)
 				m.say("assistant", fmt.Sprintf("✓ provider changed: %s → %s  (model: %s)", old, newProv, m.eng.Config().Model))
 				m.persistConfig()
 			}
