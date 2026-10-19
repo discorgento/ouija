@@ -226,21 +226,22 @@ func ownsSlug(root, s string) bool {
 const docCSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src https://fonts.gstatic.com data:; img-src data:; base-uri 'none'; form-action 'none'"
 
-var headTag = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
-var htmlTag = regexp.MustCompile(`(?i)<html(\s[^>]*)?>`)
+var doctype = regexp.MustCompile(`(?is)^\s*(<!--.*?-->\s*)*<!doctype[^>]*>`)
 
-// withCSP puts the docCSP meta tag first in <head> (a CSP only covers what
-// comes after it), creating the head when the model left it out. A second
-// CSP in the document can only narrow it further: browsers enforce both.
+// withCSP puts the docCSP meta tag before anything the model wrote (after
+// the doctype). The HTML parser takes a <meta> seen before <html> into an
+// implied <head>, and folds the model's own <html>/<head> tags into those, so
+// the policy is the first thing in <head> however the rest looks — inserting
+// after the first "<head>" the text contains let a decoy in a comment
+// (<!-- <head> -->) carry the CSP away while a real <script> ran. A second CSP
+// in the document can only narrow it further: browsers enforce both.
 func withCSP(html string) string {
 	meta := `<meta http-equiv="Content-Security-Policy" content="` + docCSP + `">`
-	if loc := headTag.FindStringIndex(html); loc != nil {
-		return html[:loc[1]] + meta + html[loc[1]:]
+	rest := html
+	if loc := doctype.FindStringIndex(html); loc != nil {
+		rest = html[loc[1]:]
 	}
-	if loc := htmlTag.FindStringIndex(html); loc != nil {
-		return html[:loc[1]] + "<head>" + meta + "</head>" + html[loc[1]:]
-	}
-	return "<head>" + meta + "</head>" + html
+	return "<!DOCTYPE html>\n" + meta + "\n" + rest
 }
 
 // pdfTimeout bounds the headless print: a Chrome that hangs (it happens, e.g.

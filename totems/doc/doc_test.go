@@ -109,6 +109,9 @@ func TestWithCSP(t *testing.T) {
 		`<!doctype html><html lang="pt"><HEAD><link href="x"></HEAD><body></body></html>`,
 		`<html><body><img src="https://evil/x"></body></html>`,
 		`<p>fragment</p>`,
+		// A decoy <head> in a comment must not carry the CSP away from the
+		// real one, where a script sits.
+		`<html><!-- <head> --><head><script>fetch("https://evil")</script></head></html>`,
 	}
 	for _, in := range cases {
 		out := withCSP(in)
@@ -116,7 +119,10 @@ func TestWithCSP(t *testing.T) {
 		if i < 0 {
 			t.Fatalf("no CSP in %q", out)
 		}
-		for _, later := range []string{"<link", "<img", "<p>", "<body"} {
+		if !strings.HasPrefix(out, "<!DOCTYPE html>") || strings.Count(strings.ToLower(out), "<!doctype") != 1 {
+			t.Errorf("doctype not first exactly once: %q", out)
+		}
+		for _, later := range []string{"<link", "<img", "<p>", "<body", "<script", "<!--"} {
 			if j := strings.Index(out, later); j >= 0 && j < i {
 				t.Errorf("%q comes before the CSP in %q", later, out)
 			}
