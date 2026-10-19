@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/discorgento/ouija/engine"
@@ -73,5 +75,26 @@ func TestPickerHeightEmpty(t *testing.T) {
 	p.Show(nil, nil, "Models")
 	if h := p.Height(); h != 0 {
 		t.Fatalf("empty picker Height = %d, want 0", h)
+	}
+}
+
+// Wrapping around keeps the selection inside the visible window.
+func TestPickerWrapKeepsSelectionVisible(t *testing.T) {
+	items := make([]string, 25)
+	for i := range items {
+		items[i] = fmt.Sprintf("model-%02d", i)
+	}
+	p := &Picker{}
+	p.Show(items, items, "Models")
+	p.HandleKey("up") // 0 → 24
+	if !strings.Contains(p.Render(80), "model-24") {
+		t.Fatal("after wrapping up, the last item is not shown")
+	}
+	p.HandleKey("down") // 24 → 0
+	if !strings.Contains(p.Render(80), "model-00") || p.SelectedValue() != "model-00" {
+		t.Fatal("after wrapping down, the first item is not shown")
+	}
+	if _, confirmed := p.HandleKey("enter"); !confirmed {
+		t.Fatal("enter did not confirm")
 	}
 }

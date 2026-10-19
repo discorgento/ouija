@@ -2,6 +2,7 @@ package chat
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/discorgento/ouija/engine"
 )
 
 // ─── Key handling ─────────────────────────────────────────────────────
@@ -61,6 +64,13 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ── Escape: cancel or clear queue ────────────────────────────────
 	// NB: msg.String() returns "esc" (not "escape") in bubbletea v2.
 	if key == "esc" || key == "escape" {
+		// An open list closes first: Esc on it must not cancel the reply.
+		if m.picker.Visible || m.showCmdList {
+			m.picker.Hide()
+			m.showCmdList = false
+			m.setViewportSize()
+			return m, nil
+		}
 		if m.waiting {
 			m.cancelGeneration()
 			return m, m.dispatchQueued()
@@ -111,6 +121,14 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// ── Slash command list / picker navigation ─────────────────────
 	if m.picker.Visible {
+		if key == "tab" { // complete the highlighted item, and offer the next step
+			m.selectCompletion()
+			m.input.SetValue(m.input.Value() + " ")
+			m.input.CursorEnd()
+			m.updateCmdList()
+			m.setViewportSize()
+			return m, nil
+		}
 		handled, confirmed := m.picker.HandleKey(key)
 		if handled {
 			if confirmed {
@@ -211,7 +229,7 @@ func (m *model) chooseApproval(opt approvalOpt) (tea.Model, tea.Cmd) {
 	}
 	m.approvalReq.respCh <- opt.resp
 	m.approvalReq = nil
-	m.setViewportSize() // restore viewport height
+	m.nextApproval() // the next queued prompt, or the normal layout back
 	return m, nil
 }
 
@@ -238,10 +256,13 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	projectRoot := m.eng.Config().ProjectRoot
-	full := p
-	if projectRoot != "" && !filepath.IsAbs(p) {
-		full = filepath.Join(projectRoot, p)
+	// The sandbox decides where the edit lands, as for the tool itself: a
+	// plain Join let `../x` or a symlink out of the project be written by the
+	// editor, skipping the escape and protected-path checks.
+	ctx := cmp.Or[context.Context](req.ctx, context.Background())
+	full, err := engine.SafeResolve(ctx, m.eng.Config().ProjectRoot, p)
+	if err != nil {
+		return m.addBanner("⚠ cannot edit " + p + ": " + err.Error())
 	}
 
 	// Read original content and apply the edit to get proposed content.
@@ -254,7 +275,7 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 	proposed := strings.Replace(orig, oldStr, newStr, 1)
 
 	// Write proposed content to temp file.
-	tmpFile, err := os.CreateTemp("", "ouija-edit-*")
+	tmpFile, err := os.CreateTemp("", "ouija-edit-*"+filepath.Ext(p)) // the extension keeps syntax highlighting
 	if err != nil {
 		return m.addBanner("⚠ could not create temp file: " + err.Error())
 	}

@@ -3,7 +3,6 @@ package chat
 import (
 	"fmt"
 	"image/color"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -491,7 +490,7 @@ func (m *model) rebuildContent() {
 		for i, msg := range m.pendingQueue {
 			preview := msg
 			if len(preview) > int(float64(vpW)*0.4) {
-				preview = preview[:int(float64(vpW)*0.4)-3] + "..."
+				preview = strings.ToValidUTF8(preview[:int(float64(vpW)*0.4)-3], "") + "..."
 			}
 			fmt.Fprintf(&qBuf, "%s\n", txtDim.Render(fmt.Sprintf("◇ %d: %s", i+1, preview)))
 		}
@@ -615,22 +614,31 @@ func wrapLines(text, indent string, maxWidth int) []string {
 	if maxWidth < 8 {
 		return []string{text}
 	}
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return []string{text}
-	}
+	// Word-wrap each line of the message on its own: Fields over the whole
+	// text dropped the line breaks and indentation of a pasted snippet.
 	var lines []string
-	line := words[0]
-	for _, word := range words[1:] {
-		candidate := line + " " + word
-		if lipgloss.Width(candidate) <= maxWidth {
-			line = candidate
-		} else {
-			lines = append(lines, line)
-			line = indent + word
+	for i, para := range strings.Split(text, "\n") {
+		lead := para[:len(para)-len(strings.TrimLeft(para, " \t"))] // keep code indentation
+		words := strings.Fields(para)
+		prefix := ""
+		if i > 0 {
+			prefix = indent // continuation lines of the message are indented
 		}
+		if len(words) == 0 {
+			lines = append(lines, prefix)
+			continue
+		}
+		line := prefix + lead + words[0]
+		for _, word := range words[1:] {
+			if candidate := line + " " + word; lipgloss.Width(candidate) <= maxWidth {
+				line = candidate
+			} else {
+				lines = append(lines, line)
+				line = indent + word
+			}
+		}
+		lines = append(lines, line)
 	}
-	lines = append(lines, line)
 	return lines
 }
 
@@ -675,10 +683,10 @@ func (m *model) handleCopyMessage() (tea.Model, tea.Cmd) {
 	for i := len(m.lines) - 1; i >= 0; i-- {
 		if m.lines[i].role == "assistant" && strings.TrimSpace(m.lines[i].text) != "" {
 			if err := clipboard.WriteAll(m.lines[i].text); err != nil {
-				slog.Warn("clipboard", "err", err)
+				return m.addBanner("⚠ copy failed: " + err.Error())
 			}
-			break
+			return m.addBanner("✓ copied the last reply")
 		}
 	}
-	return m, nil
+	return m.addBanner("nothing to copy yet")
 }

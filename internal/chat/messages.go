@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -24,8 +25,13 @@ type toolProgressMsg struct {
 }
 
 // tokenMsg carries a streaming text token for real-time TUI display.
+// bannerMsg puts a notice in the transcript from outside the event loop (the
+// approval callback runs on the engine's goroutine).
+type bannerMsg struct{ text string }
+
 type tokenMsg struct {
 	text string
+	gen  int // the generation that streamed it; others are stale
 }
 
 // tickMsg fires every 500ms for the welcome animation.
@@ -35,6 +41,7 @@ type tickMsg struct{}
 // loop when a tool requires user approval. The TUI must send a response
 // through respCh to unblock the engine.
 type approvalRequestMsg struct {
+	ctx    context.Context // the run's: done once its generation is cancelled
 	tool   string
 	path   string         // human-readable description (from friendlyArg)
 	input  map[string]any // full tool call arguments for display

@@ -30,23 +30,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResize(msg)
 
 	case tea.KeyPressMsg:
-		m.lastWasPress = true
+		if m.pressed == nil {
+			m.pressed = make(map[string]bool)
+		}
+		m.pressed[msg.String()] = true
 		return m.handleKey(msg)
 
 	case tea.KeyReleaseMsg:
 		// Some terminals (Kitty) send KeyReleaseMsg INSTEAD of KeyPressMsg
-		// for Enter (no press event at all). But most terminals send BOTH
-		// press and release. If we already processed a press, ignore the
-		// release to avoid double-firing (e.g. approving two tools with
-		// one Enter press).
-		if m.lastWasPress {
-			m.lastWasPress = false
+		// for Enter (no press event at all); most send both. A release whose
+		// press was handled is ignored — matched per key, so overlapping keys
+		// (press a, press b, release a, release b) never fire twice.
+		if k := msg.String(); m.pressed[k] {
+			delete(m.pressed, k)
 			return m, nil
 		}
-		// No press was received — this terminal might be Kitty-style.
-		// Handle the release as if it were a press.
-		k := tea.KeyPressMsg(msg)
-		return m.handleKey(k)
+		return m.handleKey(tea.KeyPressMsg(msg))
 
 	case tea.PasteMsg:
 		var cmd tea.Cmd
@@ -92,8 +91,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleResponse(msg)
 
 	case tokenMsg:
-		// Ignore stale tokens from cancelled requests.
-		if !m.waiting {
+		// Ignore stale tokens: a cancelled generation's, still in flight.
+		if !m.waiting || msg.gen != m.gen {
 			return m, nil
 		}
 		m.partialText += msg.text
@@ -122,30 +121,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case approvalRequestMsg:
-		// Auto-reject if the generation was cancelled or the user already
-		// rejected this tool. The engine may still send approval requests
-		// for subsequent tool calls from the same batch even after
-		// cancellation (the p.Send enqueues before ctx.Done() is checked).
-		if m.generationCancelled || m.rejectedTools[baseTool(msg.tool)] {
-			msg.respCh <- approvalResponseMsg{allowed: false}
+		if m.answerStale(msg) {
 			return m, nil
 		}
-
-		// Guard against orphaned goroutines: when parallel tools both hit
-		// Ask permission, each sends an approvalRequestMsg concurrently.
-		// Only the last one stored in m.approvalReq gets a response from
-		// the user; all earlier ones would block forever on their respCh.
-		// Reject any pending approval before storing the new one.
+		// Parallel tools can ask at once: one prompt on screen, the rest
+		// wait their turn (answering them "cancelled" unseen misled the model).
 		if m.approvalReq != nil {
-			m.approvalReq.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
+			m.approvalQueue = append(m.approvalQueue, msg)
+			return m, nil
 		}
-
-		m.approvalReq = &msg
-		m.toolCallN++ // sequential counter for "call #2", "#3", etc.
-		// Reset the selection: the option list varies per tool (delete_file has
-		// four), so a stale index from a longer list would panic on Enter.
-		m.approvalIdx = 0
-		m.setViewportSize() // approval box is taller → shrink viewport
+		m.showApproval(msg)
 		return m, nil
 
 	case tickMsg:
@@ -161,8 +146,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildContent()
 		return m, tickCmd()
 
+	case bannerMsg:
+		return m.addBanner(msg.text)
+
 	case editorDoneMsg:
-		return m.handleEditorDone(msg)
+		model, cmd := m.handleEditorDone(msg)
+		m.nextApproval()
+		return model, cmd
 
 	default:
 		return m, nil
@@ -248,7 +238,8 @@ func (m *model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 
 	// Write the edited content to the real file.
 	if err := os.WriteFile(pe.path, []byte(editedContent), 0o644); err != nil {
-		pe.respCh <- approvalResponseMsg{allowed: true, skipExecution: true}
+		// Not applied: the model must not be told "already applied".
+		pe.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
 		os.Remove(pe.tmpFile)
 		return m.addBanner("⚠ wrote to temp but could not write file: " + err.Error())
 	}

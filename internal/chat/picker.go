@@ -111,15 +111,11 @@ func (p *Picker) HandleKey(key string) (handled, confirmed bool) {
 	switch key {
 	case "down":
 		p.selected = (p.selected + 1) % listLen
-		if p.selected >= p.offset+maxPickerLines {
-			p.offset = p.selected - maxPickerLines + 1
-		}
+		p.scrollToSelected()
 		return true, false
 	case "up":
 		p.selected = (p.selected - 1 + listLen) % listLen
-		if p.selected < p.offset {
-			p.offset = p.selected
-		}
+		p.scrollToSelected()
 		return true, false
 	case "tab":
 		// Tab completes without closing.
@@ -158,6 +154,18 @@ func (p *Picker) Height() int {
 	}
 	// 4 = label(1) + card padding top(1) + card padding bottom(1) + internal blank(1)
 	return 4 + n
+}
+
+// scrollToSelected moves the window so the selection is visible — in both
+// directions: wrapping from the last item to the first (or back) used to leave
+// it outside the window.
+func (p *Picker) scrollToSelected() {
+	if p.selected < p.offset {
+		p.offset = p.selected
+	}
+	if p.selected >= p.offset+maxPickerLines {
+		p.offset = p.selected - maxPickerLines + 1
+	}
 }
 
 // Render renders the picker as an ANSI string inside a SlashCard.

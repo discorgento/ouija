@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -32,7 +34,7 @@ var slashCmds = []slashCmd{
 	{"/model [name]", "Show or change model (type /model + Enter to open picker)"},
 	{"/provider [name] [model]", "Show or change provider and model (Enter opens a picker for each)"},
 	{"/permit [tool] allow|ask|deny", "Permission: show, set default, or per-tool level"},
-	{"/debug", "Toggle debug log level (info ↔ debug)"},
+	{"/debug", "Toggle debug logs (written to a file; the path is shown)"},
 	{"/help", "Show this help"},
 }
 
@@ -149,10 +151,11 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 	m.setViewportSize()
 
 	// ── If already waiting, enqueue instead of sending ──────────────
+	// It joins the transcript when it is sent (dispatchQueued), so each reply
+	// sits under its own question; until then the queue preview shows it.
 	if m.waiting {
 		m.pendingQueue = append(m.pendingQueue, input)
-		m.msgCount++
-		m.say("user", input)
+		m.setViewportSize() // the preview grows
 		return m, nil
 	}
 
@@ -183,11 +186,15 @@ func (m *model) startChat(input string) tea.Cmd {
 	gen := m.gen // capture before goroutine — cancel can't change this local
 	m.toolCallN = 0
 	m.generationCancelled = false // fresh generation starts with a clean slate
+	// A rejection blocks the tool for the generation it was given in, not for
+	// the rest of the session.
+	m.rejectedTools = make(map[string]bool)
 	msgs := m.history
 	if msgs == nil {
 		msgs = []engine.Message{}
 	}
 	chatCtx := m.chatCtx
+	sink := m.tokenSink
 	return func() tea.Msg {
 		text, updated, err := m.eng.Chat(chatCtx, engine.RunRequest{
 			Label:    "chat",
@@ -195,6 +202,13 @@ func (m *model) startChat(input string) tea.Cmd {
 			Messages: msgs,
 			UseTools: true,
 			System:   m.system,
+			// Tagged with this generation, so its tokens still in flight
+			// after a cancel are dropped instead of joining the next reply.
+			OnToken: func(text string) {
+				if sink != nil {
+					sink(tokenMsg{text: text, gen: gen})
+				}
+			},
 		})
 		if err != nil {
 			return chatResponse{text: "", msgs: updated, err: err, gen: gen}
@@ -223,7 +237,7 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	// ── Handle error ────────────────────────────────────────────────
 	if msg.err != nil {
 		m.say("assistant", fmt.Sprintf("error: %v", msg.err))
-		return m, nil
+		return m, m.dispatchQueued() // a failed reply must not strand the queue
 	}
 
 	// Save updated conversation history.
@@ -290,15 +304,7 @@ func (m *model) handleSlash(input string) bool {
 		return m.showHelp()
 
 	case "/debug":
-		// Toggle between slog.LevelInfo and slog.LevelDebug.
-		level := engine.LogLevel()
-		if level == slog.LevelDebug {
-			engine.SetLogLevel(slog.LevelInfo)
-			m.say("assistant", "debug logging: off")
-		} else {
-			engine.SetLogLevel(slog.LevelDebug)
-			m.say("assistant", "debug logging: on")
-		}
+		m.toggleDebugLog()
 		return true
 
 	case "/model":
@@ -353,6 +359,28 @@ func (m *model) handleSlash(input string) bool {
 	}
 }
 
+// toggleDebugLog sends the engine's debug logs to a file, or stops. The TUI
+// discards them otherwise (stderr would draw over the screen), so the old
+// level switch alone showed nothing.
+func (m *model) toggleDebugLog() {
+	if m.debugLog != nil {
+		m.eng.SetLogger(slog.New(slog.DiscardHandler))
+		m.debugLog.Close()
+		m.debugLog = nil
+		m.say("assistant", "debug logging: off")
+		return
+	}
+	path := filepath.Join(os.TempDir(), "ouija-chat-debug.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // prompts and file contents: owner only
+	if err != nil {
+		m.say("assistant", "debug logging: "+err.Error())
+		return
+	}
+	m.debugLog = f
+	m.eng.SetLogger(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	m.say("assistant", "debug logging: on → "+path)
+}
+
 // ─── /help ────────────────────────────────────────────────────────────
 
 // showHelp renders a formatted list of slash commands.
@@ -383,51 +411,62 @@ func (m *model) showHelp() bool {
 
 // persistConfig writes the current config back to the project config file.
 // It delegates to the engine (SaveConfigAt) so the "temporarily blank the
-// project root before saving" trick lives in exactly one place.
+// project root before saving" trick lives in exactly one place. A failure is
+// shown in the transcript: slog would write over the TUI, and the change
+// would silently last only this session.
 func (m *model) persistConfig() {
 	if m.configPath == "" {
 		return
 	}
 	if err := app.SaveProjectConfig(m.configPath, m.eng.SaveConfigAt); err != nil {
-		slog.Warn("save config", "path", m.configPath, "err", err)
+		m.addBanner("⚠ not saved (this session only): " + err.Error())
 	}
 }
 
 // ─── /permit ──────────────────────────────────────────────────────────
 
-// handlePermit processes the /permit command.
+// handlePermit processes the /permit command: show the levels, set the
+// default (`/permit ask`), or set one tool's (`/permit bash allow`).
 func (m *model) handlePermit(parts []string) bool {
+	const usage = "usage: /permit [tool] allow|ask|deny"
 	pc := m.eng.PermissionConfig()
+	if pc == nil {
+		m.say("assistant", "permissions are not configured")
+		return true
+	}
 
-	if len(parts) == 1 {
-		// Show current permission levels.
+	switch len(parts) {
+	case 1:
 		var b strings.Builder
 		b.WriteString("### Permission levels\n\n")
 		def, tools := pc.Levels()
-		b.WriteString(fmt.Sprintf("  default: **%s**\n", def))
+		fmt.Fprintf(&b, "  default: **%s**\n", def)
 		b.WriteString("\n  per-tool overrides:\n")
-
-		// Show tools in sorted order.
-		toolNames := make([]string, 0, len(tools))
-		for name := range tools {
-			toolNames = append(toolNames, name)
-		}
-		slices.Sort(toolNames)
-		if len(toolNames) == 0 {
+		if len(tools) == 0 {
 			b.WriteString("    (none)\n")
 		}
-		for _, name := range toolNames {
-			b.WriteString(fmt.Sprintf("    %s → **%s**\n", name, tools[name]))
+		for _, name := range slices.Sorted(maps.Keys(tools)) {
+			fmt.Fprintf(&b, "    %s → **%s**\n", name, tools[name])
 		}
-
 		m.say("assistant", b.String())
-	} else if len(parts) == 3 {
-		tool := parts[1]
-		level := engine.ParseLevel(parts[2])
-		pc.SetTool(tool, level) // a run may be reading the config right now
-		m.say("assistant", fmt.Sprintf("✓ %s → %s", tool, level))
-	} else {
-		m.say("assistant", "usage: /permit [tool] [allow|ask|deny]")
+	case 2, 3:
+		// The level is checked here, not by ParseLevel: a typo ("alow")
+		// silently became ask.
+		word := parts[len(parts)-1]
+		if !slices.Contains([]string{"allow", "ask", "deny"}, strings.ToLower(word)) {
+			m.say("assistant", fmt.Sprintf("unknown level %q — %s", word, usage))
+			return true
+		}
+		level := engine.ParseLevel(word)
+		if len(parts) == 2 {
+			pc.SetDefault(level)
+			m.say("assistant", fmt.Sprintf("✓ default → %s", level))
+		} else {
+			pc.SetTool(parts[1], level) // a run may be reading the config right now
+			m.say("assistant", fmt.Sprintf("✓ %s → %s", parts[1], level))
+		}
+	default:
+		m.say("assistant", usage)
 	}
 	return true
 }

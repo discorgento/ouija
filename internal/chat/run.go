@@ -38,12 +38,12 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 	tokenCh := make(chan tokenMsg, 256)
 	toolCh := make(chan toolProgressMsg, 32)
 
-	eng.SetTokenCallback(func(text string) {
+	m.tokenSink = func(t tokenMsg) {
 		select {
-		case tokenCh <- tokenMsg{text: text}:
+		case tokenCh <- t:
 		case <-m.ctx.Done():
 		}
-	})
+	}
 	eng.SetToolCallback(func(name string, input map[string]any) {
 		select {
 		case toolCh <- toolProgressMsg{tool: name, arg: friendlyArg(name, input)}:
@@ -68,7 +68,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 	approvalMgr.SetCallback(func(ctx context.Context, tool string, input map[string]any) (engine.ApprovalResult, error) {
 		path := friendlyArg(tool, input)
 		respCh := make(chan approvalResponseMsg, 1)
-		p.Send(approvalRequestMsg{tool: tool, path: path, input: input, respCh: respCh})
+		p.Send(approvalRequestMsg{ctx: ctx, tool: tool, path: path, input: input, respCh: respCh})
 		select {
 		case resp := <-respCh:
 			// Auto-learn only on an explicit "Session" choice. A plain "yes"
@@ -86,7 +86,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 					}
 					if configPath != "" {
 						if err := app.SaveProjectConfig(configPath, eng.SaveConfigAt); err != nil {
-							slog.Warn("persist allowlist", "path", configPath, "err", err)
+							p.Send(bannerMsg{"⚠ allowlist not saved (this session only): " + err.Error()})
 						}
 					}
 				}

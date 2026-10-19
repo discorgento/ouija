@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -116,5 +117,14 @@ func TestBudgetUsage(t *testing.T) {
 					pct, lbl, tc.wantPct, tc.wantLabel)
 			}
 		})
+	}
+}
+
+// Line breaks and indentation of a multi-line message survive wrapping.
+func TestWrapLinesKeepsLineBreaks(t *testing.T) {
+	got := wrapLines("line1\nline2\n    indented", "  ", 40)
+	want := []string{"line1", "  line2", "      indented"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("wrapLines = %q, want %q", got, want)
 	}
 }

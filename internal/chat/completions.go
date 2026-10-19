@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/discorgento/ouija/engine/providers"
@@ -9,85 +10,89 @@ import (
 
 // updateCmdList shows/hides the slash command or argument suggestion list.
 // When the input is "/model " or "/provider " it switches to argument mode.
+// A list is shown only while it can complete what is typed: once nothing
+// matches, it hides, so Enter sends the input as typed — a list left open on
+// its first item used to turn `/save notes.md` into `/clear`.
 // Returns true when the visible state (showCmdList / picker visibility) changed.
 func (m *model) updateCmdList() bool {
+	wasCmd, wasPicker := m.showCmdList, m.picker.Visible
+	changed := func() bool { return wasCmd != m.showCmdList || wasPicker != m.picker.Visible || m.picker.Visible }
+
 	input := m.input.Value()
-	trimmed := strings.TrimSpace(input)
-	if !strings.HasPrefix(trimmed, "/") {
-		changed := m.showCmdList || m.picker.Visible
-		m.showCmdList = false
+	m.showCmdList = false
+	if !strings.HasPrefix(strings.TrimSpace(input), "/") {
 		m.picker.Hide()
-		return changed
+		return changed()
 	}
 
-	// Check for argument completion mode: /model […], /provider […], etc.
 	parts := strings.Fields(input)
-	hasSpaceAfterCmd := len(parts) >= 2 || strings.HasSuffix(input, " ")
-	if hasSpaceAfterCmd {
-		baseCmd := parts[0]
+	trailing := strings.HasSuffix(input, " ")
+	if len(parts) >= 2 || trailing {
+		// Argument mode: the word being typed (empty right after a space).
 		typed := ""
-		if len(parts) >= 2 {
+		if !trailing {
 			typed = parts[len(parts)-1]
 		}
-
-		switch baseCmd {
-		case "/model":
-			modelNames := suggestedModels(m.eng.Config(), models.IDs(m.providerModels(m.eng.Config().Provider)))
-			m.picker.Show(modelNames, modelNames, "Models")
-			if typed != "" {
-				m.pickerFilter(typed)
-			}
-			return true
-		case "/provider":
+		m.picker.Hide()
+		switch {
+		case parts[0] == "/model" && len(parts)+boolInt(trailing) == 2:
+			names := suggestedModels(m.eng.Config(), models.IDs(m.providerModels(m.eng.Config().Provider)))
+			m.picker.Show(names, names, modelPickerLabel)
+		case parts[0] == "/provider" && len(parts)+boolInt(trailing) == 2:
 			names, _ := models.Load().ProvidersFor(providers.Names())
 			m.picker.Show(names, names, "Providers")
-			if typed != "" {
-				m.pickerFilter(typed)
-			}
-			return true
+		case parts[0] == "/provider" && len(parts)+boolInt(trailing) == 3:
+			// Second step: this provider's models (not the provider list).
+			m.showModelPicker(parts[1])
 		}
+		if typed != "" && !m.pickerFilter(typed) {
+			m.picker.Hide() // nothing to complete: Enter sends what was typed
+		}
+		return changed()
 	}
 
-	// Default: show command list (not using picker — it's small and fixed).
-	wasPicker := m.picker.Visible
+	// The command name itself: list the commands it can still become.
 	m.picker.Hide()
-	m.showCmdList = true
-	m.selCmdIdx = 0
 	for i, sc := range slashCmds {
-		if strings.HasPrefix(sc.cmd, trimmed) {
+		if strings.HasPrefix(sc.cmd, parts[0]) {
+			m.showCmdList = true
 			m.selCmdIdx = i
 			break
 		}
 	}
-	return !wasPicker // true if we transitioned from picker to cmd list or were in neither
+	return changed()
 }
 
-// pickerFilter filters the picker items by the typed prefix.
-// First tries display text, then actual values (case-insensitive).
-func (m *model) pickerFilter(typed string) {
-	if typed == "" || !m.picker.Visible {
-		return
+func boolInt(b bool) int {
+	if b {
+		return 1
 	}
-	items := m.picker.Items
-	values := m.picker.Values
-	lower := strings.ToLower(typed)
+	return 0
+}
 
-	// Try matching display text first.
-	for i, s := range items {
-		if strings.HasPrefix(strings.ToLower(s), lower) {
-			m.picker.selected = i
-			m.picker.offset = 0
-			return
+// pickerFilter selects the item whose value is typed, else the first whose
+// display text, else value, starts with it (case-insensitive). It reports
+// whether one matched.
+func (m *model) pickerFilter(typed string) bool {
+	if !m.picker.Visible {
+		return false
+	}
+	lower := strings.ToLower(typed)
+	if i := slices.Index(m.picker.Values, typed); i >= 0 { // exact id: llama3, not llama3.2
+		m.picker.selected = i
+		m.picker.offset = max(0, i-maxPickerLines+1)
+		return true
+	}
+	for _, list := range [][]string{m.picker.Items, m.picker.Values} {
+		for i, s := range list {
+			if strings.HasPrefix(strings.ToLower(s), lower) {
+				m.picker.selected = i
+				m.picker.offset = max(0, i-maxPickerLines+1)
+				return true
+			}
 		}
 	}
-	// Try matching actual values.
-	for i, v := range values {
-		if strings.HasPrefix(strings.ToLower(v), lower) {
-			m.picker.selected = i
-			m.picker.offset = 0
-			return
-		}
-	}
+	return false
 }
 
 // selectCompletion applies the currently selected suggestion to the input.

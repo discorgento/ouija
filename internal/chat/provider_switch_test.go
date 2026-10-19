@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"iter"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ type switchEngine struct {
 	provider string
 	model    string
 	lastReq  engine.RunRequest
+	perm     *engine.PermissionConfig
 }
 
 func (f *switchEngine) Chat(_ context.Context, req engine.RunRequest) (string, []engine.Message, error) {
@@ -24,7 +26,7 @@ func (f *switchEngine) Chat(_ context.Context, req engine.RunRequest) (string, [
 func (f *switchEngine) Config() *engine.Config                     { return f.cfg }
 func (f *switchEngine) Spent() (int, int, float64)                 { return 0, 0, 0 }
 func (f *switchEngine) Tracer() *engine.Tracer                     { return nil }
-func (f *switchEngine) PermissionConfig() *engine.PermissionConfig { return nil }
+func (f *switchEngine) PermissionConfig() *engine.PermissionConfig { return f.perm }
 func (f *switchEngine) ResetApprovals()                            {}
 func (f *switchEngine) SetModel(name string)                       { f.model = name; f.cfg.Model = name }
 func (f *switchEngine) SetProvider(p engine.Provider) {
@@ -32,6 +34,7 @@ func (f *switchEngine) SetProvider(p engine.Provider) {
 	f.cfg.Provider = p.Name()
 }
 func (f *switchEngine) SaveConfigAt(string) error { return nil }
+func (f *switchEngine) SetLogger(*slog.Logger)    {}
 
 type namedProvider struct{ name string }
 

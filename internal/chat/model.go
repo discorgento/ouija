@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"image/color"
+	"os"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -108,6 +109,14 @@ type model struct {
 
 	// Pending approval request from the engine (non-nil when user must decide).
 	approvalReq *approvalRequestMsg
+	// approvalQueue holds requests that arrived while one was on screen
+	// (parallel tools): each is shown in turn, none answered unseen.
+	approvalQueue []approvalRequestMsg
+	// debugLog is the file /debug sends the engine's logs to (nil = off).
+	debugLog *os.File
+	// tokenSink forwards a run's streamed tokens to the event loop (set by
+	// Run; nil in tests).
+	tokenSink   func(tokenMsg)
 	approvalIdx int // which option is selected via arrow keys (0-4)
 
 	// toolCallN is the sequential tool call number within the current generation.
@@ -127,12 +136,9 @@ type model struct {
 	// context.
 	generationCancelled bool
 
-	// lastWasPress tracks whether the last key event was a KeyPressMsg.
-	// Some terminals send both press AND release for Enter; others (Kitty)
-	// send only release. This flag prevents double-processing: when a
-	// KeyReleaseMsg arrives, if lastWasPress is true (press was already
-	// processed), the release is ignored.
-	lastWasPress bool
+	// pressed holds the keys whose press was handled and whose release is
+	// still due (see the KeyReleaseMsg case).
+	pressed map[string]bool
 
 	// pendingEdit tracks an in-progress external editor session.
 	pendingEdit *pendingEditFile

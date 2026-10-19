@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"testing"
 
 	"charm.land/bubbles/v2/viewport"
@@ -124,5 +125,63 @@ func TestInputHeightFollowsLineCount(t *testing.T) {
 	m.setViewportSize()
 	if h := m.input.Height(); h != 1 {
 		t.Fatalf("empty input height = %d, want 1", h)
+	}
+}
+
+// Two prompts at once (parallel tools): both reach the user, in turn; neither
+// is answered "cancelled" unseen. A stale one (its run cancelled) is answered
+// without being shown.
+func TestApprovalQueue(t *testing.T) {
+	m := newApprovalTestModel()
+	a, b := make(chan approvalResponseMsg, 1), make(chan approvalResponseMsg, 1)
+	m.Update(approvalRequestMsg{tool: "bash\x00one", respCh: a})
+	m.Update(approvalRequestMsg{tool: "bash\x00two", respCh: b})
+	if len(a) != 0 || m.approvalReq == nil || m.approvalReq.tool != "bash\x00one" {
+		t.Fatal("the first prompt was not kept on screen")
+	}
+	m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if r := <-a; !r.allowed {
+		t.Fatalf("first answer = %+v", r)
+	}
+	if m.approvalReq == nil || m.approvalReq.tool != "bash\x00two" {
+		t.Fatal("the queued prompt was not shown next")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := make(chan approvalResponseMsg, 1)
+	m.approvalReq = nil
+	m.Update(approvalRequestMsg{ctx: ctx, tool: "bash\x00late", respCh: c})
+	if r := <-c; r.allowed || !r.cancelled || m.approvalReq != nil {
+		t.Fatalf("stale prompt: answer=%+v shown=%v", r, m.approvalReq != nil)
+	}
+}
+
+// A cancelled generation's late tokens do not join the next reply.
+func TestStaleTokensDropped(t *testing.T) {
+	m := newApprovalTestModel()
+	m.waiting = true
+	m.gen = 2
+	m.Update(tokenMsg{text: "old", gen: 1})
+	m.Update(tokenMsg{text: "new", gen: 2})
+	if m.partialText != "new" {
+		t.Fatalf("partialText = %q, want only the current generation's", m.partialText)
+	}
+}
+
+// Overlapping keys fire once each; a release with no press (Kitty Enter)
+// still fires.
+func TestKeyReleasePairing(t *testing.T) {
+	m := newApprovalTestModel()
+	m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m.Update(tea.KeyPressMsg{Code: 'b', Text: "b"})
+	m.Update(tea.KeyReleaseMsg{Code: 'a', Text: "a"})
+	m.Update(tea.KeyReleaseMsg{Code: 'b', Text: "b"})
+	if got := m.input.Value(); got != "ab" {
+		t.Fatalf("input = %q, want ab (no doubled key)", got)
+	}
+	m.Update(tea.KeyReleaseMsg{Code: 'c', Text: "c"})
+	if got := m.input.Value(); got != "abc" {
+		t.Fatalf("input = %q, want a release-only key handled", got)
 	}
 }

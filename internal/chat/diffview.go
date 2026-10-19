@@ -27,16 +27,11 @@ func RenderColoredDiff(diff string) string {
 	if diff == "" {
 		return ""
 	}
-	var b strings.Builder
-	for _, line := range strings.Split(diff, "\n") {
-		if line == "" {
-			b.WriteByte('\n')
-		} else {
-			b.WriteString(colorDiffLine(line))
-		}
-		b.WriteByte('\n')
+	lines := strings.Split(strings.TrimRight(diff, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = colorDiffLine(line) // a blank line stays one blank line
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.Join(lines, "\n")
 }
 
 func colorDiffLine(line string) string {

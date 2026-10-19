@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/discorgento/ouija/engine"
 )
@@ -34,4 +35,7 @@ type EngineAPI interface {
 	SetProvider(p engine.Provider)
 	// SaveConfigAt persists config changes back to disk.
 	SaveConfigAt(path string) error
+	// SetLogger routes the engine's logs (/debug sends them to a file: the
+	// terminal belongs to the TUI).
+	SetLogger(l *slog.Logger)
 }

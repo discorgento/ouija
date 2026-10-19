@@ -52,10 +52,16 @@ func baseTool(key string) string {
 
 // approvalOptionsFor returns the appropriate options set for the given tool.
 func approvalOptionsFor(tool string) []approvalOpt {
+	opts := approvalOptions
 	if baseTool(tool) == "delete_file" {
-		return deleteFileOptions
+		opts = deleteFileOptions
 	}
-	return approvalOptions
+	// Edit opens the proposed oldString → newString change in $EDITOR: only
+	// edit_file has one; elsewhere the button did nothing.
+	if baseTool(tool) != "edit_file" {
+		opts = slices.DeleteFunc(slices.Clone(opts), func(o approvalOpt) bool { return o.key == "e" })
+	}
+	return opts
 }
 
 // renderApprovalBtn renders one selectable option in the approval prompt.

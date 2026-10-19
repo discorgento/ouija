@@ -38,6 +38,10 @@ func (m *model) cancelGeneration() {
 	m.partialText = ""
 	m.currentTool = ""
 	m.gen++
+	for _, q := range m.approvalQueue { // their run is gone
+		q.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
+	}
+	m.approvalQueue = nil
 	m.lines = append(m.lines, line{role: "banner", text: "✕ cancelled"})
 	m.setViewportSize() // the status line is gone; re-renders
 }
@@ -49,7 +53,49 @@ func (m *model) dispatchQueued() tea.Cmd {
 	}
 	next := m.pendingQueue[0]
 	m.pendingQueue = m.pendingQueue[1:]
+	m.lines = append(m.lines, line{role: "user", text: next, ts: time.Now().Format("15:04")})
+	m.msgCount++
 	return m.beginGeneration(next)
+}
+
+// answerStale answers, unshown, a request that must not reach the user: its
+// generation was cancelled (the late prompt would land in the next turn) or
+// the user already rejected that tool in this generation. It reports whether
+// it did.
+func (m *model) answerStale(req approvalRequestMsg) bool {
+	switch {
+	case (req.ctx != nil && req.ctx.Err() != nil) || m.generationCancelled:
+		req.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
+	case m.rejectedTools[baseTool(req.tool)]:
+		req.respCh <- approvalResponseMsg{allowed: false}
+	default:
+		return false
+	}
+	return true
+}
+
+// showApproval puts req on screen.
+func (m *model) showApproval(req approvalRequestMsg) {
+	m.approvalReq = &req
+	m.toolCallN++ // sequential counter for "call #2", "#3", etc.
+	// Reset the selection: the option list varies per tool, so a stale index
+	// from a longer list would panic on Enter.
+	m.approvalIdx = 0
+	m.setViewportSize() // approval box is taller → shrink viewport
+}
+
+// nextApproval shows the next queued request once the current one is
+// answered, skipping (and answering) the ones gone stale meanwhile.
+func (m *model) nextApproval() {
+	for m.approvalReq == nil && len(m.approvalQueue) > 0 {
+		req := m.approvalQueue[0]
+		m.approvalQueue = m.approvalQueue[1:]
+		if !m.answerStale(req) {
+			m.showApproval(req)
+			return
+		}
+	}
+	m.setViewportSize()
 }
 
 // say appends a timestamped line and re-renders (which also scrolls to the
