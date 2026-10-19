@@ -46,7 +46,8 @@ Then, inside any project:
 
 ```sh
 cd /path/to/your/project
-ouija task "your task here"
+ouija chat                 # daily driver: explore and edit code, approve diffs
+ouija task "describe X"    # one-shot: verified plan (scout → N passes → reconcile)
 ```
 
 `ouija setup` walks you through the keys; pick `ollama` to run fully local and
