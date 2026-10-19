@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/discorgento/ouija/engine"
 )
 
 func TestBackoffHonoursRetryAfterUpToCap(t *testing.T) {
@@ -36,6 +38,17 @@ func TestRetryAfterParsing(t *testing.T) {
 	}
 	if got := retryAfter(nil); got != 0 {
 		t.Fatalf("nil response = %v, want 0", got)
+	}
+}
+
+// A refused key or plan (401/403) is an AUTH error; other statuses are not.
+func TestStatusErrorAuth(t *testing.T) {
+	err := statusError("SSE: ", http.StatusForbidden, `{"error":{"type":"FreeTierError"}}`)
+	if code, ok := engine.Code(err); !ok || code != engine.ErrCodeAuth {
+		t.Fatalf("403 → %v; want AUTH", err)
+	}
+	if _, ok := engine.Code(statusError("SSE: ", http.StatusBadRequest, "bad")); ok {
+		t.Fatal("400 must not be classified as AUTH")
 	}
 }
 

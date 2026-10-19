@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,17 @@ func NewClient(timeout time.Duration) *Client {
 		HTTP:    &http.Client{Transport: tr},
 		Circuit: NewCircuitBreaker(),
 	}
+}
+
+// statusError turns a non-2xx response into an error. 401 and 403 are AUTH
+// errors (a missing or refused key, or a plan that does not cover this use),
+// so callers can tell them from transient failures.
+func statusError(prefix string, code int, body string) error {
+	msg := fmt.Sprintf("%sHTTP %d: %s", prefix, code, body)
+	if code == http.StatusUnauthorized || code == http.StatusForbidden {
+		return engine.ErrAuth(msg)
+	}
+	return errors.New(msg)
 }
 
 // RoundTrip performs the request with retries and circuit breaking.
@@ -68,7 +80,7 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 		if readErr != nil {
 			return fmt.Errorf("SSE: HTTP %d (body read error: %w)", resp.StatusCode, readErr)
 		}
-		return fmt.Errorf("SSE: HTTP %d: %s", resp.StatusCode, string(raw))
+		return statusError("SSE: ", resp.StatusCode, string(raw))
 	}
 
 	br := bufio.NewReader(resp.Body)

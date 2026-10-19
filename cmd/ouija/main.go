@@ -192,7 +192,8 @@ func runCommand(fn func([]string) error, args []string, stderr io.Writer) int {
 func errorHint(err error) string {
 	switch {
 	case engine.Is(err, engine.ErrCodeAuth):
-		return "set an API key: `ouija setup` (global) or `ouija init` (project)"
+		return "the provider has no key or refused it (check the key and what its plan covers): " +
+			"`ouija setup` to change it or pick another provider/model, `ouija init` for this project"
 	case engine.Is(err, engine.ErrCodeConfig):
 		return "check your setup with `ouija doctor`"
 	case engine.Is(err, engine.ErrCodeProvider):
