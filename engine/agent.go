@@ -32,6 +32,15 @@ type RunEnv struct {
 	Tracer   *Tracer       // nil-safe
 	Logger   *slog.Logger  // never nil
 	OnToken  TokenCallback // optional: streamed text tokens (e.g. a TUI)
+	// MayRun reports whether RunTool could ever run a call to the tool (extra
+	// = a RunRequest.ExtraTools tool), so the agent offers the model only
+	// those. nil means every tool may run.
+	MayRun func(def ToolDef, extra bool) bool
+}
+
+// mayRun is MayRun with the nil default.
+func (e RunEnv) mayRun(def ToolDef, extra bool) bool {
+	return e.MayRun == nil || e.MayRun(def, extra)
 }
 
 // BudgetMeter records provider usage against the Engine's ceilings

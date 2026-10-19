@@ -363,6 +363,7 @@ func (e *Engine) env() RunEnv {
 		Tracer:   e.tracer,
 		Logger:   e.logger,
 		OnToken:  e.tokenCb,
+		MayRun:   e.runner.MayRun,
 	}
 }
 

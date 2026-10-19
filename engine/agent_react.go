@@ -49,15 +49,24 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 	// Build the tool list the model sees: defaults + extras.
 	useStructured := req.Schema != nil
 
+	// Only tools the gate could let run are offered: one it always refuses
+	// (write tier with no permission config, Deny, Ask with no one to ask)
+	// only makes the model spend turns on calls that come back "denied".
 	var toolDefs []ToolDef
 	if req.UseTools {
-		toolDefs = append(toolDefs, env.Tools.Defs()...)
+		for _, d := range env.Tools.Defs() {
+			if env.mayRun(d, false) {
+				toolDefs = append(toolDefs, d)
+			}
+		}
 	}
 	for _, ct := range req.ExtraTools {
 		if env.Tools.Has(ct.Def.Name) {
 			env.Logger.Warn("extra tool shadows built-in", "name", ct.Def.Name)
 		}
-		toolDefs = append(toolDefs, ct.Def)
+		if env.mayRun(ct.Def, true) {
+			toolDefs = append(toolDefs, ct.Def)
+		}
 	}
 
 	// When using structured output, avoid the two-phase slow path for simple

@@ -110,3 +110,66 @@ func TestCustomAgent(t *testing.T) {
 		t.Fatalf("budget not shared with the custom agent: tokens=%d steps=%d", tokens, steps)
 	}
 }
+
+// toolsMock records the tool names of each request.
+type toolsMock struct{ seen [][]string }
+
+func (m *toolsMock) Name() string               { return "tools" }
+func (m *toolsMock) Capabilities() Capabilities { return Capabilities{} }
+func (m *toolsMock) Chat(_ context.Context, req ChatRequest) iter.Seq2[StreamEvent, error] {
+	var names []string
+	for _, d := range req.Tools {
+		names = append(names, d.Name)
+	}
+	m.seen = append(m.seen, names)
+	return func(yield func(StreamEvent, error) bool) {
+		if yield(StreamEvent{Type: EventText, Text: "done"}, nil) {
+			yield(StreamEvent{Type: EventDone}, nil)
+		}
+	}
+}
+
+// The model is offered only tools the gate could let run: headless runs (no
+// permission config, or Ask with no one to ask) get no write/exec tools, which
+// the live test showed a model calling over and over to be denied.
+func TestOnlyRunnableToolsAreOffered(t *testing.T) {
+	offered := func(setup func(*Engine)) map[string]bool {
+		m := &toolsMock{}
+		eng := newTestEngine(m, t.TempDir())
+		setup(eng)
+		if _, err := eng.Run(context.Background(), RunRequest{Prompt: "hi", UseTools: true}); err != nil {
+			t.Fatal(err)
+		}
+		set := map[string]bool{}
+		for _, n := range m.seen[0] {
+			set[n] = true
+		}
+		return set
+	}
+
+	headless := offered(func(*Engine) {})
+	if !headless["read_file"] || headless["write_file"] || headless["bash"] {
+		t.Errorf("headless offers %v; want read-only tools only", headless)
+	}
+
+	askNoUI := offered(func(e *Engine) { e.SetPermissionConfig(NewDefaultPermissionConfig()) })
+	if askNoUI["write_file"] || askNoUI["bash"] || !askNoUI["read_file"] {
+		t.Errorf("ask without an approval UI offers %v", askNoUI)
+	}
+
+	allowlisted := offered(func(e *Engine) {
+		e.SetPermissionConfig(NewDefaultPermissionConfig())
+		e.SetBashAllowlist([]string{"git status"})
+	})
+	if !allowlisted["bash"] || allowlisted["write_file"] {
+		t.Errorf("an allowlist makes bash runnable without a prompt; offered %v", allowlisted)
+	}
+
+	chat := offered(func(e *Engine) {
+		e.SetPermissionConfig(NewDefaultPermissionConfig())
+		e.SetApprovalManager(NewApprovalManager())
+	})
+	if !chat["write_file"] || !chat["bash"] {
+		t.Errorf("with an approval UI every askable tool is offered; got %v", chat)
+	}
+}

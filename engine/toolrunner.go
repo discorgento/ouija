@@ -251,6 +251,29 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	return r.tools.Run(ctx, call)
 }
 
+// MayRun reports whether a call to the tool could run at all under the
+// current gate — regardless of its arguments, which only narrow it further
+// (protected paths, the bash denylist). It is false for a tool the gate always
+// refuses: write tier with no PermissionConfig, Deny, or Ask with no approval
+// UI (except bash, whose allowlisted commands need no prompt).
+func (r *ToolRunner) MayRun(def ToolDef, extra bool) bool {
+	gate := r.gate.snapshot()
+	if gate.permConfig == nil {
+		risk := toolRisk(def.Name)
+		if extra {
+			risk = def.Risk
+		}
+		return risk == RiskReadOnly
+	}
+	switch gate.permConfig.Check(def.Name, "") {
+	case Allow:
+		return true
+	case Ask:
+		return gate.approvalMgr != nil || (def.Name == "bash" && r.allowlist.Restricts())
+	}
+	return false
+}
+
 // bashPreApproved reports whether the bash command already sits on the
 // allowlist (which requires a non-empty allowlist — an empty one means "no
 // commands pre-approved yet", NOT "everything approved": the Ask level still
