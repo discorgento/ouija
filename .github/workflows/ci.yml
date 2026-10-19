@@ -1,0 +1,48 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: make fmt-check
+
+      - name: go vet
+        run: make vet
+
+      - name: test (race)
+        run: make test-race
+
+      - name: build
+        run: make build
+
+  # Separate job on purpose: it does real network requests, so it must never
+  # slow down or flake the gofmt/vet/test gate above.
+  docs-external-links:
+    name: docs (external links)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: verify absolute http(s) links in the docs
+        run: DOCCHECK_EXTERNAL=1 go test ./internal/doccheck -run TestExternalLinksReachable -v -count=1
