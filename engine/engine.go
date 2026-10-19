@@ -98,8 +98,11 @@ func New(cfg EngineConfig) *Engine {
 		return e.requestEscapeApproval(ctx, toolName, path)
 	}
 	e.agent = cmp.Or[Agent](cfg.Agent, NewReAct())
-	if cfg.Config.Tools != nil && cfg.Config.Tools.Bash != nil && len(cfg.Config.Tools.Bash.Allowlist) > 0 {
-		e.allowlist.Set(cfg.Config.Tools.Bash.Allowlist)
+	if cfg.Config.Tools != nil && cfg.Config.Tools.Bash != nil {
+		if len(cfg.Config.Tools.Bash.Allowlist) > 0 {
+			e.allowlist.Set(cfg.Config.Tools.Bash.Allowlist)
+		}
+		e.tools.sandbox = cfg.Config.Tools.Bash.Sandbox
 	}
 	return e
 }

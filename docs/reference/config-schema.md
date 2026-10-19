@@ -131,6 +131,7 @@ those sections exist, and the next save writes the new layout.
 | `costPer1MOutput` | `float64` | `0` | Output price per 1M tokens (set it to make maxUSD effective) |
 | `streamTimeout` | `int` | `120` | Longest silence, in seconds, allowed from the provider during a streamed call (an idle timeout, not a deadline: an answer that keeps streaming is never cut) |
 | `tools.bash.allowlist` | `[]string` | `null` | Pre-approved bash commands (no prompt); guard rail when `bash` level is `allow` (see below) |
+| `tools.bash.sandbox` | `object` | off | OS confinement of every bash command (Linux Landlock); see below |
 | `modelSuggestions` | `map[string][]string` | `null` | Suggested models per provider for the TUI picker autocomplete |
 | `permission` | `PermissionRule` | `null` | Permission defaults (see below) |
 
@@ -171,6 +172,33 @@ both on the tool's `path` argument and on any path a bash command names: the
 system dirs `/etc/*` and `/var/lib/*`; the files `.env*`, `.gitconfig`, `.netrc`,
 `.npmrc`, `.dockercfg`, `.dockerconfigjson`; and the dirs `.ssh`, `.gnupg`,
 `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`.
+
+### `tools.bash.sandbox`
+
+```json
+{
+  "tools": {
+    "bash": {
+      "sandbox": {
+        "enabled": true,
+        "read": ["~/go/pkg/mod"],
+        "write": ["~/.cache/go-build"]
+      }
+    }
+  }
+}
+```
+
+Every bash command runs confined by the kernel (Linux, Landlock ABI v3+ —
+Linux 6.2): it writes only inside the project and the temp dir and reads only
+the system directories (`/usr`, `/etc`, `/lib`, …), the project and the paths
+listed in `read` / `write` (`~/` is your home; relative paths are relative to
+the project). The rest of `$HOME` — `~/.ssh`, `~/.aws`, ouija's own config —
+is unreachable, whatever the command, its subprocesses, or a path built at
+run time. Off by default because build tools keep caches under `$HOME`: list
+them. A protected location in `read`/`write` is refused. Where the OS cannot
+enforce the sandbox (macOS, Windows, an older kernel), bash refuses to run
+instead of running unconfined. Network access is not restricted.
 
 ### `tools.bash.allowlist`
 

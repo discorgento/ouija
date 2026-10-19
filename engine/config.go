@@ -83,6 +83,21 @@ type BashConfig struct {
 	// When empty or nil, all commands are allowed (default).
 	// Commands approved interactively in the TUI are added at runtime.
 	Allowlist []string `json:"allowlist,omitempty"`
+
+	// Sandbox confines every bash command with the OS (Linux Landlock).
+	Sandbox *SandboxConfig `json:"sandbox,omitempty"`
+}
+
+// SandboxConfig configures the bash sandbox. When enabled, a command may write
+// only inside the project and the temp dir and read only system directories,
+// the project and the paths listed here — never the rest of $HOME, where the
+// credentials live. Off by default: build tools that keep caches under $HOME
+// (~/go/pkg/mod, ~/.cache, ~/.npm, …) need those paths listed. Where the OS
+// cannot enforce it, bash refuses to run instead of running unconfined.
+type SandboxConfig struct {
+	Enabled bool     `json:"enabled"`
+	Read    []string `json:"read,omitempty"`  // extra readable paths; `~/` = home, relative = project
+	Write   []string `json:"write,omitempty"` // extra writable paths
 }
 
 // TotemConfig decodes the settings of totem name (Totems[name]) into v. When

@@ -120,6 +120,22 @@ persists them to disk — a command that is not fully static (`echo $(whoami)`)
 teaches nothing. A plain **Yes** runs the command once and is *not* persisted.
 Thread-safe via `sync.RWMutex`.
 
+### OS sandbox (opt-in)
+
+The checks above read the command's *text*, and a path built at run time
+(`cat $(printf '.%s' env)`) is beyond any reading of text. With
+`tools.bash.sandbox.enabled`, the kernel enforces the boundary instead: each
+command runs in a re-executed copy of the ouija binary that confines itself
+with Linux Landlock — write only inside the project and the temp dir, read
+only system directories, the project and the paths the config lists — and then
+execs the shell; every process it starts inherits the confinement, which cannot
+be lifted. `/proc` (other processes' environments) and `/run` (ssh-agent and
+docker sockets) are left out on purpose, and on kernels that support it
+connecting to Unix sockets is confined too. If the sandbox is enabled but
+cannot be enforced (not Linux, or Landlock older than ABI v3), bash refuses to
+run. Network access is not restricted. See
+[`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
+
 ## Layer 5: Doom-loop detection
 
 Encapsulated in `DoomDetector`. If the model calls the same tool with the

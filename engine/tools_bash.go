@@ -49,9 +49,19 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	var cmd *exec.Cmd
+	if sb, ok := ctx.Value(sandboxKey{}).(*SandboxConfig); ok && sb.Enabled {
+		sandboxed, err := sandboxedShell(ctx, root, sb, command)
+		if err != nil {
+			// Fail closed: the user asked for a sandbox; never run unconfined.
+			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash sandbox: " + err.Error()}}
+		}
+		cmd = sandboxed // its environment is sanitized too
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		cmd.Env = sanitizeEnv()
+	}
 	cmd.Dir = root
-	cmd.Env = sanitizeEnv()
 	// WaitDelay bounds how long the process may survive after ctx cancellation.
 	// On Unix the Cancel function (set by CommandContext) sends SIGKILL, which
 	// is instantaneous, so this is a safety net for edge cases.

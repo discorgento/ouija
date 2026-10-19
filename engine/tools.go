@@ -58,7 +58,11 @@ type Tools struct {
 	entries        map[string]toolEntry
 	order          []string
 	escapeApprover func(ctx context.Context, toolName, escapedPath string) bool
+	sandbox        *SandboxConfig // bash sandbox; nil or disabled = none
 }
+
+// sandboxKey carries the bash sandbox config to the bash tool.
+type sandboxKey struct{}
 
 // NewTools builds the default read-only toolset rooted at projectRoot.
 func NewTools(root string) *Tools {
@@ -104,6 +108,9 @@ func (t *Tools) Preview(ctx context.Context, call ToolCall) string {
 // is invoked to request user approval. If approved, the escape path is attached
 // to ctx so resolve() can use it — no global variable needed.
 func (t *Tools) Run(ctx context.Context, call ToolCall) ToolResult {
+	if t.sandbox != nil && t.sandbox.Enabled {
+		ctx = context.WithValue(ctx, sandboxKey{}, t.sandbox)
+	}
 	e, ok := t.entries[call.Name]
 	if !ok {
 		return errInvalidInput("unknown tool: " + call.Name)
