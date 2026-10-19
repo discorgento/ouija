@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/internal/app"
 )
 
 // Run starts the chat TUI. It blocks until the user exits.
@@ -84,7 +85,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 						eng.AddAllowedCommand(pat)
 					}
 					if configPath != "" {
-						if err := eng.SaveConfigAt(configPath); err != nil {
+						if err := app.SaveProjectConfig(configPath, eng.SaveConfigAt); err != nil {
 							slog.Warn("persist allowlist", "path", configPath, "err", err)
 						}
 					}

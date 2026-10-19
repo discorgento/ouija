@@ -38,6 +38,7 @@ func help() string {
 	b.WriteString("\n  ◆ Setup\n")
 	b.WriteString("      setup      Interactive global config wizard (API keys + provider)\n")
 	b.WriteString("      init       Create .ouija/config.json (interactive)\n")
+	b.WriteString("      trust      Trust this project's config (permissions, allowlist, apiKey)\n")
 	b.WriteString("      config     Change provider/model (interactive)\n")
 	b.WriteString("      doctor     Diagnose config, provider key, and harness wiring\n")
 
@@ -90,6 +91,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCommand(commands.Setup, args[2:], stderr)
 	case "init":
 		return runCommand(commands.Init, args[2:], stderr)
+	case "trust":
+		return runCommand(commands.Trust, args[2:], stderr)
 	case "config":
 		return runCommand(commands.Config, args[2:], stderr)
 	case "learn":

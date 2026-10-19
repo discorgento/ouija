@@ -36,7 +36,18 @@ Interactive per-project config wizard. Reads global defaults and lets you
 override provider, model, and API key. Requires an existing global config —
 run `ouija setup` first.
 
-Writes to `.ouija/config.json` in the current directory.
+Writes to `.ouija/config.json` in the current directory, and trusts it (see
+`ouija trust`).
+
+### `ouija trust [--revoke] [<path>]`
+
+Trusts the project config discovery finds from the current directory (or
+`<path>`), after printing the security-sensitive keys it sets (`permission`,
+`tools` bash allowlist, `apiKey`, a non-default `systemPrompt`). Until then
+those keys are ignored with a warning; any change to the file needs
+`ouija trust` again. `--revoke` forgets the trust. Files written by
+`ouija init` and by the chat are trusted automatically. See
+[Project trust](../explanation/security.md#project-trust).
 
 ### `ouija config`
 

@@ -77,6 +77,18 @@ The `apiKey` field is only written when it differs from the global one.
 Optional sections (`permission`, `tools`, `modelSuggestions`, `streamTimeout`)
 are omitted when unset.
 
+`init` also trusts the file it wrote. A project config you did not write —
+committed by a teammate, or in a repository you cloned — applies its
+`permission`, `tools`, `apiKey` and `systemPrompt` keys only after you review
+and trust it:
+
+```sh
+ouija trust          # prints what the config grants, then trusts it
+ouija trust --revoke
+```
+
+Any change to the file lapses the trust (`ouija doctor` shows it).
+
 ## Config validation
 
 Config is validated automatically on load:

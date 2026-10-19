@@ -121,6 +121,9 @@ func (r *report) provider() {
 	} else {
 		r.ok("project config", cfgPath)
 		r.detail(fmt.Sprintf("provider: %s · model: %s", cfg.Provider, cfg.Model))
+		if keys, _ := app.SensitiveKeys(cfgPath); len(keys) > 0 && !app.IsTrusted(cfgPath) {
+			r.detail("untrusted: " + strings.Join(keys, ", ") + " ignored — run `ouija trust` to apply them")
+		}
 	}
 
 	if cfg.Provider == "" {

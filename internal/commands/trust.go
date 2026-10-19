@@ -1,0 +1,92 @@
+package commands
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"strings"
+
+	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/internal/app"
+)
+
+// Trust implements `ouija trust [--revoke] [path]`: it trusts the project
+// config (the one discovery finds from the current directory, or path), so
+// its permission, bash allowlist, apiKey and systemPrompt keys apply. It shows
+// what those keys grant before recording the trust; any later change to the
+// file lapses it.
+func Trust(args []string) error {
+	fs := flag.NewFlagSet("trust", flag.ContinueOnError)
+	revoke := fs.Bool("revoke", false, "forget the trust recorded for the project config")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	path := fs.Arg(0)
+	if path == "" {
+		found, err := app.FindProjectConfig()
+		if err != nil {
+			return err
+		}
+		if found == "" {
+			return fmt.Errorf("no project config found from here (.ouija/config.json, .ouija.json, ouija.json)")
+		}
+		path = found
+	}
+
+	if *revoke {
+		if err := app.Untrust(path); err != nil {
+			return err
+		}
+		fmt.Printf("✓ No longer trusted: %s\n", path)
+		return nil
+	}
+
+	cfg, err := engine.LoadConfig(path)
+	if err != nil {
+		return fmt.Errorf("load %s: %w", path, err)
+	}
+	keys, err := app.SensitiveKeys(path)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Project config: %s\n", path)
+	if len(keys) == 0 {
+		fmt.Println("  It sets no security-sensitive keys.")
+	}
+	for _, k := range keys {
+		fmt.Printf("  %-13s %s\n", k, describeSensitive(k, cfg))
+	}
+	if err := app.Trust(path); err != nil {
+		return err
+	}
+	fmt.Println("✓ Trusted. Any change to the file needs `ouija trust` again.")
+	return nil
+}
+
+// describeSensitive summarizes what a sensitive key grants, never printing a
+// secret.
+func describeSensitive(key string, cfg *engine.Config) string {
+	switch key {
+	case "permission":
+		if cfg.Permission == nil {
+			return ""
+		}
+		b, _ := json.Marshal(cfg.Permission)
+		return string(b)
+	case "tools":
+		if cfg.Tools != nil && cfg.Tools.Bash != nil && len(cfg.Tools.Bash.Allowlist) > 0 {
+			return "bash allowlist: " + strings.Join(cfg.Tools.Bash.Allowlist, ", ")
+		}
+		return "(no bash allowlist)"
+	case "apiKey":
+		return "overrides your API key for provider " + cfg.Provider
+	case "systemPrompt":
+		p := strings.Join(strings.Fields(cfg.SystemPrompt), " ")
+		if len(p) > 70 {
+			p = p[:70] + "…"
+		}
+		return fmt.Sprintf("%q", p)
+	}
+	return ""
+}

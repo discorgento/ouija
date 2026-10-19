@@ -27,6 +27,10 @@ type Config struct {
 	APIKeys  map[string]string `json:"apiKeys,omitempty"`
 	Defaults *Defaults         `json:"defaults,omitempty"`
 
+	// TrustedProjects maps a project config's absolute path to the SHA-256 of
+	// the contents the user trusted (`ouija trust`); see internal/app/trust.go.
+	TrustedProjects map[string]string `json:"trustedProjects,omitempty"`
+
 	// Legacy fields — kept for backward compat with old configs.
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`

@@ -9,6 +9,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
+	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/models"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 )
@@ -99,6 +100,10 @@ func Init(args []string) error {
 
 	if err := cfg.Save(path); err != nil {
 		return fmt.Errorf("save config: %w", err)
+	}
+	// The user just wrote this file: trust it, so its settings apply.
+	if err := app.Trust(path); err != nil {
+		return fmt.Errorf("trust config: %w", err)
 	}
 
 	verb := "saved"

@@ -12,6 +12,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
+	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/models"
 )
 
@@ -431,7 +432,7 @@ func (m *model) persistConfig() {
 	if m.configPath == "" {
 		return
 	}
-	if err := m.eng.SaveConfigAt(m.configPath); err != nil {
+	if err := app.SaveProjectConfig(m.configPath, m.eng.SaveConfigAt); err != nil {
 		slog.Warn("save config", "path", m.configPath, "err", err)
 	}
 }

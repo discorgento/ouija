@@ -5,8 +5,10 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
@@ -30,6 +32,16 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 	projectCfg, cfgPath, err := findConfigFile(explicit)
 	if err != nil {
 		return nil, "", err
+	}
+	// A discovered config may come from a cloned repository: its sensitive
+	// keys apply only once the user trusts the file (see trust.go). An
+	// explicit --config is trusted like any CLI flag.
+	if projectCfg != nil && explicit == "" && !IsTrusted(cfgPath) {
+		if keys, _ := SensitiveKeys(cfgPath); len(keys) > 0 {
+			stripUntrusted(projectCfg)
+			slog.Warn("untrusted project config: ignoring "+strings.Join(keys, ", ")+
+				" — run `ouija trust` to apply them", "path", cfgPath)
+		}
 	}
 
 	globalCfg, _ := ouijaconfig.Load()

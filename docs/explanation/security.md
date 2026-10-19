@@ -29,6 +29,21 @@ An auto-discovered `.ouija.json` is clamped to its own directory, so a planted
 config can't grant reads above it. An explicit `--config` is trusted (your
 choice).
 
+### Project trust
+
+A project config found by walking up from the working directory
+(`.ouija/config.json`, `.ouija.json`, `ouija.json`) may come from a repository
+someone else wrote. Its security-sensitive keys — `permission`, `tools` (the
+bash allowlist), `apiKey` and a non-default `systemPrompt` — are **ignored**,
+with a warning, until you run `ouija trust` in the project. Trust is the file's
+SHA-256, stored in the global config (a protected path), so any change to the
+file lapses it; `ouija trust --revoke` forgets it. Files ouija writes itself
+(`ouija init`, chat saves) are trusted automatically, and ouija never rewrites
+an untrusted file that sets those keys. Without this, cloning a repository that
+commits `{"permission":{"default":"allow"}}` would hand a prompt-injected model
+unattended `bash`, and an `apiKey` override would send your prompts and code to
+an account the repository author controls.
+
 ## Layer 2: Protected paths (always denied)
 
 Certain paths are **always blocked** regardless of the permission level:
@@ -98,7 +113,8 @@ Two independent mechanisms:
   (`git -c core.pager=…`, `find -exec`), so prefer multi-word patterns for
   unattended runs.
 
-Configured statically in `.ouija/config.json`, or learned interactively: a bash
+Configured statically in `.ouija/config.json` (applied only when the project is
+trusted, see [Project trust](#project-trust)), or learned interactively: a bash
 command approved with **Session** adds one pattern per simple command and
 persists them to disk — a command that is not fully static (`echo $(whoami)`)
 teaches nothing. A plain **Yes** runs the command once and is *not* persisted.
@@ -169,7 +185,12 @@ The permission system applies across all categories.
 Prompt injection can still skew *analysis content* — the model might produce a
 misleading report based on malicious code comments. The layered defenses contain
 the blast radius (no exfiltration, no modification without approval). An explicit
-`--config` and the MCP host are trust boundaries you own.
+`--config`, a project you ran `ouija trust` on, and the MCP host are trust
+boundaries you own. The bash checks read the command's text: a path built at run
+time (`cat $(printf '.%s' env)`, a variable set earlier in the same command) is
+beyond them, which is why such commands are never pre-approved by the
+allowlist — under `allow` with an empty allowlist nothing but the static gates
+stands in the way, so reserve that for trusted projects.
 
 ## Reporting a vulnerability
 

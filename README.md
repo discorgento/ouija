@@ -67,6 +67,7 @@ free. Diagnose anything with `ouija doctor`.
 | `ouija sticker` | Laptop sticker SVG from real project metrics |
 | `ouija chat` | Interactive terminal chat (Bubble Tea TUI): tools, streaming, approvals |
 | `ouija setup` / `ouija init` | Global defaults / per-project config |
+| `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey) |
 | `ouija learn "fact"` | Save project knowledge, injected into every prompt |
 | `ouija mcp [install\|status]` | Serve MCP over stdio, or register ouija with your editor's harness |
 | `ouija generate totem` | Scaffold a new totem |
