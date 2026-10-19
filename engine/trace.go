@@ -318,6 +318,9 @@ func renderSpanString(s *Span, prefix string, isLast bool) string {
 		if p, ok := attrs["path"]; ok {
 			attrStr = "  " + p
 		}
+		if p, ok := attrs["pattern"]; ok {
+			attrStr += "  /" + p + "/"
+		}
 	}
 
 	var buf strings.Builder

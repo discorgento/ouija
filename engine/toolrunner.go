@@ -103,6 +103,9 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	if p, ok := call.Input["path"].(string); ok {
 		span.SetAttr("path", p)
 	}
+	if p, ok := call.Input["pattern"].(string); ok { // grep/glob: what was searched
+		span.SetAttr("pattern", p)
+	}
 	defer span.End()
 
 	// ── Doom-loop detection ───────────────────────────────────────
