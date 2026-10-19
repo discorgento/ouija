@@ -134,7 +134,7 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 		handled := m.handleSlash(input)
 		if handled {
 			m.input.Reset()
-			m.input.SetHeight(1)
+			m.setViewportSize()
 			return m, nil
 		}
 	}
@@ -146,7 +146,7 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 	}
 
 	m.input.Reset()
-	m.input.SetHeight(1)
+	m.setViewportSize()
 
 	// ── If already waiting, enqueue instead of sending ──────────────
 	if m.waiting {
@@ -236,13 +236,10 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 		)
 	}
 
-	// Show per-turn trace after each response, then reset for the next turn.
-	// Resetting is safe: the tracer is not used anywhere else between Chat calls.
+	// This turn's trace (beginGeneration started the turn). The tracer keeps
+	// every turn, for the session trace and --trace-file.
 	if trace := m.eng.Tracer().RenderLastRootString(); trace != "" {
-		m.lines = append(m.lines,
-			line{role: "trace", text: trace, ts: now},
-		)
-		m.eng.Tracer().Reset()
+		m.lines = append(m.lines, line{role: "trace", text: trace, ts: now})
 	}
 
 	// ── Show this turn's write/edit diffs as code blocks ────────────

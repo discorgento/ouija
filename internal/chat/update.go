@@ -180,7 +180,9 @@ func (m *model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) setViewportSize() {
 	m.input.SetWidth(m.width - inputCardFrame)
-	m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
+	// Logical lines, not the cursor row (Line): with the cursor on the first
+	// line of a long message the box used to shrink to one line.
+	m.input.SetHeight(min(m.input.LineCount(), m.input.MaxHeight))
 
 	var n int
 	if m.approvalReq != nil {

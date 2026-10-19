@@ -86,3 +86,43 @@ func TestApprovalArrowStaysInRange(t *testing.T) {
 		}
 	}
 }
+
+// Letter keys answer only with the options the prompt shows: a delete takes a
+// fresh "d" — "y" and "s" (approve for the whole session) are not offered.
+func TestApprovalLettersFollowTheOptions(t *testing.T) {
+	m := newApprovalTestModel()
+	ch := make(chan approvalResponseMsg, 1)
+	m.Update(approvalRequestMsg{tool: "delete_file\x00/tmp/x", path: "p", respCh: ch})
+	for _, k := range []string{"y", "s"} {
+		m.Update(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+		if m.approvalReq == nil || len(ch) != 0 {
+			t.Fatalf("%q answered a delete prompt that does not offer it", k)
+		}
+	}
+	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if r := <-ch; !r.allowed || r.forSession {
+		t.Fatalf("d = %+v; want a one-off approval", r)
+	}
+
+	m.Update(approvalRequestMsg{tool: "bash\x00ls", path: "p", respCh: ch})
+	m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if r := <-ch; !r.allowed || !r.forSession {
+		t.Fatalf("s on bash = %+v; want approve for session", r)
+	}
+}
+
+// The input box fits the message's lines, wherever the cursor is.
+func TestInputHeightFollowsLineCount(t *testing.T) {
+	m := newApprovalTestModel()
+	m.input.SetValue("one\ntwo\nthree")
+	m.input.MoveToBegin() // cursor on the first line
+	m.setViewportSize()
+	if h := m.input.Height(); h != 3 {
+		t.Fatalf("input height = %d with 3 lines, want 3", h)
+	}
+	m.input.Reset()
+	m.setViewportSize()
+	if h := m.input.Height(); h != 1 {
+		t.Fatalf("empty input height = %d, want 1", h)
+	}
+}

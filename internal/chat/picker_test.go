@@ -66,3 +66,12 @@ func TestSuggestedModels(t *testing.T) {
 		})
 	}
 }
+
+// An empty list renders nothing, so it must take no room from the viewport.
+func TestPickerHeightEmpty(t *testing.T) {
+	p := &Picker{}
+	p.Show(nil, nil, "Models")
+	if h := p.Height(); h != 0 {
+		t.Fatalf("empty picker Height = %d, want 0", h)
+	}
+}

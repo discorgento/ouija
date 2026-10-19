@@ -650,7 +650,6 @@ func (m *model) handleHistoryPrev() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.input.SetValue(m.inputHistory[m.inputHistIdx])
-	m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
 	m.setViewportSize()
 	return m, nil
 }
@@ -668,7 +667,6 @@ func (m *model) handleHistoryNext() (tea.Model, tea.Cmd) {
 		m.inputHistIdx++
 		m.input.SetValue(m.inputHistory[m.inputHistIdx])
 	}
-	m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
 	m.setViewportSize()
 	return m, nil
 }

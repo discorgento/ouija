@@ -149,8 +149,8 @@ func (p *Picker) SelectedValue() string {
 // including the label, visible items, "… and N more" line, and card
 // padding. Used for viewport size calculation.
 func (p *Picker) Height() int {
-	if !p.Visible {
-		return 0
+	if !p.Visible || len(p.Items) == 0 {
+		return 0 // Render draws nothing for an empty list
 	}
 	n := len(p.Items)
 	if n > maxPickerLines {

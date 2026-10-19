@@ -22,6 +22,7 @@ func (m *model) beginGeneration(input string) tea.Cmd {
 	m.responseStart = time.Now()
 	m.partialText = ""
 	m.streamingTokens = 0
+	m.eng.Tracer().NextTurn()
 	m.setViewportSize() // room for the status line; re-renders
 	return tea.Batch(m.startChat(input), m.spinner.Tick)
 }

@@ -44,60 +44,18 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.rebuildContent()
 			return m, nil
 		case code == tea.KeyEnter || key == "enter":
-			// Confirm the currently selected option.
-			opts := approvalOptionsFor(m.approvalReq.tool)
-			opt := opts[m.approvalIdx]
-			if opt.key == "esc" {
-				return m.approvalCancel()
-			}
-			if opt.key == "e" {
-				return m.handleApprovalEdit()
-			}
-			if opt.key == "n" {
-				// A rejection blocks the whole tool for this generation, not
-				// just this target — the user does not want the agent to keep
-				// proposing it (matches the rejectedTools contract).
-				m.rejectedTools[baseTool(m.approvalReq.tool)] = true
-			}
-			m.approvalReq.respCh <- opt.resp
-			m.approvalReq = nil
-			m.setViewportSize() // restore viewport height
-			return m, nil
+			return m.chooseApproval(approvalOptionsFor(m.approvalReq.tool)[m.approvalIdx])
 		case code == tea.KeyEscape || key == "esc" || key == "escape":
 			return m.approvalCancel()
-		case key == "y":
-			if baseTool(m.approvalReq.tool) == "delete_file" {
-				return m, nil // must press 'd' for delete
-			}
-			m.approvalReq.respCh <- approvalResponseMsg{allowed: true}
-			m.approvalReq = nil
-			m.setViewportSize()
-			return m, nil
-		case key == "d":
-			if baseTool(m.approvalReq.tool) == "delete_file" {
-				m.approvalReq.respCh <- approvalResponseMsg{allowed: true}
-				m.approvalReq = nil
-				m.setViewportSize()
-				return m, nil
-			}
-			return m, nil
-		case key == "n":
-			m.rejectedTools[baseTool(m.approvalReq.tool)] = true
-			m.approvalReq.respCh <- approvalResponseMsg{allowed: false, cancelled: false}
-			m.approvalReq = nil
-			m.setViewportSize()
-			return m, nil
-		case key == "s":
-			m.approvalReq.respCh <- approvalResponseMsg{allowed: true, forSession: true}
-			m.approvalReq = nil
-			m.setViewportSize()
-			return m, nil
-		case key == "e":
-			return m.handleApprovalEdit()
-		default:
-			// Ignore other keys during approval prompt.
-			return m, nil
 		}
+		// A letter picks the option it labels — only the options this prompt
+		// shows (delete_file has no "y" or "s": deleting takes a fresh "d").
+		for _, opt := range approvalOptionsFor(m.approvalReq.tool) {
+			if key == opt.key {
+				return m.chooseApproval(opt)
+			}
+		}
+		return m, nil // other keys are ignored during the prompt
 	}
 
 	// ── Escape: cancel or clear queue ────────────────────────────────
@@ -210,7 +168,6 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		for i := len(m.lines) - 1; i >= 0; i-- {
 			if m.lines[i].role == "user" {
 				m.input.SetValue(m.lines[i].text)
-				m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
 				m.setViewportSize()
 				break
 			}
@@ -223,7 +180,6 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// Shift+Enter or Alt+Enter → insert newline
 		if msg.Key().Mod&(tea.ModShift|tea.ModAlt) != 0 {
 			m.input.InsertString("\n")
-			m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
 			m.setViewportSize()
 			return m, nil
 		}
@@ -239,6 +195,24 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.setViewportSize()
 	}
 	return m, cmd
+}
+
+// chooseApproval answers the approval prompt with opt.
+func (m *model) chooseApproval(opt approvalOpt) (tea.Model, tea.Cmd) {
+	switch opt.key {
+	case "esc":
+		return m.approvalCancel()
+	case "e":
+		return m.handleApprovalEdit()
+	case "n":
+		// A rejection blocks the whole tool for this generation, not just
+		// this target — the user does not want the agent to keep proposing it.
+		m.rejectedTools[baseTool(m.approvalReq.tool)] = true
+	}
+	m.approvalReq.respCh <- opt.resp
+	m.approvalReq = nil
+	m.setViewportSize() // restore viewport height
+	return m, nil
 }
 
 // approvalCancel handles escape during the approval prompt:
