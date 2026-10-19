@@ -74,7 +74,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 	// When using structured output, avoid the two-phase slow path for simple
 	// requests: if no tools are needed, skip Phase 1 entirely.
 	if useStructured && len(toolDefs) == 0 {
-		resp, span, err := a.callModel(ctx, env, "chat", ChatRequest{
+		resp, span, err := a.callModel(ctx, env, "chat", req.Label, ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Schema:    req.Schema,
@@ -124,7 +124,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		msgs = compact(msgs)
 
 		// The span stays open over the turn: its tool calls become children.
-		resp, chatSpan, err := a.callModel(ctx, env, "chat", ChatRequest{
+		resp, chatSpan, err := a.callModel(ctx, env, "chat", req.Label, ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Tools:     toolDefs,
@@ -166,26 +166,29 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 			// Propagate the chat span via context so toolrunner creates child spans.
 			toolCtx := WithSpan(ctx, chatSpan)
 
-			// Classify tools: parallel-safe (read-only) run concurrently;
-			// sequential (write, bash) run one at a time.
-			parCalls, seqCalls := classifyToolCalls(resp.ToolCalls, extraRisk)
-
-			// ── Parallel execution ──────────────────────────────────────
-			if len(parCalls) > 0 {
-				results := make([]ToolResult, len(parCalls))
-				var wg sync.WaitGroup
-				for i, call := range parCalls {
-					wg.Go(func() { results[i] = env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk) })
+			// Run the calls in the model's order; consecutive read-only calls
+			// run concurrently (see batchToolCalls).
+			for _, batch := range batchToolCalls(resp.ToolCalls, extraRisk) {
+				// A cancelled run stops here: the rest of the turn's calls
+				// would still run (and prompt) after the user pressed Esc.
+				if err := ctx.Err(); err != nil {
+					chatSpan.End()
+					return nil, msgs, err
 				}
-				wg.Wait()
-				// Append results in call order so the model sees deterministic order.
-				for i, call := range parCalls {
-					msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: results[i].String()})
+				if len(batch) > 1 {
+					results := make([]ToolResult, len(batch))
+					var wg sync.WaitGroup
+					for i, call := range batch {
+						wg.Go(func() { results[i] = env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk) })
+					}
+					wg.Wait()
+					// Results in call order, so the model sees a deterministic history.
+					for i, call := range batch {
+						msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: results[i].String()})
+					}
+					continue
 				}
-			}
-
-			// ── Sequential execution ────────────────────────────────────
-			for _, call := range seqCalls {
+				call := batch[0]
 				if call.Name == SubmitTool {
 					chatSpan.SetAttr("submit_result", "true")
 					b, _ := json.Marshal(call.Input)
@@ -224,7 +227,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 				// A user turn, not an assistant prefill: newer models reject
 				// a conversation that ends on an assistant message.
 				msgs = append(msgs, Message{Role: RoleUser, Content: "Now give the final answer as the structured object."})
-				finalResp, phaseSpan, err := a.callModel(ctx, env, "phase2", ChatRequest{
+				finalResp, phaseSpan, err := a.callModel(ctx, env, "phase2", req.Label, ChatRequest{
 					System:   req.System,
 					Messages: msgs,
 					// The history holds this run's tool calls, so the tools
@@ -264,12 +267,17 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 	}
 }
 
-// callModel makes one provider call inside a span named name and charges its
+// callModel makes one provider call inside a span named name (tagged with
+// the run's label, so a totem's scout, passes and reconcile tell apart in the
+// trace) and charges its
 // usage to the budget. On success the span is returned open — the caller ends
 // it, after the turn's tool calls when they should nest under it; on failure
 // it is ended with the error.
-func (a *ReAct) callModel(ctx context.Context, env RunEnv, name string, req ChatRequest) (ChatResponse, *Span, error) {
+func (a *ReAct) callModel(ctx context.Context, env RunEnv, name, label string, req ChatRequest) (ChatResponse, *Span, error) {
 	span := env.Tracer.Start(name)
+	if label != "" {
+		span.SetAttr("label", label)
+	}
 	resp, err := a.streamChat(ctx, env, req)
 	if err == nil {
 		err = env.Budget.Add(resp.Usage)

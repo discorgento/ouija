@@ -98,3 +98,42 @@ func TestBudgetCeilings(t *testing.T) {
 		t.Fatal("should exceed the token ceiling")
 	}
 }
+
+// Cache tokens count toward the token ceiling and the cost.
+func TestBudgetCountsCacheTokens(t *testing.T) {
+	tr := newTracker(1000, 0, 0, 10, 0) // $10 per 1M input
+	if err := tr.Add(Usage{InputTokens: 10, CacheReadTokens: 600, CacheWriteTokens: 300}); err != nil {
+		t.Fatal(err)
+	}
+	tokens, _, usd := tr.spent()
+	if tokens != 910 {
+		t.Fatalf("tokens = %d, want 910 (cache included)", tokens)
+	}
+	if want := (10 + 60 + 375) / 1e6 * 10; usd < want*0.999 || usd > want*1.001 {
+		t.Fatalf("usd = %v, want %v", usd, want)
+	}
+	if err := tr.Add(Usage{CacheReadTokens: 200}); err == nil {
+		t.Fatal("cache tokens did not hit the token ceiling")
+	}
+}
+
+// Chat never writes into the caller's history (its spare capacity is shared
+// with whatever else appends to it — the chat's cancelled and next turns).
+func TestChatDoesNotAliasHistory(t *testing.T) {
+	p := &mockProvider{responses: []ChatResponse{{Text: "a"}, {Text: "b"}}}
+	eng := newTestEngine(p, t.TempDir())
+	history := make([]Message, 1, 10)
+	history[0] = Message{Role: RoleUser, Content: "earlier"}
+	spare := history[:2]
+
+	text, msgs, err := eng.Chat(context.Background(), RunRequest{Prompt: "now", Messages: history})
+	if err != nil || text != "a" {
+		t.Fatalf("Chat = %q, %v", text, err)
+	}
+	if spare[1].Content != "" {
+		t.Fatalf("Chat wrote %q into the caller's spare capacity", spare[1].Content)
+	}
+	if len(msgs) != 3 || msgs[1].Content != "now" {
+		t.Fatalf("conversation = %+v", msgs)
+	}
+}

@@ -2,9 +2,9 @@ package engine
 
 // parallelSafe reports whether a tool call may run concurrently with others
 // in the same turn: read-only tools (no side effects, no conflicts) may;
-// write and exec tools, submit_result (deferred to last) and unknown tools
-// (fail closed) run one at a time, in order. An extra tool is classified by
-// its own RiskTier, which overrides a built-in of the same name.
+// write and exec tools, submit_result and unknown tools (fail closed) run one
+// at a time, in order. An extra tool is classified by its own RiskTier, which
+// overrides a built-in of the same name.
 func parallelSafe(call ToolCall, extraRisk map[string]RiskTier) bool {
 	if call.Name == SubmitTool {
 		return false
@@ -16,15 +16,20 @@ func parallelSafe(call ToolCall, extraRisk map[string]RiskTier) bool {
 	return risk == RiskReadOnly
 }
 
-// classifyToolCalls splits already-deduplicated calls into the parallel-safe
-// and the sequential ones, keeping the original order within each group.
-func classifyToolCalls(calls []ToolCall, extraRisk map[string]RiskTier) (parallel, sequential []ToolCall) {
-	for _, call := range calls {
-		if parallelSafe(call, extraRisk) {
-			parallel = append(parallel, call)
-		} else {
-			sequential = append(sequential, call)
+// batchToolCalls splits calls into batches run one after the other, in the
+// model's order: a run of consecutive parallel-safe calls is one batch (run
+// concurrently), every other call is a batch of its own. Pulling all reads
+// to the front instead let `[write_file a.go, read_file a.go]` read the file
+// as it was before the write.
+func batchToolCalls(calls []ToolCall, extraRisk map[string]RiskTier) [][]ToolCall {
+	var batches [][]ToolCall
+	for i, call := range calls {
+		if i > 0 && parallelSafe(call, extraRisk) && parallelSafe(calls[i-1], extraRisk) {
+			last := len(batches) - 1
+			batches[last] = append(batches[last], call)
+			continue
 		}
+		batches = append(batches, []ToolCall{call})
 	}
-	return parallel, sequential
+	return batches
 }

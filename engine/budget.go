@@ -31,12 +31,18 @@ func newTracker(maxTokens, maxSteps int, maxUSD, inCost, outCost float64) *track
 func (t *tracker) Add(u Usage) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if u.InputTokens < 0 || u.OutputTokens < 0 {
-		return ErrBudget(fmt.Sprintf("budget: negative token count (input=%d output=%d)", u.InputTokens, u.OutputTokens))
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
+		return ErrBudget(fmt.Sprintf("budget: negative token count (%+v)", u))
 	}
-	t.tokens += u.InputTokens + u.OutputTokens
+	// Cache tokens are input the provider reports apart (Anthropic's
+	// input_tokens excludes them): with the system prompt and tools cached on
+	// every call they are most of the input, and leaving them out let the
+	// ceilings fire far too late. Priced as Anthropic bills them: reads at a
+	// tenth of the input price, writes at 1.25x.
+	t.tokens += u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens + u.OutputTokens
 	t.steps++
-	t.usd += float64(u.InputTokens)/1e6*t.inCostPer1M + float64(u.OutputTokens)/1e6*t.outCostPer1M
+	input := float64(u.InputTokens) + 0.1*float64(u.CacheReadTokens) + 1.25*float64(u.CacheWriteTokens)
+	t.usd += input/1e6*t.inCostPer1M + float64(u.OutputTokens)/1e6*t.outCostPer1M
 
 	if t.maxTokens > 0 && t.tokens > t.maxTokens {
 		return ErrBudget(fmt.Sprintf("budget: token ceiling reached (%d/%d)", t.tokens, t.maxTokens))

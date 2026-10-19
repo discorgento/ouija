@@ -44,7 +44,9 @@ type Message struct {
 	ToolCallID string     // for tool-result messages
 }
 
-// Usage reports token consumption for one provider call.
+// Usage reports token consumption for one provider call. InputTokens excludes
+// the cache tokens, which are reported apart (as Anthropic does); a provider
+// that folds cached input into its prompt count leaves the cache fields 0.
 type Usage struct {
 	InputTokens      int
 	OutputTokens     int

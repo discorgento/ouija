@@ -321,8 +321,12 @@ func renderSpanString(s *Span, prefix string, isLast bool) string {
 	}
 
 	var buf strings.Builder
+	display := name
+	if label := attrs["label"]; label != "" && label != name { // the chat's label is "chat"
+		display += " " + label
+	}
 	line := fmt.Sprintf("%s%s%-30s %s%s  %s",
-		prefix, connector, name, durStr(dur), attrStr, status)
+		prefix, connector, display, durStr(dur), attrStr, status)
 	if err != "" {
 		line += "  " + err
 	}

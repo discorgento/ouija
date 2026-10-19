@@ -157,3 +157,21 @@ func TestLoadConfigAcceptsFileWithoutModel(t *testing.T) {
 		t.Fatal("LoadConfig must still reject what the file itself gets wrong")
 	}
 }
+
+// An explicit maxNudges 0 survives a save: omitempty used to drop it, and the
+// next load read the default 3.
+func TestMaxNudgesZeroRoundTrip(t *testing.T) {
+	c := DefaultConfig()
+	c.MaxNudges = 0
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := c.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxNudges != 0 {
+		t.Fatalf("maxNudges = %d after a round trip, want 0", got.MaxNudges)
+	}
+}

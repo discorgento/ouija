@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 )
 
@@ -340,6 +341,10 @@ type RunRequest struct {
 	UseTools   bool           // expose the default file tools
 	ExtraTools []CustomTool   // scoped custom tools (def + impl, no global registration)
 	MaxTokens  int
+	// OnToken, when set, receives this run's streamed text instead of the
+	// engine-wide token callback — so a UI can tell a cancelled run's
+	// late tokens from the next run's.
+	OnToken TokenCallback
 }
 
 // runAgent is the single point through which every agent turn passes: it
@@ -348,7 +353,11 @@ type RunRequest struct {
 // several agents concurrently on one Engine.
 func (e *Engine) runAgent(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
 	ctx = withDoomDetector(ctx, &DoomDetector{})
-	return e.agent.Run(ctx, e.env(), req, msgs)
+	env := e.env()
+	if req.OnToken != nil {
+		env.OnToken = req.OnToken
+	}
+	return e.agent.Run(ctx, env, req, msgs)
 }
 
 // env snapshots what one run needs, so setters called during the run cannot
@@ -382,11 +391,10 @@ func (e *Engine) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 // req.Messages contains prior turns; the new Prompt is appended as the user turn.
 // Returns the final text plus the full updated conversation for the next round.
 func (e *Engine) Chat(ctx context.Context, req RunRequest) (string, []Message, error) {
-	msgs := req.Messages
-	if msgs == nil {
-		msgs = []Message{}
-	}
-	msgs = append(msgs, Message{Role: RoleUser, Content: req.Prompt})
+	// A copy: appending to the caller's slice could write into its spare
+	// capacity — and the chat runs a cancelled turn and the next one on the
+	// same history at once.
+	msgs := append(slices.Clone(req.Messages), Message{Role: RoleUser, Content: req.Prompt})
 	res, msgs, err := e.runAgent(ctx, req, msgs)
 	if err != nil {
 		return "", msgs, err

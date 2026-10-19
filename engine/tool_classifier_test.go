@@ -19,7 +19,7 @@ func TestParallelSafe(t *testing.T) {
 		{"edit_file", nil, false},
 		{"delete_file", nil, false},
 		{"bash", nil, false},
-		{SubmitTool, nil, false},    // deferred to last
+		{SubmitTool, nil, false},    // runs alone
 		{"make_coffee", nil, false}, // unknown: fail closed
 		{"lookup", map[string]RiskTier{"lookup": RiskReadOnly}, true},
 		{"deploy", map[string]RiskTier{"deploy": RiskWrite}, false},
@@ -32,23 +32,22 @@ func TestParallelSafe(t *testing.T) {
 	}
 }
 
-func TestClassifyToolCallsKeepsOrder(t *testing.T) {
-	calls := []ToolCall{{Name: "read_file"}, {Name: "write_file"}, {Name: "grep"}, {Name: SubmitTool}, {Name: "bash"}, {Name: "glob"}}
-	par, seq := classifyToolCalls(calls, nil)
-	names := func(cs []ToolCall) []string {
-		out := make([]string, len(cs))
-		for i, c := range cs {
-			out[i] = c.Name
+// Batches keep the model's order: only consecutive read-only calls share one.
+func TestBatchToolCallsKeepsOrder(t *testing.T) {
+	calls := []ToolCall{{Name: "read_file"}, {Name: "grep"}, {Name: "write_file"}, {Name: "read_file"}, {Name: SubmitTool}, {Name: "bash"}, {Name: "glob"}, {Name: "list_dir"}}
+	var got [][]string
+	for _, b := range batchToolCalls(calls, nil) {
+		var names []string
+		for _, c := range b {
+			names = append(names, c.Name)
 		}
-		return out
+		got = append(got, names)
 	}
-	if got := names(par); !slices.Equal(got, []string{"read_file", "grep", "glob"}) {
-		t.Errorf("parallel = %v", got)
+	want := [][]string{{"read_file", "grep"}, {"write_file"}, {"read_file"}, {SubmitTool}, {"bash"}, {"glob", "list_dir"}}
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("batches = %v, want %v", got, want)
 	}
-	if got := names(seq); !slices.Equal(got, []string{"write_file", SubmitTool, "bash"}) {
-		t.Errorf("sequential = %v", got)
-	}
-	if p, s := classifyToolCalls(nil, nil); p != nil || s != nil {
-		t.Errorf("empty input → %v, %v", p, s)
+	if b := batchToolCalls(nil, nil); b != nil {
+		t.Errorf("empty input → %v", b)
 	}
 }

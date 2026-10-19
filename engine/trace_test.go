@@ -405,3 +405,17 @@ func TestTracerNextTurn(t *testing.T) {
 		t.Fatalf("session render lost a turn: %q", got)
 	}
 }
+
+// A model call shows the run's label, so a totem's phases tell apart.
+func TestRenderShowsRunLabel(t *testing.T) {
+	tr := NewTracer(true)
+	for _, label := range []string{"scout", "chat"} {
+		s := tr.Start("chat")
+		s.SetAttr("label", label)
+		s.End()
+	}
+	out := tr.RenderString()
+	if !strings.Contains(out, "chat scout") || strings.Contains(out, "chat chat") {
+		t.Fatalf("render = %q; want the scout label, and no repeated chat", out)
+	}
+}

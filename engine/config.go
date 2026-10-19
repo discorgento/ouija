@@ -42,7 +42,7 @@ type Config struct {
 	Provider    string   `json:"provider"`
 	Model       string   `json:"model"`
 	APIKey      string   `json:"apiKey,omitempty"` // optional project-level override
-	MaxNudges   int      `json:"maxNudges,omitempty"`
+	MaxNudges   int      `json:"maxNudges"`        // no omitempty: an explicit 0 must survive a save
 	Budget      Budget   `json:"budget"`
 	Rules       []string `json:"rules"`
 	ProjectRoot string   `json:"projectRoot"`

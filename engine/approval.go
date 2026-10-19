@@ -81,6 +81,10 @@ func (am *ApprovalManager) Reset() {
 // callback to ask the user. Blocks until the user responds or ctx is done.
 // The input map carries the tool call arguments and is forwarded to the callback for display.
 func (am *ApprovalManager) Request(ctx context.Context, tool string, input map[string]any) (ApprovalResult, error) {
+	// A cancelled run asks nobody: its prompt would show up in the next one.
+	if err := ctx.Err(); err != nil {
+		return ApprovalResult{}, err
+	}
 	// Fast path: check session cache.
 	am.mu.Lock()
 	if entry, ok := am.session[tool]; ok && !entry.expired() {
