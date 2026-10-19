@@ -56,7 +56,37 @@ ouija task "describe X"    # one-shot: verified plan (scout → N passes → rec
 ```
 
 `ouija setup` walks you through the keys; pick `ollama` to run fully local and
-free. Diagnose anything with `ouija doctor`.
+free. Diagnose anything with `ouija doctor`. On a terminal, bare `ouija` opens
+the chat (and runs the setup the first time).
+
+## The chat
+
+<p align="center">
+  <img src="assets/screens/chat-welcome.png" alt="ouija chat: the welcome screen, with the session, where to start and the totems" width="720">
+</p>
+
+Each reply says what it did: the turn's tools on one line (a failed command
+shows its last lines), the time, tokens and cost — and every file change as a
+diff, side by side on a wide terminal. `@file` attaches a file, `/undo` takes a
+change back, `Ctrl+F` searches, `ouija chat -c` resumes the last conversation.
+
+<p align="center">
+  <img src="assets/screens/chat-conversation.png" alt="A reply with its tools, a failed test's output and the diff it applied" width="720">
+</p>
+
+The totems run right in the chat: `/task "add a cache"` draws the séance live —
+the scout, every independent pass, the reconcile — and ends on the plan.
+
+<p align="center">
+  <img src="assets/screens/chat-task.png" alt="/task in the chat: the scout and the passes drawn live" width="720">
+</p>
+
+<p align="center">
+  <img src="assets/screens/chat-diff.png" alt="A diff side by side, syntax-highlighted" width="860">
+</p>
+
+Keys, commands and themes: [Chat TUI](docs/how-to/chat.md) ·
+[CLI reference](docs/reference/cli.md).
 
 ## Commands
 
