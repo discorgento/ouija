@@ -146,22 +146,29 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 		return nil, fmt.Errorf("compose did not produce HTML (got %d bytes) — rerun or check the model", len(htmlRes.Text))
 	}
 
-	// 5) Write the trio and render the PDF. Keep the output dir inside the project
-	// root — `scope` is attacker-influenceable (CLI flag / MCP arg).
-	outDir, err := engine.SafeJoin(cfg.ProjectRoot, "docs")
-	if err != nil {
-		return nil, fmt.Errorf("invalid scope: %w", err)
-	}
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return nil, fmt.Errorf("cannot create %s: %w", outDir, err)
-	}
+	// 5) Write the trio and render the PDF. Every output path goes through the
+	// sandbox (symlink-aware): `scope` is attacker-influenceable (CLI flag /
+	// MCP arg), and a docs/ or <slug>.* symlink planted in the repo must not
+	// redirect a write outside the project.
 	slug := slugify(sheet.Title)
 	if slug == "" {
 		slug = "document"
 	}
 	res := &docResult{}
-	res.HTML = filepath.Join(outDir, slug+".html")
-	res.MD = filepath.Join(outDir, slug+".md")
+	var pdfPath string
+	for _, out := range []struct {
+		dst *string
+		ext string
+	}{{&res.HTML, ".html"}, {&res.MD, ".md"}, {&pdfPath, ".pdf"}} {
+		p, err := engine.SafeResolve(ctx, cfg.ProjectRoot, filepath.Join("docs", slug+out.ext))
+		if err != nil {
+			return nil, fmt.Errorf("invalid output path: %w", err)
+		}
+		*out.dst = p
+	}
+	if err := os.MkdirAll(filepath.Dir(res.HTML), 0o755); err != nil {
+		return nil, fmt.Errorf("cannot create %s: %w", filepath.Dir(res.HTML), err)
+	}
 
 	if err := os.WriteFile(res.HTML, []byte(htmlRes.Text), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write html: %w", err)
@@ -169,20 +176,19 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	if err := os.WriteFile(res.MD, []byte(technicalMD(&sheet)), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write md: %w", err)
 	}
-	res.PDF, res.PDFNote = renderPDF(res.HTML)
+	res.PDF, res.PDFNote = renderPDF(res.HTML, pdfPath)
 	res.OpenQuestions = sheet.OpenQuestions
 	return res, nil
 }
 
 // --- PDF: headless Chrome print-to-pdf ---
 
-func renderPDF(htmlPath string) (string, string) {
+func renderPDF(htmlPath, pdf string) (string, string) {
 	chrome := findChrome()
 	if chrome == "" {
 		return "", "Chrome/Chromium not found — open the HTML and print to PDF: " + htmlPath
 	}
 	abs, _ := filepath.Abs(htmlPath)
-	pdf := strings.TrimSuffix(abs, ".html") + ".pdf"
 	flags := []string{"--headless", "--disable-gpu", "--no-pdf-header-footer"}
 	// Isolate from the user's real Chrome profile with a throwaway user-data-dir.
 	if profile, err := os.MkdirTemp("", "ouija-chrome-"); err == nil {

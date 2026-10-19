@@ -145,7 +145,10 @@ logged or traced. The bash tool sanitizes environment: `sanitizeEnv()` strips
 credential-like env vars (`AWS_*`, `*API_KEY*`, `*SECRET*`, `*TOKEN*`, etc.)
 before passing to subprocesses. Subprocesses have `WaitDelay = 3s` as a safety
 net against runaway children. PDF rendering runs headless Chrome with argv only,
-controlled paths, and a throwaway `--user-data-dir`.
+controlled paths, and a throwaway `--user-data-dir`. The totems' fixed outputs
+(`docs/task-plan.md`, `docs/<slug>.*`, `docs/sticker/`) and `docs/knowledge.md`
+go through `engine.SafeResolve()`, so a symlink planted in the repository cannot
+redirect them outside the project or onto a protected file.
 
 ## Tool categories
 

@@ -144,13 +144,18 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 }
 
 // writePlan saves the rendered plan as docs/task-plan.md in the given directory.
+// The path goes through the sandbox: a docs/ or task-plan.md symlink planted
+// in the repo must not redirect the write outside the project.
 func writePlan(dir string, res *taskResult) {
 	content := res.Render()
-	docsDir := filepath.Join(dir, "docs")
-	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+	dst, err := engine.SafeResolve(context.Background(), dir, "docs/task-plan.md")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ouija] plan not saved: %v\n", err)
 		return
 	}
-	dst := filepath.Join(docsDir, "task-plan.md")
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return
+	}
 	if err := os.WriteFile(dst, []byte(content), 0o644); err == nil {
 		fmt.Fprintf(os.Stderr, "[ouija] plan saved to %s\n", dst)
 	}
@@ -224,15 +229,19 @@ var writePlanDef = engine.ToolDef{
 	Name:        "write_plan",
 	Description: "Save the rendered task plan as markdown to docs/task-plan.md",
 	Schema:      writePlanSchema(),
-	Risk:        engine.RiskReadOnly, // sandboxado — SafeJoin impede escrita fora do root
+	// ReadOnly for the risk-tier gate: the destination is fixed in code, and
+	// writePlanFn resolves it through the sandbox (symlinks included).
+	Risk: engine.RiskReadOnly,
 }
 
-var writePlanFn engine.ToolFn = func(_ context.Context, root string, input map[string]any) engine.ToolResult {
+var writePlanFn engine.ToolFn = func(ctx context.Context, root string, input map[string]any) engine.ToolResult {
 	content, _ := input["content"].(string)
 	if content == "" {
 		return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: "write_plan: content is required"}}
 	}
-	dst, err := engine.SafeJoin(root, "docs/task-plan.md")
+	// SafeResolve, not SafeJoin: a symlink planted at docs/ or
+	// docs/task-plan.md must not point this unattended write outside the root.
+	dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
 	if err != nil {
 		return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: err.Error()}}
 	}

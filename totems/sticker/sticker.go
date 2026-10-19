@@ -100,16 +100,17 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	svg := fillTemplate(score)
 
 	// 3) Write SVG inside the scope docs/sticker/ directory.
-	outDir, err := engine.SafeJoin(cfg.ProjectRoot, filepath.Join("docs", "sticker"))
+	// SafeResolve (symlink-aware), not SafeJoin: a docs/ symlink planted in
+	// the repo must not redirect the write outside the project.
+	slug := slugFrom(score)
+	svgPath, err := engine.SafeResolve(ctx, cfg.ProjectRoot, filepath.Join("docs", "sticker", slug+".sticker.svg"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid scope: %w", err)
+		return nil, fmt.Errorf("invalid output path: %w", err)
 	}
+	outDir := filepath.Dir(svgPath)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot create %s: %w", outDir, err)
 	}
-
-	slug := slugFrom(score)
-	svgPath := filepath.Join(outDir, slug+".sticker.svg")
 	if err := os.WriteFile(svgPath, []byte(svg), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write svg: %w", err)
 	}

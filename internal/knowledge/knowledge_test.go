@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -71,5 +72,33 @@ func TestSave_RejectsEmptyInput(t *testing.T) {
 func TestFileName_IsUnderDocs(t *testing.T) {
 	if want := filepath.Join("docs", "knowledge.md"); FileName != want {
 		t.Fatalf("FileName = %q, want %q", FileName, want)
+	}
+}
+
+// A knowledge.md symlink planted in a repo must not pull a file from outside
+// the project (e.g. an SSH key) into every prompt, nor redirect `ouija learn`.
+func TestKnowledgeRefusesSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "id_rsa")
+	if err := os.WriteFile(secret, []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "docs", "knowledge.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load(root); got != "" {
+		t.Fatalf("Load followed the symlink out of the project: %q", got)
+	}
+	if err := Save(root, "fact"); err == nil {
+		t.Fatal("Save appended through the symlink out of the project")
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "PRIVATE KEY" {
+		t.Fatalf("the outside file was modified: %q", b)
 	}
 }

