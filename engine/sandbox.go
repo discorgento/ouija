@@ -49,7 +49,10 @@ func resolve(ctx context.Context, root, p string) (string, error) {
 		return "", fmt.Errorf("path escapes the sandbox: %s", p)
 	}
 
-	if isProtectedPath(full) {
+	// The policy applies to where the path physically lands, not only to its
+	// name: a symlink inside the project (notes.txt → .env, cfg → .ouija)
+	// must not hand out what the lexical check protects.
+	if isProtectedPath(full) || isProtectedPath(physicalPath(full)) {
 		return "", fmt.Errorf("path is protected (credentials/system files): %s", p)
 	}
 
@@ -102,6 +105,24 @@ func resolveSymlinkEscape(ctx context.Context, root, full string) (string, error
 		}
 	}
 	return "", nil
+}
+
+// physicalPath resolves every symlink of p that exists on disk. Trailing
+// components that do not exist yet (a file about to be written) are kept as
+// they are, appended to the resolved parent.
+func physicalPath(p string) string {
+	existing, rest := p, ""
+	for {
+		if real, err := filepath.EvalSymlinks(existing); err == nil {
+			return filepath.Join(real, rest)
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = parent
+	}
 }
 
 func canonRoot(root string) (string, error) {

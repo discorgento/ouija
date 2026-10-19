@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,5 +89,80 @@ func TestWriteFileToProtectedPathDenied(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".env")); !os.IsNotExist(err) {
 		t.Error(".env must not have been created")
+	}
+}
+
+// A symlink inside the project must not reach a protected file or directory
+// that is also inside it: the policy holds for where the path physically
+// lands, not only for its name.
+func TestProtectedPathsHoldThroughSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root := t.TempDir()
+	mustWrite := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite(".env", "SECRET=1")
+	mustWrite(".ouija/config.json", `{"apiKey":"sk"}`)
+	mustWrite("ok.txt", "public")
+	for link, target := range map[string]string{"notes.txt": ".env", "cfgdir": ".ouija", "alias.txt": "ok.txt"} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eng := newTestEngine(&mockProvider{}, root)
+	run := func(name string, in map[string]any) ToolResult {
+		return eng.tools.Run(context.Background(), ToolCall{Name: name, Input: in})
+	}
+
+	for _, p := range []string{"notes.txt", "cfgdir/config.json"} {
+		if res := run("read_file", map[string]any{"path": p}); res.Error == nil {
+			t.Errorf("read_file %s reached a protected file: %q", p, res.Data)
+		}
+		if _, err := SafeResolve(context.Background(), root, p); err == nil {
+			t.Errorf("SafeResolve %s (MCP resources) allowed a protected file", p)
+		}
+	}
+	// A file that does not exist yet, written through a symlinked directory.
+	if res := run("write_file", map[string]any{"path": "cfgdir/new.json", "content": "x"}); res.Error == nil {
+		t.Error("write_file through a symlink into .ouija was allowed")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".ouija", "new.json")); err == nil {
+		t.Error("a file was created inside .ouija through the symlink")
+	}
+	// A symlink to an ordinary file keeps working.
+	if res := run("read_file", map[string]any{"path": "alias.txt"}); res.Error != nil || !strings.Contains(fmt.Sprint(res.Data), "public") {
+		t.Errorf("read_file through a harmless symlink failed: %+v", res)
+	}
+}
+
+func TestPhysicalPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := os.Mkdir(filepath.Join(root, "real"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]string{
+		filepath.Join(root, "link"):             filepath.Join(root, "real"),
+		filepath.Join(root, "link", "new", "f"): filepath.Join(root, "real", "new", "f"),
+		filepath.Join(root, "missing", "a.txt"): filepath.Join(root, "missing", "a.txt"),
+	}
+	for in, want := range cases {
+		if got := physicalPath(in); got != want {
+			t.Errorf("physicalPath(%s) = %s, want %s", in, got, want)
+		}
 	}
 }

@@ -38,8 +38,11 @@ Certain paths are **always blocked** regardless of the permission level:
 `/etcetera`.)
 
 The policy is enforced at every entry point, not only on the `path` argument:
-`resolve()` rejects a protected path inside the root, the `grep` walk skips
-protected files, and a bash command that merely *names* a protected path
+`resolve()` rejects a protected path inside the root — checked both on the name
+and on where the path physically lands, so a symlink in the project
+(`notes.txt → .env`, `cfg → .ouija`) cannot read or write what the name hides —
+the `grep` walk skips protected files and never follows symlinks, and a bash
+command that merely *names* a protected path
 (`cat .env`, `~/.ssh/id_rsa`) is refused with an explanatory message. The bash
 scan accepts occasional false positives (e.g. a commit message that literally
 contains `.env`) — it fails closed, never open. An explicit sandbox-escape
