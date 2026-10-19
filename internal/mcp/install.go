@@ -37,8 +37,8 @@ func harnesses(home string) []harness {
 		{
 			name:   "OpenCode",
 			detect: func() bool { return dirExists(filepath.Dir(ocPath)) },
-			check:  func() (bool, error) { return jsonHasServer(ocPath, "mcp", serverName) },
-			apply:  func() error { return jsonAddServer(ocPath, "mcp", serverName, opencodeEntry()) },
+			check:  func() (bool, error) { return jsonHasServer(ocPath, "mcp", defaultName) },
+			apply:  func() error { return jsonAddServer(ocPath, "mcp", defaultName, opencodeEntry()) },
 		},
 		{
 			name:   "Claude Code",
@@ -49,8 +49,8 @@ func harnesses(home string) []harness {
 		{
 			name:   "Cursor",
 			detect: func() bool { return dirExists(filepath.Dir(curPath)) },
-			check:  func() (bool, error) { return jsonHasServer(curPath, "mcpServers", serverName) },
-			apply:  func() error { return jsonAddServer(curPath, "mcpServers", serverName, cursorEntry()) },
+			check:  func() (bool, error) { return jsonHasServer(curPath, "mcpServers", defaultName) },
+			apply:  func() error { return jsonAddServer(curPath, "mcpServers", defaultName, cursorEntry()) },
 		},
 	}
 }
@@ -200,7 +200,7 @@ func claudeHasServer() bool {
 		return false
 	}
 	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), serverName+":") {
+		if strings.HasPrefix(strings.TrimSpace(line), defaultName+":") {
 			return true
 		}
 	}
@@ -208,7 +208,7 @@ func claudeHasServer() bool {
 }
 
 func claudeAdd() error {
-	args := append([]string{"mcp", "add", "--scope", "user", serverName, "--", binName}, serverArgs...)
+	args := append([]string{"mcp", "add", "--scope", "user", defaultName, "--", binName}, serverArgs...)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

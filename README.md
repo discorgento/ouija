@@ -36,10 +36,10 @@ flow on top. See [Architecture](docs/explanation/architecture.md).
 
 ### Totems you own
 
-The engine is **not locked away in `internal/`**. The `engine`, `registry` and
-`schema` packages are public Go modules, so you can write a totem in *your own
-repository*, build it into *your own binary*, and still get the full engine —
-budget, trace, sandbox and MCP — for free:
+The engine is **not locked away in `internal/`**. The `engine`, `registry`,
+`schema` and `bootstrap` packages are public Go modules, so you can write a
+totem in *your own repository*, build it into *your own binary*, and still get
+the full engine — budget, trace, sandbox and MCP — for free:
 
 ```go
 // github.com/you/your-agents/totems/sentinel/sentinel.go
@@ -68,9 +68,49 @@ func (t *Totem) Cleanup() error { return nil }
 func init() { registry.Register(&Totem{}) }
 ```
 
-`go build ./cmd/totem` produces a standalone binary with your totem and the
-full engine behind it. No fork, no upstream rebuild. Walkthrough:
-[Add a totem](docs/how-to/add-totem.md).
+Then `bootstrap.Setup` wires it to the same config the ouija CLI uses —
+`~/.config/ouija/config.json` (keys, provider, budget, rules) applies unchanged:
+
+```go
+// github.com/you/your-agents/cmd/totem/main.go
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/discorgento/ouija/bootstrap"
+    "github.com/discorgento/ouija/registry"
+    _ "github.com/you/your-agents/totems/sentinel"
+)
+
+func main() {
+    ctx := context.Background()
+    if len(os.Args) < 2 {
+        fmt.Println(registry.Help())
+        return
+    }
+    if os.Args[1] == "mcp" { // `my-totem mcp` serves MCP for your totems
+        app, err := bootstrap.Setup(ctx, bootstrap.WithName("my-totem"))
+        if err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        return
+    }
+    // ... dispatch to registry.Get(os.Args[1]).Run(ctx, app.Engine, ...)
+}
+```
+
+`go build -o my-totem ./cmd/totem` produces a standalone binary with your
+totem and the full engine behind it — and `my-totem mcp` exposes it to Claude
+Code, Cursor or OpenCode as `my-totem_<totem>` tools. No fork, no upstream
+rebuild. Walkthrough: [Add a totem](docs/how-to/add-totem.md).
 
 ---
 

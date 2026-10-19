@@ -18,7 +18,7 @@ import (
 
 // testServer returns a server with a silent logger and the given sandbox root.
 func testServer(root string) *Server {
-	return &Server{root: root, logf: func(string, ...any) {}}
+	return &Server{root: root, logf: func(string, ...any) {}, name: defaultName, prefix: defaultPrefix}
 }
 
 // callOn sends one newline-terminated JSON-RPC line through a server and decodes
@@ -82,8 +82,8 @@ func TestInitialize(t *testing.T) {
 	}
 
 	info, ok := res["serverInfo"].(map[string]any)
-	if !ok || info["name"] != serverName {
-		t.Errorf("serverInfo = %#v, want name %q", res["serverInfo"], serverName)
+	if !ok || info["name"] != defaultName {
+		t.Errorf("serverInfo = %#v, want name %q", res["serverInfo"], defaultName)
 	}
 
 	caps, ok := res["capabilities"].(map[string]any)
@@ -148,8 +148,8 @@ func TestToolsList(t *testing.T) {
 			t.Fatalf("tool = %#v, want an object", raw)
 		}
 		name, _ := tool["name"].(string)
-		if !strings.HasPrefix(name, toolPrefix) {
-			t.Errorf("tool name %q does not start with %q", name, toolPrefix)
+		if !strings.HasPrefix(name, defaultPrefix) {
+			t.Errorf("tool name %q does not start with %q", name, defaultPrefix)
 		}
 		if desc, _ := tool["description"].(string); desc == "" {
 			t.Errorf("tool %q has an empty description", name)
@@ -157,7 +157,7 @@ func TestToolsList(t *testing.T) {
 		names[name] = true
 	}
 
-	for _, want := range []string{toolPrefix + "task", toolPrefix + "doc", toolPrefix + "sticker"} {
+	for _, want := range []string{defaultPrefix + "task", defaultPrefix + "doc", defaultPrefix + "sticker"} {
 		if !names[want] {
 			t.Errorf("tools/list is missing %q", want)
 		}

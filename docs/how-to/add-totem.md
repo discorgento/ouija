@@ -264,21 +264,65 @@ Once your totem lives in your repo, a minimal `cmd/totem/main.go` wires it up:
 package main
 
 import (
+    "context"
     "fmt"
     "os"
 
+    "github.com/discorgento/ouija/bootstrap"
     "github.com/discorgento/ouija/registry"
     _ "github.com/you/your-agents/totems/sentinel"
 )
 
 func main() {
+    ctx := context.Background()
     if len(os.Args) < 2 {
         fmt.Println(registry.Help())
         return
     }
-    fmt.Println("would run:", os.Args[1])
+    if os.Args[1] == "mcp" {
+        app, err := bootstrap.Setup(ctx, bootstrap.WithName("my-totem"))
+        if err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        return
+    }
+
+    app, err := bootstrap.Setup(ctx)
+    if err != nil {
+        fmt.Fprintln(os.Stderr, "error:", err)
+        os.Exit(1)
+    }
+    defer app.Engine.Close()
+
+    name := os.Args[1]
+    totem, ok := registry.Get(name)
+    if !ok {
+        fmt.Fprintf(os.Stderr, "unknown totem: %s\n\n%s", name, registry.Help())
+        os.Exit(1)
+    }
+    res, err := totem.Run(ctx, app.Engine, registry.Args{Task: os.Args[2]})
+    if err != nil {
+        fmt.Fprintln(os.Stderr, "error:", err)
+        os.Exit(1)
+    }
+    fmt.Println(res)
 }
 ```
+
+`bootstrap.Setup` is the whole glue: it discovers config (project layers +
+the global `~/.config/ouija/config.json` written by `ouija setup`), validates
+it, builds the provider and returns a ready engine. Options:
+
+| Option | Effect |
+|---|---|
+| `bootstrap.WithConfigPath(path)` | Load an explicit config file instead of discovering |
+| `bootstrap.WithName(name)` | MCP identity (`<name>_<totem>` tools in the harness) |
+| `bootstrap.WithTrace(true)` | Console trace tree on stderr (development) |
 
 `go mod tidy` will pull `github.com/discorgento/ouija` and its engine. Build
 with `go build -o my-totem ./cmd/totem`, or cross-compile with the same flags

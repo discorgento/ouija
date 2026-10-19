@@ -29,8 +29,8 @@ import (
 const (
 	// ProtocolVersion is the MCP revision this server speaks.
 	ProtocolVersion = "2025-06-18"
-	serverName      = "ouija"
-	toolPrefix      = "ouija_"
+	defaultName     = "ouija"
+	defaultPrefix   = "ouija_"
 
 	resourceProjectURI = "ouija://project/"
 )
@@ -40,9 +40,14 @@ const (
 type Logf func(format string, a ...any)
 
 // Server is the stdio MCP server, bound to one sandbox root for resource reads.
+// name and prefix identify the server to harnesses (serverInfo.name and the
+// tool namespace); they default to the ouija CLI identity and are overridden
+// when the server is embedded in an external totem binary.
 type Server struct {
-	root string
-	logf Logf
+	root   string
+	logf   Logf
+	name   string
+	prefix string
 }
 
 // New resolves the sandbox root (the config's ProjectRoot when it points
@@ -56,7 +61,18 @@ func New(logf Logf) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{root: root, logf: logf}, nil
+	return &Server{root: root, logf: logf, name: defaultName, prefix: defaultPrefix}, nil
+}
+
+// SetName overrides the server identity: the name reported in serverInfo and
+// the prefix every tool gets (the harness sees `<name>_<totem>`). An empty
+// name restores the defaults.
+func (s *Server) SetName(name string) {
+	if name == "" {
+		s.name, s.prefix = defaultName, defaultPrefix
+		return
+	}
+	s.name, s.prefix = name, name+"_"
 }
 
 // Logf lets callers (like cmd/ouija-mcp) emit diagnostics through the same
@@ -118,7 +134,7 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	srv.logf("%s started (%d modules)", serverName, len(registry.List()))
+	srv.logf("%s started (%d modules)", srv.name, len(registry.List()))
 	return srv.Serve(ctx, in, out)
 }
 
@@ -154,14 +170,14 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 				"tools":     map[string]any{},
 				"resources": map[string]any{},
 			},
-			"serverInfo": map[string]any{"name": serverName, "version": version.Version},
+			"serverInfo": map[string]any{"name": s.name, "version": version.Version},
 		})
 	case "notifications/initialized":
 		// notification — no response
 	case "ping":
 		s.writeResult(out, req.ID, map[string]any{})
 	case "tools/list":
-		s.writeResult(out, req.ID, map[string]any{"tools": toolList()})
+		s.writeResult(out, req.ID, map[string]any{"tools": toolList(s.prefix)})
 	case "tools/call":
 		s.handleToolCall(ctx, out, req)
 	case "resources/list":
@@ -175,7 +191,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 	}
 }
 
-func toolList() []map[string]any {
+func toolList(prefix string) []map[string]any {
 	schema := map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -186,7 +202,7 @@ func toolList() []map[string]any {
 	var tools []map[string]any
 	for _, m := range registry.List() {
 		tools = append(tools, map[string]any{
-			"name":        toolPrefix + m.Name(),
+			"name":        prefix + m.Name(),
 			"description": m.Summary(),
 			"inputSchema": schema,
 		})
@@ -205,7 +221,7 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 		s.writeError(out, req.ID, -32602, "invalid params")
 		return
 	}
-	module := strings.TrimPrefix(p.Name, toolPrefix)
+	module := strings.TrimPrefix(p.Name, s.prefix)
 	if _, ok := registry.Get(module); !ok {
 		s.writeToolResult(out, req.ID, "unknown tool: "+p.Name, true)
 		return
@@ -388,9 +404,9 @@ func rawID(id json.RawMessage) any {
 	return id
 }
 
-// ServerName returns the MCP server name.
+// ServerName returns the default MCP server name (the ouija CLI identity).
 func ServerName() string {
-	return serverName
+	return defaultName
 }
 
 // ListTotems returns the registered totems.
