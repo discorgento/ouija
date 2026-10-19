@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,45 @@ import (
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-_]{1,31}$`)
+
+// reservedNames are CLI subcommands: `ouija <name>` (or `<bin> mcp|help` on a
+// bootstrap host) runs the builtin, never a totem with that name.
+var reservedNames = map[string]bool{
+	"help": true, "version": true, "setup": true, "init": true, "trust": true, "config": true,
+	"learn": true, "generate": true, "chat": true, "mcp": true, "doctor": true,
+}
+
+// buildSuffixes are GOOS/GOARCH values: a file named x_<one of these>.go is
+// compiled only on that platform (the totem file is <name>.go).
+var buildSuffixes = map[string]bool{
+	"aix": true, "android": true, "darwin": true, "dragonfly": true, "freebsd": true, "hurd": true,
+	"illumos": true, "ios": true, "js": true, "linux": true, "netbsd": true, "openbsd": true,
+	"plan9": true, "solaris": true, "wasip1": true, "windows": true, "zos": true,
+	"386": true, "amd64": true, "arm": true, "arm64": true, "loong64": true, "mips": true,
+	"mipsle": true, "mips64": true, "mips64le": true, "ppc64": true, "ppc64le": true,
+	"riscv64": true, "s390x": true, "wasm": true,
+}
+
+// validateTotemName rejects names the scaffold would turn into a package that
+// does not build, is never compiled, or cannot be reached from the CLI.
+func validateTotemName(name string) error {
+	if !validName.MatchString(name) {
+		return fmt.Errorf("use 2-32 lowercase chars, digits, hyphens, underscores")
+	}
+	pkg := strings.ReplaceAll(name, "-", "_")
+	parts := strings.Split(name, "_")
+	switch {
+	case token.IsKeyword(pkg) || pkg == "main":
+		return fmt.Errorf("%q is a Go keyword or main: the package would not build", name)
+	case name == "testdata" || strings.HasSuffix(name, "_test"):
+		return fmt.Errorf("%q is ignored by the go tool (testdata / _test)", name)
+	case len(parts) > 1 && buildSuffixes[parts[len(parts)-1]]:
+		return fmt.Errorf("%q ends in a GOOS/GOARCH suffix: the file would build on one platform only", name)
+	case reservedNames[name]:
+		return fmt.Errorf("%q is an ouija subcommand: `ouija %s` would never reach the totem", name, name)
+	}
+	return nil
+}
 
 // Generate scaffolds a new totem.
 //
@@ -52,8 +92,8 @@ func Generate(args []string) error {
 				Title("Totem name").
 				Description("2-32 chars, lowercase, digits, hyphens, underscores").
 				Validate(func(s string) error {
-					if !validName.MatchString(s) {
-						return fmt.Errorf("use 2-32 lowercase chars, digits, hyphens, underscores")
+					if err := validateTotemName(s); err != nil {
+						return err
 					}
 					wd, _ := os.Getwd()
 					base := wd
@@ -90,20 +130,12 @@ func Generate(args []string) error {
 	return scaffoldInternal(wd, name, summary)
 }
 
-// scaffoldInternal adds a totem to this repo and rebuilds the CLI.
-func scaffoldInternal(wd, name, summary string) error {
-	dir := filepath.Join(wd, "totems", name)
-	if _, err := os.Stat(dir); err == nil {
-		return fmt.Errorf("totem %q already exists at %s", name, dir)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir: %w", err)
-	}
-
+// internalTotemSource is the Go source of a new totem inside this repo.
+func internalTotemSource(name, summary string) string {
 	pkg := strings.ReplaceAll(strings.ReplaceAll(name, "-", "_"), " ", "_")
 	structName := toCamel(name)
 
-	src := fmt.Sprintf(`package %[1]s
+	return fmt.Sprintf(`package %[1]s
 
 import (
 	"context"
@@ -140,6 +172,19 @@ func (r *result) Render() string {
 	return b.String()
 }
 `, pkg, structName, name, summary, "`", "`")
+}
+
+// scaffoldInternal adds a totem to this repo and rebuilds the CLI.
+func scaffoldInternal(wd, name, summary string) error {
+	dir := filepath.Join(wd, "totems", name)
+	if _, err := os.Stat(dir); err == nil {
+		return fmt.Errorf("totem %q already exists at %s", name, dir)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	src := internalTotemSource(name, summary)
 
 	path := filepath.Join(dir, name+".go")
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
@@ -148,15 +193,23 @@ func (r *result) Render() string {
 
 	fmt.Printf("✓ Created totems/%[1]s/%[1]s.go\n", name)
 
+	// A failed step takes the totem back out: left behind, it (and the
+	// imports_gen.go line for it) would break the build of the whole repo.
+	rollback := func(step string, err error) error {
+		os.RemoveAll(dir)
+		_ = runCmd("", "go", "generate", "./totems/")
+		return fmt.Errorf("%s: %w (totems/%s was removed)", step, err, name)
+	}
+
 	fmt.Print("◇ Running go generate ./totems/... ")
 	if err := runCmd("", "go", "generate", "./totems/"); err != nil {
-		return fmt.Errorf("go generate: %w", err)
+		return rollback("go generate", err)
 	}
 	fmt.Println("done")
 
 	fmt.Print("◇ Running go install ./cmd/ouija... ")
 	if err := runCmd("", "go", "install", "./cmd/ouija"); err != nil {
-		return fmt.Errorf("go install: %w", err)
+		return rollback("go install", err)
 	}
 	fmt.Println("done")
 

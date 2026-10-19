@@ -2,6 +2,7 @@ package commands
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,5 +87,55 @@ func TestWriteExternalModuleCustomDir(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "cmd", "guard", "main.go")); err != nil {
 		t.Fatalf("custom dir not used: %v", err)
+	}
+}
+
+func TestValidateTotemName(t *testing.T) {
+	for name, ok := range map[string]bool{
+		"report": true, "my-totem": true, "data_sync": true,
+		"go": false, "type": false, "main": false, "testdata": false,
+		"foo_test": false, "bot_windows": false, "app_js": false, "x_arm64": false,
+		"doctor": false, "chat": false, "mcp": false, "x": false, "Bad": false,
+	} {
+		if err := validateTotemName(name); (err == nil) != ok {
+			t.Errorf("validateTotemName(%q) = %v, want ok=%v", name, err, ok)
+		}
+	}
+}
+
+// Both scaffolds compile against the current public API: a scaffold that
+// stops building would only be found by the next person who runs generate.
+func TestScaffoldsCompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go tool")
+	}
+	repo, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := writeExternalModule(t.TempDir(), "", "demo-totem", "A demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The internal scaffold, as one more package of the same module.
+	if err := os.MkdirAll(filepath.Join(base, "inrepo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "inrepo", "inrepo.go"), []byte(internalTotemSource("inrepo", `say "hi"`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gomod := filepath.Join(base, "go.mod")
+	b, _ := os.ReadFile(gomod)
+	b = append(b, []byte("\nreplace github.com/discorgento/ouija => "+filepath.ToSlash(repo)+"\n")...)
+	if err := os.WriteFile(gomod, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}} {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = base
+		cmd.Env = append(os.Environ(), "GOPROXY=off", "GOFLAGS=-mod=mod", "GOWORK=off")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
 	}
 }
