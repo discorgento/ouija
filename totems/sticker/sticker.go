@@ -19,6 +19,7 @@ import (
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/registry"
 	"github.com/discorgento/ouija/schema"
+	"github.com/discorgento/ouija/totems/internal/seance"
 )
 
 func init() { registry.Register(&Totem{}) }
@@ -46,10 +47,10 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	cfg := eng.Config()
 
-	// Build a description of what the project does, for the LLM prompt.
-	taskDesc := strings.TrimSpace(args.Task)
-	if taskDesc == "" {
-		taskDesc = "Generate a sticker for this project"
+	// The optional hint (InputSchema's task) steers what to highlight.
+	hint := ""
+	if h := strings.TrimSpace(args.Task); h != "" {
+		hint = "User's hint about what to highlight: " + h + "\n\n"
 	}
 
 	// 1) Scout -- read project files and extract metadata with read-only tools.
@@ -59,20 +60,20 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 			"You MUST use the tools (read_file, grep, glob) to examine the code before calling submit_result. " +
 			"If a field has no evidence use empty string or empty array. " +
 			"Do NOT guess, infer, or repeat example values.",
-		Prompt: fmt.Sprintf(
+		Prompt: hint +
 			"Generate a sticker for this project.\n\n" +
-				"Read the project files before calling submit_result.\n\n" +
-				"Files to read:\n" +
-				"1. The project manifest or README -> projectName and projectDescription\n" +
-				"   (whichever exists: package.json, composer.json, go.mod, Cargo.toml,\n" +
-				"    pyproject.toml, pom.xml, build.gradle, Gemfile, README.md — any layout)\n" +
-				"2. Identify tech stack -> techTags (list of technologies: frameworks, languages, databases, tools)\n\n" +
-				"VERSIONS AND MODULE COUNT ARE HANDLED AUTOMATICALLY.\n\n" +
-				"CRITICAL RULES:\n" +
-				"- Use empty string \"\" for fields you cannot find evidence for\n" +
-				"- Do NOT write 'EMPTY', 'N/A', 'none' or any placeholder text\n" +
-				"- Do NOT make up values\n" +
-				"- Read files first, then call submit_result with the schema"),
+			"Read the project files before calling submit_result.\n\n" +
+			"Files to read:\n" +
+			"1. The project manifest or README -> projectName and projectDescription\n" +
+			"   (whichever exists: package.json, composer.json, go.mod, Cargo.toml,\n" +
+			"    pyproject.toml, pom.xml, build.gradle, Gemfile, README.md — any layout)\n" +
+			"2. Identify tech stack -> techTags (list of technologies: frameworks, languages, databases, tools)\n\n" +
+			"VERSIONS AND MODULE COUNT ARE HANDLED AUTOMATICALLY.\n\n" +
+			"CRITICAL RULES:\n" +
+			"- Use empty string \"\" for fields you cannot find evidence for\n" +
+			"- Do NOT write 'EMPTY', 'N/A', 'none' or any placeholder text\n" +
+			"- Do NOT make up values\n" +
+			"- Read files first, then call submit_result with the schema",
 		UseTools:  true,
 		Schema:    scoutSchema(),
 		MaxTokens: 4096,
@@ -135,9 +136,6 @@ type scoutData struct {
 	ThemeVersion    string   `json:"themeVersion"`
 	CustomModules   string   `json:"customModules"`
 	TechTags        []string `json:"techTags"`
-	ExtraInfo       []string `json:"extraInfo"`
-	// Computed fields for template rendering.
-	NameSize string // adaptive font-size injected into SVG
 }
 
 // parseScout unmarshals the scout JSON into a struct, cleaning up fields.
@@ -486,17 +484,9 @@ func (r *stickerResult) Render() string {
 func slugFrom(d *scoutData) string {
 	name := strings.TrimSpace(d.ProjectName)
 	if name != "" {
-		return slugify(name)
+		return seance.Slugify(name)
 	}
 	return "project-sticker"
-}
-
-var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = nonSlug.ReplaceAllString(s, "-")
-	return strings.Trim(s, "-")
 }
 
 // --- schemas ---

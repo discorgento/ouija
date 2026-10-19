@@ -13,6 +13,7 @@ import (
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/registry"
 	"github.com/discorgento/ouija/schema"
+	"github.com/discorgento/ouija/totems/internal/seance"
 )
 
 func init() { registry.Register(&Totem{}) }
@@ -95,7 +96,6 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	var jobs []func() (passResult, error)
 	for p := 1; p <= tc.Passes; p++ {
 		for _, d := range dims {
-			p, d := p, d
 			jobs = append(jobs, func() (passResult, error) {
 				prompt := fmt.Sprintf(
 					"PASS %d (INDEPENDENT analysis). TASK: %s\n\nAnalyze along the %q dimension. "+
@@ -112,31 +112,14 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 			})
 		}
 	}
-	results, pErr := engine.Parallel(ctx, 8, jobs)
-
-	// Bail out if every pass failed (bad key, budget ceiling, etc.).
-	ok := 0
-	for _, r := range results {
-		if r.JSON != "" {
-			ok++
-		}
-	}
-	if ok == 0 {
-		if pErr != nil {
-			return nil, fmt.Errorf("all %d analysis passes failed: %w", len(jobs), pErr)
-		}
-		return nil, fmt.Errorf("all %d analysis passes failed (check provider/key/budget)", len(jobs))
-	}
-	if pErr != nil {
-		fmt.Fprintf(os.Stderr, "[ouija] warning: %d/%d passes failed (%v)\n", len(jobs)-ok, len(jobs), pErr)
+	results, err := seance.Passes(ctx, eng, "analysis passes", jobs, func(r passResult) bool { return r.JSON != "" })
+	if err != nil {
+		return nil, err
 	}
 
 	// 3) Reconcile — the séance consensus across passes.
 	var sb strings.Builder
 	for _, r := range results {
-		if r.JSON == "" {
-			continue
-		}
 		fmt.Fprintf(&sb, "{\"pass\":%d,\"dimension\":%q,\"analysis\":%s}\n", r.Pass, r.Dimension, r.JSON)
 	}
 	recSystem := "You reconcile independent analyses (self-consistency). Project rules:\n" + rules
@@ -163,28 +146,28 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// Fallback: only when the model didn't call write_plan itself.
 	if !slices.Contains(recResult.Tools, "write_plan") {
-		writePlan(cfg.ProjectRoot, &res)
+		if dst, err := savePlan(ctx, cfg.ProjectRoot, res.Render()); err != nil {
+			eng.Logger().Warn("plan not saved", "err", err)
+		} else {
+			eng.Logger().Info("plan saved", "path", dst)
+		}
 	}
 
 	return &res, nil
 }
 
-// writePlan saves the rendered plan as docs/task-plan.md in the given directory.
-// The path goes through the sandbox: a docs/ or task-plan.md symlink planted
-// in the repo must not redirect the write outside the project.
-func writePlan(dir string, res *taskResult) {
-	content := res.Render()
-	dst, err := engine.SafeResolve(context.Background(), dir, "docs/task-plan.md")
+// savePlan writes the plan to docs/task-plan.md under root and returns the
+// path. SafeResolve, not SafeJoin: a symlink planted at docs/ or
+// docs/task-plan.md must not point this unattended write outside the root.
+func savePlan(ctx context.Context, root, content string) (string, error) {
+	dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ouija] plan not saved: %v\n", err)
-		return
+		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return
+		return "", err
 	}
-	if err := os.WriteFile(dst, []byte(content), 0o644); err == nil {
-		fmt.Fprintf(os.Stderr, "[ouija] plan saved to %s\n", dst)
-	}
+	return dst, os.WriteFile(dst, []byte(content), 0o644)
 }
 
 // taskResult is the typed reconcile output. It implements registry.Renderer.
@@ -265,19 +248,10 @@ var writePlanFn engine.ToolFn = func(ctx context.Context, root string, input map
 	if content == "" {
 		return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: "write_plan: content is required"}}
 	}
-	// SafeResolve, not SafeJoin: a symlink planted at docs/ or
-	// docs/task-plan.md must not point this unattended write outside the root.
-	dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
+	dst, err := savePlan(ctx, root, content)
 	if err != nil {
-		return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: err.Error()}}
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return engine.ToolResult{Error: &engine.ToolError{Code: "INTERNAL", Message: err.Error()}}
 	}
-	if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
-		return engine.ToolResult{Error: &engine.ToolError{Code: "INTERNAL", Message: err.Error()}}
-	}
-	fmt.Fprintf(os.Stderr, "[ouija] plan saved to %s\n", dst)
 	return engine.ToolResult{Data: "plan saved to " + dst}
 }
 
@@ -303,7 +277,7 @@ func dimensionSchema() map[string]any {
 	finding := schema.Obj(map[string]any{
 		"point":     schema.Str("the finding"),
 		"rationale": schema.Str("why it matters; cite a file/class"),
-		"severity":  map[string]any{"type": "string", "enum": []string{"info", "low", "medium", "high"}},
+		"severity":  schema.Enum("how serious the finding is", "info", "low", "medium", "high"),
 	}, "point", "rationale", "severity")
 	return schema.Obj(map[string]any{
 		"dimension": schema.Str("dimension name"),
@@ -316,7 +290,7 @@ func dimensionSchema() map[string]any {
 func finalSchema() map[string]any {
 	checkItem := schema.Obj(map[string]any{
 		"item":     schema.Str("actionable item"),
-		"category": map[string]any{"type": "string", "enum": []string{"core", "best-practices", "security", "performance", "general"}},
+		"category": schema.Enum("the area the item belongs to", "core", "best-practices", "security", "performance", "general"),
 	}, "item", "category")
 	planStep := schema.Obj(map[string]any{
 		"step":   schema.Str("the step"),

@@ -17,6 +17,7 @@ import (
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/registry"
 	"github.com/discorgento/ouija/schema"
+	"github.com/discorgento/ouija/totems/internal/seance"
 )
 
 //go:embed template.html
@@ -82,7 +83,6 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	var jobs []func() (factResult, error)
 	for p := 1; p <= dc.Passes; p++ {
 		for _, a := range docAspects {
-			p, a := p, a
 			jobs = append(jobs, func() (factResult, error) {
 				prompt := fmt.Sprintf(
 					"PASS %d (INDEPENDENT). DOC REQUEST: %s\n\nGather the documentable facts for the %q aspect. "+
@@ -100,29 +100,13 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 			})
 		}
 	}
-	facts, pErr := engine.Parallel(ctx, 8, jobs)
-
-	okFacts := 0
-	for _, f := range facts {
-		if f.JSON != "" {
-			okFacts++
-		}
-	}
-	if okFacts == 0 {
-		if pErr != nil {
-			return nil, fmt.Errorf("all %d fact passes failed: %w", len(jobs), pErr)
-		}
-		return nil, fmt.Errorf("all %d fact passes failed (check provider/key/budget)", len(jobs))
-	}
-	if pErr != nil {
-		fmt.Fprintf(os.Stderr, "[ouija] warning: %d/%d fact passes failed (%v)\n", len(jobs)-okFacts, len(jobs), pErr)
+	facts, err := seance.Passes(ctx, eng, "fact passes", jobs, func(f factResult) bool { return f.JSON != "" })
+	if err != nil {
+		return nil, err
 	}
 
 	var fb strings.Builder
 	for _, f := range facts {
-		if f.JSON == "" {
-			continue
-		}
 		fmt.Fprintf(&fb, "{\"aspect\":%q,\"facts\":%s}\n", f.Aspect, f.JSON)
 	}
 
@@ -131,7 +115,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	recPrompt := fmt.Sprintf(
 		"DOC REQUEST: %s\n\nSCOUT CONTEXT:\n%s\n\nFACT PASSES:\n%s\n\n"+
 			"Keep only facts that are consistent across passes and verified in code; drop or flag the rest. "+
-			"Produce title, subtitle, docType (manual|parecer|relatorio), the document sections (heading + points), "+
+			"Produce title, subtitle, docType (manual|assessment|report), the document sections (heading + points), "+
 			"and openQuestions. When done, call submit_result.",
 		args.Task, scoutRes.Text, fb.String())
 	sheetRes, err := eng.Run(ctx, engine.RunRequest{
@@ -169,7 +153,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	// sandbox (symlink-aware): `scope` is attacker-influenceable (CLI flag /
 	// MCP arg), and a docs/ or <slug>.* symlink planted in the repo must not
 	// redirect a write outside the project.
-	slug := slugify(sheet.Title)
+	slug := seance.Slugify(sheet.Title)
 	if slug == "" {
 		slug = "document"
 	}
@@ -295,14 +279,6 @@ func stripFence(s string) string {
 	return s
 }
 
-var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	s = nonSlug.ReplaceAllString(s, "-")
-	return strings.Trim(s, "-")
-}
-
 func technicalMD(s *factSheet) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s — technical notes\n\n", s.Title)
@@ -372,7 +348,7 @@ func sheetSchema() map[string]any {
 	return schema.Obj(map[string]any{
 		"title":         schema.Str("document title"),
 		"subtitle":      schema.Str("one-line subtitle"),
-		"docType":       map[string]any{"type": "string", "enum": []string{"manual", "assessment", "report"}},
+		"docType":       schema.Enum("kind of document", "manual", "assessment", "report"),
 		"sections":      map[string]any{"type": "array", "items": section},
 		"openQuestions": schema.Arr("facts that could not be verified / need confirmation"),
 	}, "title", "subtitle", "docType", "sections", "openQuestions")

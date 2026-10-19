@@ -223,26 +223,6 @@ func TestEmptyIfPlaceholder(t *testing.T) {
 	}
 }
 
-func TestSlugify(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"My Project", "my-project"},
-		{"Hello World!", "hello-world"},
-		{"  spaces  ", "spaces"},
-		{"already-slug", "already-slug"},
-		{"UPPERCASE", "uppercase"},
-		{"special_chars!", "special-chars"},
-	}
-	for _, tc := range tests {
-		got := slugify(tc.input)
-		if got != tc.want {
-			t.Fatalf("slugify(%q) = %q, want %q", tc.input, got, tc.want)
-		}
-	}
-}
-
 func TestValidVersion(t *testing.T) {
 	tests := []struct {
 		input string

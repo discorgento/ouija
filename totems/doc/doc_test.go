@@ -30,25 +30,6 @@ func TestStripFence(t *testing.T) {
 	}
 }
 
-func TestSlugify(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"My Document", "my-document"},
-		{"Configuration Manual", "configuration-manual"},
-		{"  spaces  ", "spaces"},
-		{"UPPERCASE", "uppercase"},
-		{"special_chars!", "special-chars"},
-	}
-	for _, tc := range tests {
-		got := slugify(tc.input)
-		if got != tc.want {
-			t.Fatalf("slugify(%q) = %q, want %q", tc.input, got, tc.want)
-		}
-	}
-}
-
 func TestTechnicalMDGolden(t *testing.T) {
 	sheet := &factSheet{
 		Title:    "Configuration Manual",
@@ -100,15 +81,6 @@ func TestTechnicalMDGolden(t *testing.T) {
 	}
 	if got != string(expected) {
 		t.Fatalf("output differs from golden file %s (run with -update to refresh)", golden)
-	}
-}
-
-func TestDocSlugify(t *testing.T) {
-	// Verify slugify is accessible (same function name in doc and sticker).
-	got := slugify("My Document Title")
-	want := "my-document-title"
-	if got != want {
-		t.Fatalf("slugify(%q) = %q, want %q", "My Document Title", got, want)
 	}
 }
 

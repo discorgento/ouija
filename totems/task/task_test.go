@@ -122,7 +122,9 @@ func TestWritePlanRefusesSymlinkEscape(t *testing.T) {
 	if res.Error == nil {
 		t.Fatal("write_plan wrote through a docs/ symlink pointing outside the root")
 	}
-	writePlan(root, &taskResult{TaskDescription: "x"})
+	if _, err := savePlan(context.Background(), root, "x"); err == nil {
+		t.Fatal("the fallback plan save wrote through a docs/ symlink")
+	}
 	if _, err := os.Stat(filepath.Join(outside, "task-plan.md")); err == nil {
 		t.Fatal("a plan was written outside the project through the symlink")
 	}
