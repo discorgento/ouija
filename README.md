@@ -66,7 +66,7 @@ the chat (and runs the setup the first time).
 ## The chat
 
 <p align="center">
-  <img src="assets/screens/chat-welcome.png" alt="ouija chat: the welcome screen, with the session, where to start and the totems" width="720">
+  <img src="assets/screens/chat-welcome.png" alt="ouija chat: the welcome screen — the logo and four places to start" width="720">
 </p>
 
 Each reply says what it did: the turn's tools on one line (a failed command
