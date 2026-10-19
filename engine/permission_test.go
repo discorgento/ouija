@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -163,5 +165,38 @@ func TestOuijaConfigsAreProtected(t *testing.T) {
 	}
 	if _, found := commandRefsProtectedPath("cat ~/.config/ouija/config.json"); !found {
 		t.Error("bash `cat ~/.config/ouija/config.json` was not refused")
+	}
+}
+
+// SaveConfigAt must not copy the resolved API key (from the global store)
+// into a project config, which is often committed.
+func TestSaveConfigAtDoesNotLeakResolvedKey(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.APIKey = "sk-global-secret"
+	eng := New(EngineConfig{Provider: &mockProvider{}, Config: cfg, Tracer: NewTracer(false)})
+	dir := t.TempDir()
+
+	fresh := filepath.Join(dir, "fresh", "config.json")
+	if err := eng.SaveConfigAt(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(fresh); strings.Contains(string(b), "sk-global-secret") {
+		t.Fatal("the global key was written into a new project config")
+	}
+
+	// A key the project file itself declares is kept as it is.
+	own := filepath.Join(dir, "own.json")
+	if err := os.WriteFile(own, []byte(`{"apiKey":"sk-project-own"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SaveConfigAt(own); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(own)
+	if strings.Contains(string(b), "sk-global-secret") || !strings.Contains(string(b), "sk-project-own") {
+		t.Fatalf("project key not preserved / global key leaked: %s", b)
+	}
+	if eng.Config().APIKey != "sk-global-secret" {
+		t.Fatal("SaveConfigAt changed the in-memory key")
 	}
 }

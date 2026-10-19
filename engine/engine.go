@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 )
@@ -278,11 +279,31 @@ func (e *Engine) syncAllowlistConfig() {
 // SaveConfigAt persists the current config to the given file path.
 // It temporarily sets ProjectRoot to "." so the saved JSON does not contain
 // an absolute project path (the same pattern used by /model and /provider).
+// The API key written is the one the file itself already declares, never the
+// resolved cfg.APIKey: that one usually comes from the global store, and
+// copying it into a project file (often committed) would leak it.
 func (e *Engine) SaveConfigAt(path string) error {
-	orig := e.cfg.ProjectRoot
+	origRoot, origKey := e.cfg.ProjectRoot, e.cfg.APIKey
 	e.cfg.ProjectRoot = "."
-	defer func() { e.cfg.ProjectRoot = orig }()
+	e.cfg.APIKey = apiKeyOnDisk(path)
+	defer func() { e.cfg.ProjectRoot, e.cfg.APIKey = origRoot, origKey }()
 	return e.cfg.Save(path)
+}
+
+// apiKeyOnDisk returns the apiKey a config file declares, "" when the file is
+// missing, unreadable or has none.
+func apiKeyOnDisk(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var f struct {
+		APIKey string `json:"apiKey"`
+	}
+	if json.Unmarshal(b, &f) != nil {
+		return ""
+	}
+	return f.APIKey
 }
 
 // IsCmdAllowed returns true if the command is in the allowlist.
