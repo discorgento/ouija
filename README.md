@@ -19,6 +19,11 @@ with types, tests and golden files, not prompt files.
 > prose is a request the model may skip; in Go it is the next line — and you can
 > test it. [The full argument →](docs/explanation/totems.md)
 
+It ships with three totems (`task`, `doc`, `sticker`) — and the engine is a Go
+library: **your own agent is a Go type in your repo**, ~20 lines, inheriting
+budget, sandbox, tracing and MCP. `go build` gives you a standalone binary.
+[Write your own agent →](#write-your-own-agent)
+
 The metaphor is literal: a ouija board needs several hands to spell an answer —
 like the N independent passes + reconcile in the `task` totem.
 
