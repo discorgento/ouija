@@ -232,6 +232,15 @@ func TestBashDenylist(t *testing.T) {
 		"dd if=/dev/zero of=/dev/sda",
 		":(){ :|:& };:",
 		"mkfs.ext4 /dev/sda",
+		// Quote removal / escaping on the command name (alias bypass idiom).
+		`\rm -rf /*`,
+		`'r'm -rf /`,
+		`r\m -rf /`,
+		// Spellings of the root and home targets.
+		"rm -rf ${HOME}/",
+		`rm -rf "$HOME"/`,
+		"rm -rf //",
+		"rm -rf /.",
 	}
 	for _, c := range denied {
 		t.Run(c, func(t *testing.T) {
@@ -244,6 +253,9 @@ func TestBashDenylist(t *testing.T) {
 	allowed := []string{
 		"rm -rf /tmp",
 		"rm -rf ./build",
+		`\rm -rf ./build`,
+		`rm -rf "$HOME"/project`,
+		"rm -rf /tmp/*",
 		"dd if=/dev/zero of=file.img count=1024",
 		"echo ok",
 	}
@@ -681,6 +693,21 @@ func TestBashProtectedPathRefsSurviveGlobs(t *testing.T) {
 	for _, c := range []string{"cat *.go", "ls ~/Down*", "grep -rn TODO ."} {
 		if ref, found := commandRefsProtectedPathIn(root, c); found {
 			t.Errorf("%q refused (%q); want allowed", c, ref)
+		}
+	}
+}
+
+// A failing command keeps its stdout (where test runners print the failure)
+// and says how it exited.
+func TestBashFailureKeepsStdoutAndStatus(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses /bin/sh")
+	}
+	res := bashTool(context.Background(), t.TempDir(), map[string]any{"command": "echo details; echo summary >&2; exit 3"})
+	out := res.Data
+	for _, want := range []string{"details", "summary", "exit status 3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output %q lacks %q", out, want)
 		}
 	}
 }

@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,27 +79,23 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	out := strings.TrimSpace(stdout.String())
 	errOut := strings.TrimSpace(stderr.String())
 
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return ToolResult{Error: &ToolError{Code: ErrCodeTimeout, Message: fmt.Sprintf("bash: command timed out after %v", timeout)}}
+	}
+
+	// Both streams, also on failure: `go test` and `make` print what failed
+	// on stdout and only a summary on stderr.
+	out = strings.Join(slices.DeleteFunc([]string{out, errOut}, func(s string) bool { return s == "" }), "\n")
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return ToolResult{Error: &ToolError{Code: ErrCodeTimeout, Message: fmt.Sprintf("bash: command timed out after %v", timeout)}}
+		// A non-zero exit is data for the model, not a Go error — but it must
+		// see that the command failed, and how.
+		status := err.Error()
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			status = fmt.Sprintf("exit status %d", exitErr.ExitCode())
 		}
-		// Non-zero exit — include stderr in output, not as a Go error.
-		if errOut != "" {
-			out = errOut
-		}
-		if out == "" {
-			out = fmt.Sprintf("exit error: %v", err)
-		}
-		return ToolResult{Data: trim(out)}
+		return ToolResult{Data: trim(strings.TrimSpace(out + "\n[" + status + "]"))}
 	}
-
-	// Combine stdout + stderr if both present.
-	if out != "" && errOut != "" {
-		out = out + "\n" + errOut
-	} else if errOut != "" {
-		out = errOut
-	}
-
 	return ToolResult{Data: trim(cmp.Or(out, "(no output)"))}
 }
 
@@ -446,7 +444,43 @@ func semanticDenied(normalized, lower string) bool {
 			return true
 		}
 	}
+	// The same rules on the words as the shell passes them: quote removal
+	// and $HOME expansion turn `\rm -rf /`, `'r'm -rf /` and
+	// `rm -rf "$HOME"/` into the command they run.
+	for _, words := range expandedCalls(normalized) {
+		if segmentDenied(words, 0) {
+			return true
+		}
+	}
 	return false
+}
+
+// expandedCalls returns each command invocation of cmd (substitutions
+// included) as its words after static expansion, with HOME set. Nothing is
+// executed; a word that needs a real expansion keeps its literal form.
+func expandedCalls(cmd string) [][]string {
+	f, err := syntax.NewParser().Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return nil
+	}
+	var env []string
+	if home, err := os.UserHomeDir(); err == nil {
+		env = append(env, "HOME="+home)
+	}
+	cfg := staticExpandConfig(env...)
+	var calls [][]string
+	forEachCall(f, func(call *syntax.CallExpr) {
+		var words []string
+		for _, w := range call.Args {
+			if vs, err := expand.Fields(cfg, w); err == nil {
+				words = append(words, vs...)
+			} else {
+				words = append(words, w.Lit())
+			}
+		}
+		calls = append(calls, words)
+	})
+	return calls
 }
 
 // segmentDenied applies the destructive-command rules to one invocation's
@@ -602,7 +636,18 @@ func isRootish(t string) bool {
 	case "/", "/*", "~", "~/", "~/*", "$home", "$home/*", "${home}", "${home}/*", "$home/", "/*/", "/**":
 		return true
 	}
-	return false
+	// Spelling variants of the same targets: `${home}/`, `//`, `/.`, and the
+	// expanded home directory itself (expandedCalls substitutes $HOME).
+	c := strings.TrimSuffix(t, "*")
+	if c == "" {
+		return false
+	}
+	c = path.Clean(c)
+	if c == "/" || c == "~" || c == "$home" || c == "${home}" {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	return err == nil && c == strings.ToLower(path.Clean(filepath.ToSlash(home)))
 }
 
 func stripShellQuotes(s string) string {
