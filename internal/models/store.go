@@ -57,9 +57,10 @@ func defaultModels() *ModelsFile {
 			"anthropic": {
 				Label: "Anthropic (Claude)",
 				Models: map[string]ModelDef{
-					"claude-opus-4-8":   {Label: "Claude Opus 4", ContextWindow: 200_000, Default: true},
-					"claude-sonnet-4-8": {Label: "Claude Sonnet 4", ContextWindow: 200_000},
-					"claude-haiku-3-5":  {Label: "Claude Haiku 3.5", ContextWindow: 200_000},
+					"claude-opus-5-5":   {Label: "Claude Opus 5.5", ContextWindow: 1_000_000, Default: true},
+					"claude-sonnet-5-5": {Label: "Claude Sonnet 5.5", ContextWindow: 1_000_000},
+					"claude-haiku-5-5":  {Label: "Claude Haiku 5.5", ContextWindow: 1_000_000},
+					"claude-fable-5-1":  {Label: "Claude Fable 5.1", ContextWindow: 1_000_000},
 				},
 			},
 			"openai": {

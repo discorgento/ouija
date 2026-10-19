@@ -17,6 +17,16 @@ import (
 // a bare `/model` and the inline list after `/model ` — go through here, so
 // they can never drift apart.
 func suggestedModels(cfg *engine.Config, storeIDs []string) []string {
+	provider := ""
+	if cfg != nil {
+		provider = cfg.Provider
+	}
+	return suggestedModelsFor(cfg, provider, storeIDs)
+}
+
+// suggestedModelsFor is suggestedModels for any provider: the project's
+// modelSuggestions for it first, then the catalog.
+func suggestedModelsFor(cfg *engine.Config, provider string, storeIDs []string) []string {
 	seen := make(map[string]bool, len(storeIDs)+4)
 	out := make([]string, 0, len(storeIDs)+4)
 	add := func(ids []string) {
@@ -29,7 +39,7 @@ func suggestedModels(cfg *engine.Config, storeIDs []string) []string {
 		}
 	}
 	if cfg != nil {
-		add(cfg.ModelSuggestions[cfg.Provider])
+		add(cfg.ModelSuggestions[provider])
 	}
 	add(storeIDs)
 	return out

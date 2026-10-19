@@ -29,7 +29,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "Clear chat history"},
 	{"/save [file]", "Save conversation to markdown"},
 	{"/model [name]", "Show or change model (type /model + Enter to open picker)"},
-	{"/provider [name]", "Show or change provider (type /provider + Enter to open picker)"},
+	{"/provider [name] [model]", "Show or change provider and model (Enter opens a picker for each)"},
 	{"/permit [tool] allow|ask|deny", "Permission: show, set default, or per-tool level"},
 	{"/debug", "Toggle debug log level (info ↔ debug)"},
 	{"/help", "Show this help"},
@@ -44,27 +44,42 @@ func (m *model) openPicker(cmd string) (tea.Model, tea.Cmd) {
 
 	switch cmd {
 	case "/model":
-		modelNames := suggestedModels(m.eng.Config(), store.Models(m.eng.Config().Provider))
-		items := make([]string, len(modelNames))
-		values := make([]string, len(modelNames))
-		for i, name := range modelNames {
-			values[i] = name
-			display := name
-			if info, ok := store.ModelInfo(m.eng.Config().Provider, name); ok && info.Label != "" {
-				display = info.Label
-				if info.ContextWindow > 0 {
-					display = fmt.Sprintf("%s  ·  %dk ctx", info.Label, info.ContextWindow/1000)
-				}
-			}
-			items[i] = display
-		}
-		m.picker.Show(items, values, "Models")
+		m.showModelPicker(m.eng.Config().Provider)
 	case "/provider":
 		names, labels := store.ProvidersFor(providers.Names())
 		m.picker.Show(labels, names, "Providers")
 	}
 	m.setViewportSize()
 	return m, nil
+}
+
+// modelPickerLabel heads the model list; selectCompletion keys on it.
+const modelPickerLabel = "Models"
+
+// showModelPicker lists provider's models — the project's suggestions first,
+// then the catalog — with labels and context sizes. It reports whether there
+// was anything to list.
+func (m *model) showModelPicker(provider string) bool {
+	store := models.Load()
+	modelNames := suggestedModelsFor(m.eng.Config(), provider, store.Models(provider))
+	if len(modelNames) == 0 {
+		return false
+	}
+	items := make([]string, len(modelNames))
+	values := make([]string, len(modelNames))
+	for i, name := range modelNames {
+		values[i] = name
+		display := name
+		if info, ok := store.ModelInfo(provider, name); ok && info.Label != "" {
+			display = info.Label
+			if info.ContextWindow > 0 {
+				display = fmt.Sprintf("%s  ·  %dk ctx", info.Label, info.ContextWindow/1000)
+			}
+		}
+		items[i] = display
+	}
+	m.picker.Show(items, values, modelPickerLabel)
+	return true
 }
 
 // handleSend sends or enqueues the current input as a chat message.
@@ -79,6 +94,15 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 		parts := strings.Fields(input)
 		if len(parts) == 1 && (parts[0] == "/model" || parts[0] == "/provider") {
 			return m.openPicker(parts[0])
+		}
+		// `/provider <name>`: the developer picks the model too — offer this
+		// provider's models; picking one completes `/provider <name> <model>`.
+		if len(parts) == 2 && parts[0] == "/provider" {
+			m.input.SetValue("/provider " + parts[1] + " ")
+			if m.showModelPicker(parts[1]) {
+				m.setViewportSize()
+				return m, nil
+			}
 		}
 		handled := m.handleSlash(input)
 		if handled {
@@ -343,8 +367,14 @@ func (m *model) handleSlash(input string) bool {
 			m.lines = append(m.lines,
 				line{role: "assistant", text: fmt.Sprintf("current provider: %s", m.eng.Config().Provider), ts: now},
 			)
+		} else if len(parts) < 3 {
+			// The developer picks the model; ouija never chooses one for them.
+			// (A provider with catalog models gets a picker before this.)
+			now := time.Now().Format("15:04")
+			m.lines = append(m.lines, line{role: "assistant",
+				text: fmt.Sprintf("usage: /provider %s <model>", parts[1]), ts: now})
 		} else {
-			newProv := parts[1]
+			newProv, newModel := parts[1], parts[2]
 			p, err := m.buildProvider(newProv)
 			if err != nil {
 				now := time.Now().Format("15:04")
@@ -354,7 +384,7 @@ func (m *model) handleSlash(input string) bool {
 			} else {
 				old := m.eng.Config().Provider
 				m.eng.SetProvider(p)
-				m.eng.SetModel(models.Load().DefaultModel(newProv))
+				m.eng.SetModel(newModel)
 				now := time.Now().Format("15:04")
 				m.lines = append(m.lines,
 					line{role: "assistant", text: fmt.Sprintf("✓ provider changed: %s → %s  (model: %s)", old, newProv, m.eng.Config().Model), ts: now},

@@ -79,7 +79,7 @@ injected into the `task` scout and the chat system prompt.
 Stats printed to stderr after completion:
 
 ```
-[ouija] anthropic · claude-opus-4-8 · 184320 tokens · 14 steps · $1.05
+[ouija] anthropic · claude-opus-5-5 · 184320 tokens · 14 steps · $1.05
 ```
 
 Token counts are printed as a plain integer; the ` · $…` suffix only appears

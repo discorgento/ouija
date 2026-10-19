@@ -108,7 +108,7 @@ by a one-line summary (messages · tokens · steps, plus cost when pricing is se
 | `/clear` | Clear chat history |
 | `/save [file]` | Export conversation to Markdown |
 | `/model [name]` | Show or switch model (with interactive picker) |
-| `/provider [name]` | Show or switch provider (with interactive picker) |
+| `/provider [name] [model]` | Show or switch provider and model; Enter on `/provider` or `/provider <name>` opens a picker, so you always choose the model |
 | `/permit [tool] [allow\|ask\|deny]` | Show or set permission level |
 | `/debug` | Toggle debug logging |
 | `/help` | Show all commands and keyboard shortcuts |

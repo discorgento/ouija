@@ -18,7 +18,7 @@
   },
   "defaults": {
     "provider": "anthropic",
-    "model": "claude-opus-4-8"
+    "model": "claude-opus-5-5"
   }
 }
 ```
@@ -49,7 +49,7 @@ File permissions: `0600` (auto-fixed on load if loose).
     }
   },
   "modelSuggestions": {
-    "anthropic": ["claude-sonnet-4-8"],
+    "anthropic": ["claude-sonnet-5-5"],
     "openai": ["gpt-4o"]
   }
 }
@@ -73,7 +73,7 @@ combination of built-in defaults + global config + project config.
 ```json
 {
   "provider": "anthropic",
-  "model": "claude-opus-4-8",
+  "model": "claude-opus-5-5",
   "maxNudges": 3,
   "totems": {
     "task": { "passes": 3, "dimensions": ["correctness", "best-practices", "security", "performance"] },
@@ -89,7 +89,7 @@ combination of built-in defaults + global config + project config.
   "costPer1MInput": 0,
   "costPer1MOutput": 0,
   "streamTimeout": 120,
-  "modelSuggestions": {"anthropic": ["claude-sonnet-4-8"], "openai": ["gpt-4o"]},
+  "modelSuggestions": {"anthropic": ["claude-sonnet-5-5"], "openai": ["gpt-4o"]},
   "tools": {
     "bash": {
       "allowlist": ["npm run build", "composer install"]
@@ -109,8 +109,8 @@ combination of built-in defaults + global config + project config.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `provider` | `string` | `"anthropic"` | Active provider |
-| `model` | `string` | `"claude-opus-4-8"` | Active model |
+| `provider` | `string` | — (required) | Active provider. No built-in default: set it here or with `ouija setup` (global) |
+| `model` | `string` | — (required) | Active model. No built-in default — which model to run, and pay for, is your choice |
 | `apiKey` | `string` | `""` | Project-level API key override |
 | `systemPrompt` | `string` | built-in prompt ("You are an AI coding assistant with access to the project files…") | Overrides the default chat system prompt |
 | `maxNudges` | `int` | `3` | Max retries when model fails to return structured output |

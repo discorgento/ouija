@@ -99,7 +99,11 @@ func (m *model) selectCompletion() {
 		}
 		input := m.input.Value()
 		parts := strings.Fields(input)
-		if len(parts) >= 1 {
+		switch {
+		case len(parts) >= 2 && parts[0] == "/provider" && m.picker.Label == modelPickerLabel:
+			// Second step of /provider: keep the chosen provider, add the model.
+			m.input.SetValue(parts[0] + " " + parts[1] + " " + val)
+		case len(parts) >= 1:
 			m.input.SetValue(parts[0] + " " + val)
 		}
 		m.picker.Hide()

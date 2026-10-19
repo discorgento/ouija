@@ -10,11 +10,9 @@ import (
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.Provider != "anthropic" {
-		t.Errorf("DefaultConfig().Provider = %q, want anthropic", cfg.Provider)
-	}
-	if cfg.Model != "claude-opus-4-8" {
-		t.Errorf("DefaultConfig().Model = %q, want claude-opus-4-8", cfg.Model)
+	// No built-in provider or model: the developer always chooses.
+	if cfg.Provider != "" || cfg.Model != "" {
+		t.Errorf("DefaultConfig() picks %q/%q; it must name no provider or model", cfg.Provider, cfg.Model)
 	}
 	if cfg.MaxNudges != 3 {
 		t.Errorf("DefaultConfig().MaxNudges = %d, want 3", cfg.MaxNudges)
@@ -29,6 +27,7 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestConfigValidate(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.Provider, cfg.Model = "ollama", "llama3"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
@@ -133,5 +132,28 @@ func TestTotemConfig(t *testing.T) {
 	}
 	if err := cfg.TotemConfig("bad", &w); err == nil || !strings.Contains(err.Error(), "totems.bad") {
 		t.Fatalf("TotemConfig(bad) error = %v; want it to name the section", err)
+	}
+}
+
+// A project file may leave the provider and model to the global config:
+// LoadConfig accepts it, and only the merged config must name them.
+func TestLoadConfigAcceptsFileWithoutModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(path, []byte(`{"rules":["one"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig rejected a file that leaves the model to the global layer: %v", err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate must still require a provider and model on the merged config")
+	}
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	if err := os.WriteFile(bad, []byte(`{"budget":{"maxTokens":-1,"maxSteps":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(bad); err == nil {
+		t.Fatal("LoadConfig must still reject what the file itself gets wrong")
 	}
 }

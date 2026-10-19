@@ -352,7 +352,7 @@ func TestResolveProjectRoot_NoConfigPathIsNoop(t *testing.T) {
 func TestValidateConfig(t *testing.T) {
 	t.Run("unknown provider is rejected", func(t *testing.T) {
 		cfg := engine.DefaultConfig()
-		cfg.Provider = "no-such-provider"
+		cfg.Provider, cfg.Model = "no-such-provider", "m"
 
 		if err := ValidateConfig(cfg); err == nil {
 			t.Error("ValidateConfig() error = nil for an unknown provider")
@@ -370,7 +370,7 @@ func TestValidateConfig(t *testing.T) {
 
 	t.Run("registered provider with required fields is accepted", func(t *testing.T) {
 		cfg := engine.DefaultConfig()
-		cfg.Provider = "ollama"
+		cfg.Provider, cfg.Model = "ollama", "llama3"
 
 		if err := ValidateConfig(cfg); err != nil {
 			t.Errorf("ValidateConfig() error = %v, want nil", err)
@@ -526,5 +526,35 @@ func TestLegacyTotemKeysMigrate(t *testing.T) {
 	task.Passes = 0
 	if err := cfg.TotemConfig("task", &task); err != nil || task.Passes != 2 {
 		t.Fatalf("an explicit totems.task must win over legacy keys: %+v, %v", task, err)
+	}
+}
+
+// With no layer choosing a model, the error says how to choose one; ouija
+// has no default model.
+func TestDiscoverConfigWithoutAnyModel(t *testing.T) {
+	isolateGlobalConfig(t)
+	t.Chdir(t.TempDir())
+	_, err := SetupEngine(context.Background(), "", false)
+	if err == nil || !strings.Contains(err.Error(), "ouija setup") {
+		t.Fatalf("SetupEngine with no model chosen = %v; want an error pointing to `ouija setup`", err)
+	}
+}
+
+// A project config that sets only rules keeps the global provider and model
+// (it used to override the provider with the built-in default).
+func TestProjectConfigWithoutModelKeepsGlobalChoice(t *testing.T) {
+	isolateGlobalConfig(t)
+	if err := ouijaconfig.Save(&ouijaconfig.Config{Defaults: &ouijaconfig.Defaults{Provider: "ollama", Model: "llama3"}}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	writeProjectConfig(t, filepath.Join(dir, ".ouija", "config.json"), `{"rules":["project rule"]}`)
+	t.Chdir(dir)
+	cfg, path, err := DiscoverConfig("")
+	if err != nil || path == "" {
+		t.Fatalf("DiscoverConfig = %q, %v", path, err)
+	}
+	if cfg.Provider != "ollama" || cfg.Model != "llama3" || len(cfg.Rules) != 1 {
+		t.Fatalf("got provider=%q model=%q rules=%v; want the global choice and the project rules", cfg.Provider, cfg.Model, cfg.Rules)
 	}
 }

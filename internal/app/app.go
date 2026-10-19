@@ -202,6 +202,11 @@ func resolveProjectRoot(cfg *engine.Config, cfgPath string, explicit bool) {
 // ValidateConfig checks the merged config against the provider registry.
 // Call after DiscoverConfig to catch misconfiguration before engine start.
 func ValidateConfig(cfg *engine.Config) error {
+	// No layer chose a model: say how to choose one, instead of a bare
+	// "provider is required". ouija has no built-in default on purpose.
+	if cfg.Provider == "" || cfg.Model == "" {
+		return engine.ErrConfig(noModelChosen)
+	}
 	// Base field validation.
 	if err := cfg.Validate(); err != nil {
 		return engine.ErrConfig(err.Error())
@@ -213,10 +218,14 @@ func ValidateConfig(cfg *engine.Config) error {
 	return nil
 }
 
+// noModelChosen is the error when no config layer names a provider and model.
+const noModelChosen = "no provider/model chosen — run `ouija setup` to pick your default, " +
+	"or `ouija init` (or `provider`/`model` in the project config) for this project"
+
 // validateProviderName reports an error when name is empty or unregistered.
 func validateProviderName(name string) error {
 	if name == "" {
-		return engine.ErrConfig("provider name is empty — set one in config or run `ouija init`")
+		return engine.ErrConfig(noModelChosen)
 	}
 	if !providers.Known(name) {
 		return engine.ErrProvider(fmt.Sprintf("unknown provider: %s (registered: %v)", name, providers.Names()))

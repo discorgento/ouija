@@ -163,7 +163,7 @@ The tracker also rejects negative token counts from buggy providers (sanity
 check before summing). Per-run stats go to stderr:
 
 ```
-[ouija] anthropic · claude-opus-4-8 · 184320 tokens · 14 steps · $1.05
+[ouija] anthropic · claude-opus-5-5 · 184320 tokens · 14 steps · $1.05
 ```
 
 The ` · $…` suffix appears only when cost pricing (`costPer1MInput`/`Output`) is

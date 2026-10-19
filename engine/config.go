@@ -116,16 +116,26 @@ func (c *Config) StreamTimeoutSec() int {
 	return c.StreamTimeout
 }
 
-// Validate checks the config is usable and returns all problems at once.
+// Validate checks a complete config — every layer merged — and returns all
+// problems at once. The provider and model are required: ouija never picks a
+// model for you.
 func (c *Config) Validate() error {
 	var errs []error
-
 	if c.Provider == "" {
 		errs = append(errs, errors.New("provider is required"))
 	}
 	if c.Model == "" {
 		errs = append(errs, errors.New("model is required"))
 	}
+	return errors.Join(append(errs, c.validateFile())...)
+}
+
+// validateFile checks what one config file must get right on its own. The
+// provider and model are not among them: a project file may leave them to the
+// global config (`ouija setup`), so they are checked once the layers are
+// merged (Validate).
+func (c *Config) validateFile() error {
+	var errs []error
 	if c.MaxNudges < 0 {
 		errs = append(errs, errors.New("maxNudges must be >= 0"))
 	}
@@ -139,11 +149,12 @@ func (c *Config) Validate() error {
 	return errors.Join(errs...)
 }
 
-// DefaultConfig is used when no --config is given.
+// DefaultConfig holds the built-in defaults every config layer starts from.
+// It names no provider and no model on purpose: which model to run (and pay
+// for) is the developer's choice, made with `ouija setup` / `ouija init` or
+// in the config file — a hardcoded model would also go stale.
 func DefaultConfig() *Config {
 	return &Config{
-		Provider:  "anthropic",
-		Model:     "claude-opus-4-8",
 		MaxNudges: 3,
 		// MaxSteps is a runaway backstop counting EVERY chat call across all agents
 		// in a run (scout + N×dims passes + reconcile, each with tool round-trips),
@@ -160,7 +171,9 @@ func DefaultConfig() *Config {
 	}
 }
 
-// LoadConfig reads and validates a config file.
+// LoadConfig reads a config file and validates what the file alone must get
+// right. It does not require a provider or model, which may come from another
+// layer: call Validate on the final, merged config.
 func LoadConfig(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -173,7 +186,7 @@ func LoadConfig(path string) (*Config, error) {
 	if c.ProjectRoot == "" {
 		c.ProjectRoot = "."
 	}
-	if err := c.Validate(); err != nil {
+	if err := c.validateFile(); err != nil {
 		return nil, err
 	}
 	return c, nil

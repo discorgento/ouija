@@ -75,7 +75,7 @@ ouija task "describe this codebase and propose a refactor plan"
 a checklist. Two things to notice:
 
 - The plan is saved to `docs/task-plan.md` in the project.
-- The last stderr line is your usage: `[ouija] anthropic · claude-opus-4-8 ·
+- The last stderr line is your usage: `[ouija] anthropic · claude-opus-5-5 ·
   184320 tokens · 14 steps · $1.05`.
 
 Want the raw data instead of the pretty output? Add `--json`. Want to see where
