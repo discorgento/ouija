@@ -22,7 +22,7 @@ Verify:
 
 ```sh
 ouija version
-# ouija 1.0.0
+# ouija 1.2.3   # 0.0.0 for a build from source before the first release
 ```
 
 Not on your `PATH` yet? [Install](../how-to/install.md) explains where the
@@ -47,7 +47,9 @@ ouija setup
 
 The wizard asks for API keys (one field per provider — leave blank to skip) and
 your default provider/model. Everything is written to
-`~/.config/ouija/config.json` with `0600` permissions.
+the global config with `0600` permissions — `~/.config/ouija/config.json` on
+Linux (`~/Library/Application Support/ouija/` on macOS, `%AppData%\ouija\` on
+Windows).
 
 No API key? Pick **ollama** — it runs locally and free, as long as an Ollama
 server is reachable.

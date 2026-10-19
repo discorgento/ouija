@@ -13,7 +13,7 @@ ouija uses two layers:
 
 | Scope | File | Purpose |
 |---|---|---|
-| **Global** | `~/.config/ouija/config.json` (or `$XDG_CONFIG_HOME/ouija/config.json`) | Default provider, model, API keys (`0600`) |
+| **Global** | `~/.config/ouija/config.json` on Linux (or `$XDG_CONFIG_HOME/ouija/`); `~/Library/Application Support/ouija/` on macOS; `%AppData%\ouija\` on Windows | Default provider, model, API keys (`0600`) |
 | **Project** | `.ouija/config.json` | Per-project overrides |
 
 Priority (highest wins): **project config > global config > built-in defaults**
@@ -70,7 +70,7 @@ edit can be as small as:
 ```json
 {
   "provider": "openrouter",
-  "model": "opencode/big-pickle"
+  "model": "qwen/qwen3-coder:free"
 }
 ```
 

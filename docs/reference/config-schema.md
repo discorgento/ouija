@@ -8,6 +8,11 @@
 
 ## Global config: `~/.config/ouija/config.json`
 
+The path is the OS's user config directory: `~/.config/ouija/config.json` on
+Linux (or `$XDG_CONFIG_HOME/ouija/`), `~/Library/Application Support/ouija/`
+on macOS, `%AppData%\ouija\` on Windows. `ouija setup` and `ouija doctor`
+print the one in use.
+
 ```json
 {
   "apiKeys": {
@@ -39,7 +44,7 @@ File permissions: `0600` (auto-fixed on load if loose).
 ```json
 {
   "provider": "openrouter",
-  "model": "opencode/big-pickle",
+  "model": "qwen/qwen3-coder:free",
   "apiKey": "sk-alt-...",
   "permission": {
     "default": "ask",
@@ -124,9 +129,6 @@ combination of built-in defaults + global config + project config.
 | `totems.doc.brand` | `string` | `""` | Logo text, brand tag and cover footer (`--set brand=…`) |
 | `totems.doc.locale` | `string` | `"en"` | The document's language tag (`--set locale=…`) |
 
-Configs written before `totems` keep working: a top-level `passes` /
-`dimensions` is read as `totems.task` (and `passes` as `totems.doc`), unless
-those sections exist, and the next save writes the new layout.
 | `rules` | `[]string` | `[...]` | Project rules injected into prompts |
 | `projectRoot` | `string` | `"."` | Sandbox root for file tools |
 | `budget.maxTokens` | `int` | `2000000` | Hard token ceiling |
@@ -139,6 +141,10 @@ those sections exist, and the next save writes the new layout.
 | `tools.bash.sandbox` | `object` | off | OS confinement of every bash command (Linux Landlock); see below |
 | `modelSuggestions` | `map[string][]string` | `null` | Suggested models per provider for the TUI picker autocomplete |
 | `permission` | `PermissionRule` | `null` | Permission defaults (see below) |
+
+Configs written before `totems` keep working: a top-level `passes` /
+`dimensions` is read as `totems.task` (and `passes` as `totems.doc`), unless
+those sections exist, and the next save writes the new layout.
 
 ### `permission` field
 

@@ -11,6 +11,10 @@
 - **Go 1.26+** — uses `iter.Seq2`, `log/slog`, `slices`, `errors.Join`, `clear`, `range-over-int`
 - At least one configured provider — an API key via `ouija setup`, or a local Ollama, which needs no key
 - `make` (optional) — every target has a raw `go` equivalent
+- **Windows:** the `bash` tool needs a POSIX shell on `PATH` — the `sh.exe`
+  that [Git for Windows](https://gitforwindows.org) installs. Without one,
+  every bash call is refused with that explanation; the other tools work.
+  "Edit in $EDITOR" opens Notepad unless `EDITOR` is set.
 
 Runtime dependencies are declared in `go.mod` and are fetched automatically —
 there is nothing to install by hand (Charm stack for the TUI, `mvdan.cc/sh/v3`
@@ -19,8 +23,9 @@ The full list with rationale is in [Conventions](contribute.md#dependencies).
 
 ## Pre-built archives (no Go needed)
 
-Every [GitHub Release](https://github.com/discorgento/ouija/releases) is built
-by CI and carries `ouija-<os>-<arch>.tar.gz` archives (linux, macOS and Windows
+Starting with the first release, every
+[GitHub Release](https://github.com/discorgento/ouija/releases) is built by CI
+and carries `ouija-<os>-<arch>.tar.gz` archives (linux, macOS and Windows
 — amd64/arm64) plus a `SHA256SUMS` file. Verify, then extract:
 
 ```sh
@@ -65,7 +70,7 @@ go install ./cmd/ouija-mcp
 
 ```sh
 ouija version
-# ouija 1.0.0
+# ouija 1.2.3 — a release; a build from source before the first release says 0.0.0
 ```
 
 ---

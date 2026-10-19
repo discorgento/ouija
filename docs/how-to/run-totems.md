@@ -15,11 +15,12 @@ Before anything else: [install](install.md) and [configure](configure.md)
 
 ## Global flags
 
-Every totem accepts the same three flags (`chat` accepts the first two, not
-`--json`):
+Every totem accepts the same flags, after the totem name (`chat` accepts
+`--config` and `--trace-file`):
 
 | Flag | Description |
 |---|---|
+| `--set key=value` | A named input the totem declares (repeatable); typed by its input schema |
 | `--config <file>` | Override config auto-discovery |
 | `--trace-file <path>` | Write a Perfetto/Chrome Trace JSON trace |
 | `--json` | Print raw JSON result (for pipes/scripts) |

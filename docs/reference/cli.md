@@ -16,7 +16,7 @@ Prints the totem list and usage summary.
 ### `ouija version`
 
 ```
-ouija 1.0.0
+ouija 1.2.3   # 0.0.0 for a build from source before the first release
 ```
 
 `ouija -v` / `ouija --version` are aliases.
@@ -28,7 +28,9 @@ Interactive global config wizard. Prompts for:
 1. API keys per provider (Ollama skipped)
 2. Default provider and model
 
-Writes to `~/.config/ouija/config.json` (`0600`).
+Writes to the global config (`0600`): `~/.config/ouija/config.json` on Linux,
+`~/Library/Application Support/ouija/config.json` on macOS,
+`%AppData%\ouija\config.json` on Windows.
 
 ### `ouija init`
 
@@ -43,7 +45,8 @@ Writes to `.ouija/config.json` in the current directory, and trusts it (see
 
 Trusts the project config discovery finds from the current directory (or
 `<path>`), after printing the security-sensitive keys it sets (`permission`,
-`tools` bash allowlist, `apiKey`, a non-default `systemPrompt`). Until then
+`tools` bash allowlist, `apiKey`, a non-default `systemPrompt`, a `projectRoot`
+other than `.`). Until then
 those keys are ignored with a warning; any change to the file needs
 `ouija trust` again. `--revoke` forgets the trust. Files written by
 `ouija init` and by the chat are trusted automatically. See
@@ -56,7 +59,7 @@ Alias for `ouija setup`.
 ### `ouija generate totem`
 
 Interactive scaffold for a new totem. Prompts for name and description, writes
-`totems/<name>/<name>.go`, then runs `go generate ./totems/...` and
+`totems/<name>/<name>.go`, then runs `go generate ./totems/` and
 `go install ./cmd/ouija`.
 
 With `--external [dir]` it scaffolds a standalone Go module instead — `go.mod`,
@@ -71,7 +74,8 @@ ouija generate totem --external [dir]
 ### `ouija learn [<fact>]`
 
 With a fact, saves it to `docs/knowledge.md`; without arguments, prints the
-current knowledge. Facts are injected into every agent prompt.
+current knowledge. Facts are injected into the chat's system prompt and the
+`task` totem's scout.
 
 ### `ouija doctor`
 
@@ -163,9 +167,9 @@ them all.
 
 | Code | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Config error, unknown totem, or run failure |
-| `2` | Invalid flag, or an unknown `ouija mcp` subcommand |
+| `0` | Success (also `<command> --help`, which only prints the usage) |
+| `1` | Config error or run failure |
+| `2` | Usage error: unknown command or totem (with a suggestion for a typo), invalid flag, unexpected argument |
 
 ### Stderr output
 

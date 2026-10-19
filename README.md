@@ -67,11 +67,13 @@ free. Diagnose anything with `ouija doctor`.
 | `ouija sticker` | Laptop sticker SVG from real project metrics |
 | `ouija chat` | Interactive terminal chat (Bubble Tea TUI): tools, streaming, approvals |
 | `ouija setup` / `ouija init` | Global defaults / per-project config |
-| `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey) |
-| `ouija learn "fact"` | Save project knowledge, injected into every prompt |
+| `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey, systemPrompt, projectRoot) |
+| `ouija learn "fact"` | Save project knowledge, used by the chat and the `task` totem |
 | `ouija mcp [install\|status]` | Serve MCP over stdio, or register ouija with your editor's harness |
 | `ouija generate totem` | Scaffold a new totem |
 | `ouija doctor` | Diagnose config, provider key, and harness wiring |
+| `ouija config` | Same wizard as `ouija setup` |
+| `ouija version` | Print the version |
 
 Flags, slash commands, shortcuts and exit codes:
 [CLI reference](docs/reference/cli.md).
@@ -108,8 +110,9 @@ func init() { registry.Register(&Totem{}) }
 ```
 
 `bootstrap.Main` is the whole host — the command line, the MCP server, and the
-same config the ouija CLI uses (`~/.config/ouija/config.json`: keys, provider,
-budget, rules):
+same config the ouija CLI uses (keys and default provider/model from the global
+`~/.config/ouija/config.json`; budget, rules and the rest from the project's
+`.ouija/config.json`):
 
 ```go
 // github.com/you/your-agents/cmd/my-totem/main.go — the whole host
