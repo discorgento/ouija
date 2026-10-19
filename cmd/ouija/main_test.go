@@ -158,7 +158,7 @@ func TestErrorHint(t *testing.T) {
 	}{
 		{"auth", engine.ErrAuth("no key"), "ouija setup"},
 		{"config", engine.ErrConfig("bad"), "ouija doctor"},
-		{"provider", engine.ErrProvider("unknown"), "ouija doctor"},
+		{"provider", engine.ErrProvider("SSE: HTTP 400: bad schema"), "another model"},
 		{"budget", engine.ErrBudget("over"), "budget.maxTokens"},
 		{"plain", errors.New("boom"), ""},
 		{"wrapped auth", fmt.Errorf("run: %w", engine.ErrAuth("no key")), "ouija setup"},

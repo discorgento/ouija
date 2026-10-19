@@ -181,7 +181,8 @@ func errorHint(err error) string {
 	case engine.Is(err, engine.ErrCodeConfig):
 		return "check your setup with `ouija doctor`"
 	case engine.Is(err, engine.ErrCodeProvider):
-		return "list registered providers with `ouija doctor`"
+		return "the provider refused the request (its reason is above): " +
+			"try again, or pick another model with `ouija setup` / `ouija init`"
 	case engine.Is(err, engine.ErrCodeBudget):
 		return "raise budget.maxTokens / budget.maxSteps in your config"
 	}

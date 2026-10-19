@@ -35,14 +35,21 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	globalCfg, _ := ouijaconfig.Load()
+	// A global config that does not parse is reported: ignoring it ran with
+	// no provider and sent the user to `ouija setup`, which used to save over it.
+	globalCfg, err := ouijaconfig.Load()
+	if err != nil {
+		return nil, "", err
+	}
 	// A discovered config may come from a cloned repository: its sensitive
 	// keys apply only once the user trusts the file (see trust.go). An
 	// explicit --config is trusted like any CLI flag. The check uses the same
 	// bytes that were parsed, so the file cannot change in between.
+	// Sensitive fields are cleared on every untrusted file, whatever the key
+	// detection says: what the user sees warned about is not the guard.
 	if projectCfg != nil && explicit == "" && !trusted(globalCfg, cfgPath, data) {
+		stripUntrusted(projectCfg)
 		if keys, _ := sensitiveKeysIn(data); len(keys) > 0 {
-			stripUntrusted(projectCfg)
 			slog.Warn("untrusted project config: ignoring "+strings.Join(keys, ", ")+
 				" — run `ouija trust` to apply them", "path", cfgPath)
 		}
@@ -239,7 +246,7 @@ func validateProviderName(name string) error {
 		return engine.ErrConfig(noModelChosen)
 	}
 	if !providers.Known(name) {
-		return engine.ErrProvider(fmt.Sprintf("unknown provider: %s (registered: %v)", name, providers.Names()))
+		return engine.ErrConfig(fmt.Sprintf("unknown provider: %s (registered: %v)", name, providers.Names()))
 	}
 	return nil
 }

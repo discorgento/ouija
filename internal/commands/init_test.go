@@ -19,7 +19,10 @@ func TestSeedProjectConfig_ExistingFile(t *testing.T) {
 	}
 
 	global := &ouijaconfig.Config{Defaults: &ouijaconfig.Defaults{Provider: "anthropic", Model: "claude"}}
-	cfg, existing := seedProjectConfig(path, global)
+	cfg, existing, err := seedProjectConfig(path, global)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !existing {
 		t.Error("existing = false, want true for a readable project config")
@@ -33,7 +36,10 @@ func TestSeedProjectConfig_FallsBackToGlobal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".ouija", "config.json") // does not exist
 
 	global := &ouijaconfig.Config{Defaults: &ouijaconfig.Defaults{Provider: "openai", Model: "gpt-4o"}}
-	cfg, existing := seedProjectConfig(path, global)
+	cfg, existing, err := seedProjectConfig(path, global)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if existing {
 		t.Error("existing = true, want false when there is no project config")
@@ -65,5 +71,17 @@ func TestInitAPIKey(t *testing.T) {
 				t.Errorf("initAPIKey(%q, %q) = %q, want %q", tt.chosen, tt.globalKey, got, tt.want)
 			}
 		})
+	}
+}
+
+// A project config that does not load is reported, never replaced by
+// defaults: saving those would erase the user's rules, totems and permissions.
+func TestSeedProjectConfig_BrokenFileIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"rules": ["keep me"],}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seedProjectConfig(path, &ouijaconfig.Config{}); err == nil {
+		t.Fatal("a broken project config was treated as absent")
 	}
 }

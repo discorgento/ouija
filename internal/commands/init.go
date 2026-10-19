@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -20,7 +21,10 @@ import (
 // Saved to .ouija/config.json in the current directory.
 func Init(args []string) error {
 	// Load global config to seed defaults and check existing keys.
-	global, _ := ouijaconfig.Load()
+	global, err := ouijaconfig.Load()
+	if err != nil {
+		return err
+	}
 	if global == nil {
 		return fmt.Errorf("no global config found — run `ouija setup` first")
 	}
@@ -36,7 +40,15 @@ func Init(args []string) error {
 	// Seed from existing project config if it exists, otherwise from global.
 	dir, _ := os.Getwd()
 	path := filepath.Join(dir, ".ouija", "config.json")
-	cfg, existing := seedProjectConfig(path, global)
+	// Refuse before the form, not after it: a cloned repo's untrusted config
+	// with permissions or an allowlist must not be adopted by rewriting it.
+	if err := app.CheckWritable(path); err != nil {
+		return err
+	}
+	cfg, existing, err := seedProjectConfig(path, global)
+	if err != nil {
+		return err
+	}
 
 	var (
 		provider = cfg.Provider
@@ -76,7 +88,7 @@ func Init(args []string) error {
 
 	printBanner()
 
-	err := huh.NewForm(
+	err = huh.NewForm(
 		huh.NewGroup(selProv, selModel, inpKey).Title("Project config"),
 	).WithTheme(ouijaTheme{}).Run()
 	if err != nil {
@@ -92,12 +104,10 @@ func Init(args []string) error {
 	// is no global key for this provider).
 	cfg.APIKey = initAPIKey(apiKey, global.APIKeys[provider])
 
-	if err := cfg.Save(path); err != nil {
+	// The user just wrote this file: SaveProjectConfig trusts it, so its
+	// settings apply.
+	if err := app.SaveProjectConfig(path, cfg.Save); err != nil {
 		return fmt.Errorf("save config: %w", err)
-	}
-	// The user just wrote this file: trust it, so its settings apply.
-	if err := app.Trust(path); err != nil {
-		return fmt.Errorf("trust config: %w", err)
 	}
 
 	verb := "saved"
@@ -117,16 +127,22 @@ func Init(args []string) error {
 }
 
 // seedProjectConfig returns the project config to edit and whether it already
-// existed: the file at path when it loads, else engine defaults seeded with the
-// global provider/model so the wizard opens on the user's usual choice.
-func seedProjectConfig(path string, global *ouijaconfig.Config) (*engine.Config, bool) {
-	if cfg, err := app.LoadProjectConfig(path); err == nil {
-		return cfg, true
+// existed: the file at path, else (only when there is none) engine defaults
+// seeded with the global provider/model so the wizard opens on the user's
+// usual choice. A file that does not load is an error: seeding defaults would
+// save over the user's rules, totems and permissions.
+func seedProjectConfig(path string, global *ouijaconfig.Config) (*engine.Config, bool, error) {
+	cfg, err := app.LoadProjectConfig(path)
+	switch {
+	case err == nil:
+		return cfg, true, nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, false, fmt.Errorf("%s: %w — fix or remove it, then run `ouija init` again", path, err)
 	}
-	cfg := engine.DefaultConfig()
+	cfg = engine.DefaultConfig()
 	cfg.Provider = global.DefaultProvider()
 	cfg.Model = global.DefaultModel()
-	return cfg, false
+	return cfg, false, nil
 }
 
 // initAPIKey decides the project-level API-key override: it is stored only when

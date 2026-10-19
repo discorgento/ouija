@@ -22,8 +22,12 @@ func Setup(args []string) error {
 	// picker must not offer a name that BuildProvider would reject.
 	provNames, provLabels := ms.ProvidersFor(providers.Names())
 
-	// Pre-fill from existing config.
-	existing, _ := ouijaconfig.Load()
+	// Pre-fill from existing config. One that does not parse stops here:
+	// saving the form over it would lose every other key and trusted project.
+	existing, err := ouijaconfig.Load()
+	if err != nil {
+		return fmt.Errorf("%w — fix the file (or move it away) and run setup again", err)
+	}
 
 	// Build input fields: one per provider (ollama excluded — no key needed).
 	var inputs []*huh.Input
@@ -90,7 +94,7 @@ func Setup(args []string) error {
 
 	printBanner()
 
-	err := huh.NewForm(groups...).WithTheme(ouijaTheme{}).Run()
+	err = huh.NewForm(groups...).WithTheme(ouijaTheme{}).Run()
 	if err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
 			return nil

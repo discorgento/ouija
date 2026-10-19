@@ -21,8 +21,17 @@ func Trust(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
+	// flag stops at the first non-flag: `trust <path> --revoke` must revoke,
+	// not silently trust, so parse what follows the path too.
 	path := fs.Arg(0)
+	if fs.NArg() > 1 {
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() > 0 {
+			return fmt.Errorf("unexpected arguments: %v (usage: ouija trust [--revoke] [path])", fs.Args())
+		}
+	}
 	if path == "" {
 		found, err := app.FindProjectConfig()
 		if err != nil {

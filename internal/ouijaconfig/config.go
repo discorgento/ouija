@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/discorgento/ouija/internal/atomicfile"
 )
@@ -89,7 +90,9 @@ func Load() (*Config, error) {
 		}
 		return nil, fmt.Errorf("stat %s: %w", p, err)
 	}
-	if fi.Mode()&0o077 != 0 {
+	// Windows reports every file as 0666 and Chmod cannot narrow it: the
+	// check would warn on every run.
+	if runtime.GOOS != "windows" && fi.Mode()&0o077 != 0 {
 		slog.Warn("loose config permissions, fixing", "path", p, "mode", fi.Mode()&0o777)
 		if err := os.Chmod(p, filePerm); err != nil {
 			slog.Warn("chmod failed", "path", p, "err", err)

@@ -107,8 +107,19 @@ func sensitiveKeysIn(b []byte) ([]string, error) {
 	}
 	var out []string
 	for _, k := range sensitiveKeys {
-		v, ok := raw[k]
-		if !ok || string(v) == "null" || string(v) == `""` {
+		if setsKey(raw, k) {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+// setsKey reports whether raw sets the sensitive key k. Keys match without
+// regard to case, as encoding/json does when it fills the config: "Permission"
+// or "APIKEY" apply exactly like "permission" and "apiKey".
+func setsKey(raw map[string]json.RawMessage, k string) bool {
+	for name, v := range raw {
+		if !strings.EqualFold(name, k) || string(v) == "null" || string(v) == `""` {
 			continue
 		}
 		// `ouija init` writes the built-in prompt; it grants nothing.
@@ -118,9 +129,22 @@ func sensitiveKeysIn(b []byte) ([]string, error) {
 				continue
 			}
 		}
-		out = append(out, k)
+		return true
 	}
-	return out, nil
+	return false
+}
+
+// CheckWritable reports why ouija must not rewrite the project config at
+// path: an existing untrusted file that sets sensitive keys. Rewriting it
+// would either drop them or, by trusting the result, adopt them.
+func CheckWritable(path string) error {
+	if _, err := os.Stat(path); err == nil && !IsTrusted(path) {
+		if keys, _ := SensitiveKeys(path); len(keys) > 0 {
+			return fmt.Errorf("%s is not trusted (sets %s) — review it with `ouija trust` before ouija rewrites it",
+				path, strings.Join(keys, ", "))
+		}
+	}
+	return nil
 }
 
 // SaveProjectConfig writes the project config at path through save (e.g.
@@ -129,11 +153,8 @@ func sensitiveKeysIn(b []byte) ([]string, error) {
 // that sets sensitive keys: rewriting it would either drop them or, by trusting
 // the result, adopt them.
 func SaveProjectConfig(path string, save func(string) error) error {
-	if _, err := os.Stat(path); err == nil && !IsTrusted(path) {
-		if keys, _ := SensitiveKeys(path); len(keys) > 0 {
-			return fmt.Errorf("%s is not trusted (sets %s) — run `ouija trust` to let ouija save to it",
-				path, strings.Join(keys, ", "))
-		}
+	if err := CheckWritable(path); err != nil {
+		return err
 	}
 	if err := save(path); err != nil {
 		return err
