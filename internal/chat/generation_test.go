@@ -79,18 +79,35 @@ func TestClearCancelsTheGenerationInFlight(t *testing.T) {
 	}
 }
 
-// A provider's model list is resolved once per session, not on every key.
-func TestProviderModelsIsResolvedOnce(t *testing.T) {
+// A provider's model list is fetched once, off the event loop: the catalog
+// shows at once, the fetched list replaces it, and later keystrokes reuse it.
+func TestProviderModelsFetchedInBackground(t *testing.T) {
 	m, _ := newSwitchModel(t)
 	builds := 0
 	m.buildProvider = func(name string) (engine.Provider, error) {
 		builds++
 		return namedProvider{name}, nil
 	}
-	first := m.providerModels("anthropic")
-	m.providerModels("anthropic")
-	if builds != 1 || len(first) == 0 {
-		t.Fatalf("builds=%d list=%v; want one resolution per provider", builds, models.IDs(first))
+	if first := m.providerModels("anthropic"); len(first) == 0 || builds != 0 || len(m.pendingCmds) != 1 {
+		t.Fatalf("first call: list=%d builds=%d cmds=%d; want the catalog now, one fetch queued", len(first), builds, len(m.pendingCmds))
+	}
+	m.providerModels("anthropic") // a fetch is in flight: not queued again
+	if len(m.pendingCmds) != 1 {
+		t.Fatalf("%d fetches queued, want 1", len(m.pendingCmds))
+	}
+	if msg, ok := m.pendingCmds[0]().(modelListMsg); !ok || msg.provider != "anthropic" || builds != 1 {
+		t.Fatalf("the fetch command returned %T, builds=%d", msg, builds)
+	}
+	m.pendingCmds = nil
+	m.Update(modelListMsg{provider: "anthropic", list: []models.Model{{ID: "fetched"}}})
+	if got := m.providerModels("anthropic"); len(got) != 1 || got[0].ID != "fetched" || len(m.pendingCmds) != 0 {
+		t.Fatalf("after the fetch: %v, cmds=%d", models.IDs(got), len(m.pendingCmds))
+	}
+	// A failed fetch is not kept as the list, and is retried only later.
+	m.Update(modelListMsg{provider: "openai", err: errors.New("down")})
+	m.providerModels("openai")
+	if _, kept := m.modelLists["openai"]; kept || len(m.pendingCmds) != 0 {
+		t.Fatalf("failed fetch kept=%v or retried at once (cmds=%d)", kept, len(m.pendingCmds))
 	}
 }
 
@@ -287,5 +304,16 @@ func TestCopyFeedback(t *testing.T) {
 	m.handleCopyMessage()
 	if got := m.lines[len(m.lines)-1].text; got != "nothing to copy yet" {
 		t.Fatalf("empty transcript: %q", got)
+	}
+}
+
+// Terminal controls in a reply never reach the screen.
+func TestReplyIsTerminalSafe(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	m.handleResponse(chatResponse{text: "hi\x1b]52;c;ZXZpbA==\x07", gen: m.gen})
+	for _, l := range m.lines {
+		if strings.ContainsRune(l.text, 0x1b) {
+			t.Fatalf("escape sequence kept in %q", l.text)
+		}
 	}
 }

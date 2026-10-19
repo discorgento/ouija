@@ -17,6 +17,7 @@ import (
 	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/models"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // ─── Slash commands ────────────────────────────────────────────────────
@@ -56,26 +57,64 @@ func (m *model) openPicker(cmd string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// providerModels lists provider's models: its own list from its API (built
-// with the configured key, cached for a day), else the built-in suggestions.
-//
-// The answer is kept for the session: the inline list asks on every
-// keystroke, and a provider whose API is down (not cached on disk) would
-// otherwise stall the UI on every key.
+// providerModels lists provider's models without blocking the UI: the list
+// fetched from its API (built with the configured key, cached for a day) once
+// it arrived, else the built-in suggestions while a fetch runs in the
+// background (fetchModels; the result arrives as a modelListMsg). Fetching
+// inline froze the whole TUI — Ctrl+C included — on a slow or dead API, and a
+// failed fetch was kept as the provider's list for the rest of the session.
 func (m *model) providerModels(provider string) []models.Model {
 	if list, ok := m.modelLists[provider]; ok {
 		return list
 	}
-	var p engine.Provider
-	if m.buildProvider != nil {
-		p, _ = m.buildProvider(provider)
+	if !m.modelFetching[provider] && time.Since(m.modelFailedAt[provider]) > time.Minute {
+		if m.modelFetching == nil {
+			m.modelFetching = make(map[string]bool)
+		}
+		m.modelFetching[provider] = true
+		m.pendingCmds = append(m.pendingCmds, m.fetchModels(provider))
 	}
-	list := models.Load().List(context.Background(), provider, p)
+	return models.Load().Catalog(provider)
+}
+
+// modelListMsg carries a provider's fetched model list (err: it fell back).
+type modelListMsg struct {
+	provider string
+	list     []models.Model
+	err      error
+}
+
+// fetchModels fetches provider's model list off the event loop.
+func (m *model) fetchModels(provider string) tea.Cmd {
+	build := m.buildProvider
+	return func() tea.Msg {
+		var p engine.Provider
+		if build != nil {
+			p, _ = build(provider)
+		}
+		list, err := models.Load().Fetch(context.Background(), provider, p)
+		return modelListMsg{provider: provider, list: list, err: err}
+	}
+}
+
+// gotModelList stores a fetched list and refreshes an open picker with it.
+func (m *model) gotModelList(msg modelListMsg) {
+	delete(m.modelFetching, msg.provider)
+	if msg.err != nil {
+		if m.modelFailedAt == nil {
+			m.modelFailedAt = make(map[string]time.Time)
+		}
+		m.modelFailedAt[msg.provider] = time.Now() // retried after a minute
+		return
+	}
 	if m.modelLists == nil {
 		m.modelLists = make(map[string][]models.Model)
 	}
-	m.modelLists[provider] = list
-	return list
+	m.modelLists[msg.provider] = msg.list
+	if m.picker.Visible && m.picker.Label == modelPickerLabel {
+		m.updateCmdList()
+		m.setViewportSize()
+	}
 }
 
 // modelPickerLabel heads the model list; selectCompletion keys on it.
@@ -244,6 +283,9 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	m.history = msg.msgs
 
 	// ── Show response ───────────────────────────────────────────────
+	// Model and tool text reaches the screen only without terminal controls
+	// (an escape sequence could set the clipboard or redraw the transcript).
+	msg.text = termsafe.Clean(msg.text)
 	if msg.text != "" {
 		m.lines = append(m.lines,
 			line{role: "assistant", text: msg.text, ts: now},
@@ -253,12 +295,12 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	// This turn's trace (beginGeneration started the turn). The tracer keeps
 	// every turn, for the session trace and --trace-file.
 	if trace := m.eng.Tracer().RenderLastRootString(); trace != "" {
-		m.lines = append(m.lines, line{role: "trace", text: trace, ts: now})
+		m.lines = append(m.lines, line{role: "trace", text: termsafe.Clean(trace), ts: now})
 	}
 
 	// ── Show this turn's write/edit diffs as code blocks ────────────
 	for _, diff := range turnDiffs(m.history) {
-		m.lines = append(m.lines, line{role: "codeblock", text: diff, lang: "diff", ts: now})
+		m.lines = append(m.lines, line{role: "codeblock", text: termsafe.Clean(diff), lang: "diff", ts: now})
 	}
 
 	if cmd := m.dispatchQueued(); cmd != nil {

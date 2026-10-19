@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/discorgento/ouija/engine"
@@ -91,9 +92,15 @@ type model struct {
 	configPath string
 
 	// Render cache — caches are valid as long as the viewport width hasn't changed.
-	cacheWidth  int                       // width the lines' cached renders are for
-	modelLists  map[string][]models.Model // provider → models, resolved once per session
-	lastRebuild time.Time                 // throttles rebuildContent during streaming (~30fps)
+	cacheWidth int                       // width the lines' cached renders are for
+	modelLists map[string][]models.Model // provider → models fetched from its API
+	// modelFetching / modelFailedAt track background list fetches (see
+	// providerModels); pendingCmds are commands queued outside a return
+	// value, batched by Update.
+	modelFetching map[string]bool
+	modelFailedAt map[string]time.Time
+	pendingCmds   []tea.Cmd
+	lastRebuild   time.Time // throttles rebuildContent during streaming (~30fps)
 
 	// Slash command autocomplete.
 	showCmdList bool    // true when showing the slash command list (7 items, small)

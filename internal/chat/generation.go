@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // One place for starting, cancelling and chaining generations: the send,
@@ -101,7 +102,7 @@ func (m *model) nextApproval() {
 // say appends a timestamped line and re-renders (which also scrolls to the
 // bottom when autoScroll is on).
 func (m *model) say(role, text string) {
-	m.lines = append(m.lines, line{role: role, text: text, ts: time.Now().Format("15:04")})
+	m.lines = append(m.lines, line{role: role, text: termsafe.Clean(text), ts: time.Now().Format("15:04")})
 	m.rebuildContent()
 }
 

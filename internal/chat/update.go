@@ -7,7 +7,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+
 	"charm.land/lipgloss/v2"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // ─── Init ─────────────────────────────────────────────────────────────
@@ -25,7 +27,21 @@ func tickCmd() tea.Cmd {
 // ─── Update ───────────────────────────────────────────────────────────
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	if len(m.pendingCmds) > 0 { // e.g. a model-list fetch started by a keystroke
+		cmds := append(m.pendingCmds, cmd)
+		m.pendingCmds = nil
+		return next, tea.Batch(cmds...)
+	}
+	return next, cmd
+}
+
+func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case modelListMsg:
+		m.gotModelList(msg)
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		return m.handleResize(msg)
 
@@ -95,7 +111,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.waiting || msg.gen != m.gen {
 			return m, nil
 		}
-		m.partialText += msg.text
+		m.partialText += termsafe.Clean(msg.text)
 		// Estimate output tokens during streaming so the footer updates live.
 		m.streamingTokens = len(m.partialText) / 4
 		// Rebuild at low frequency (2fps) during streaming —
@@ -116,7 +132,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.waiting {
 			return m, nil
 		}
-		m.currentTool = msg.tool + ": " + msg.arg
+		m.currentTool = termsafe.Clean(msg.tool + ": " + msg.arg)
 		m.rebuildContent()
 		return m, nil
 
@@ -265,7 +281,7 @@ func (m *model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 
 // addBanner appends a banner message and rebuilds the view.
 func (m *model) addBanner(text string) (tea.Model, tea.Cmd) {
-	m.lines = append(m.lines, line{role: "banner", text: text})
+	m.lines = append(m.lines, line{role: "banner", text: termsafe.Clean(text)})
 	m.rebuildContent()
 	if m.autoScroll {
 		m.vp.GotoBottom()

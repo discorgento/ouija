@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"github.com/discorgento/ouija/internal/termsafe"
 	"image/color"
 	"maps"
 	"slices"
@@ -166,13 +167,13 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx int) stri
 	// Path line (for tools that accept a path argument).
 	if p, ok := req.input["path"]; ok {
 		if s, ok2 := p.(string); ok2 && s != "" {
-			pathLine := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render("    " + s)
+			pathLine := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render("    " + termsafe.Clean(s))
 			inner.WriteString("  ")
 			inner.WriteString(pathLine)
 			inner.WriteByte('\n')
 		}
 	} else if req.path != "" && req.path != baseTool(req.tool) {
-		pathStr := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("60")).Render("    " + req.path)
+		pathStr := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("60")).Render("    " + termsafe.Clean(req.path))
 		inner.WriteString("  ")
 		inner.WriteString(pathStr)
 		inner.WriteByte('\n')
@@ -181,6 +182,9 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx int) stri
 	// Preview from engine (colored diff for edit_file, summary for others).
 	if preview, ok := req.input["_preview"]; ok {
 		if s, ok2 := preview.(string); ok2 && s != "" {
+			// The model wrote the command and the file holds the diff: an
+			// escape sequence in either must not redraw the prompt itself.
+			s = termsafe.Clean(s)
 			inner.WriteByte('\n')
 			// Multi-line diff receives full coloring; single-line summary
 			// is rendered in dim white.
@@ -209,7 +213,7 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx int) stri
 		}
 		shown = true
 		v := req.input[k]
-		val := fmt.Sprintf("%v", v)
+		val := termsafe.Clean(fmt.Sprintf("%v", v))
 		if len(val) > 80 {
 			val = strings.ToValidUTF8(val[:77], "") + "..."
 		}
