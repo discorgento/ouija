@@ -44,10 +44,11 @@ type Logf func(format string, a ...any)
 // tool namespace); they default to the ouija CLI identity and are overridden
 // when the server is embedded in an external totem binary.
 type Server struct {
-	root   string
-	logf   Logf
-	name   string
-	prefix string
+	root       string
+	configPath string // explicit project config; "" = discover from the cwd
+	logf       Logf
+	name       string
+	prefix     string
 }
 
 // New resolves the sandbox root (the config's ProjectRoot when it points
@@ -57,7 +58,7 @@ func New(logf Logf) (*Server, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	root, err := resolveProjectRoot()
+	root, err := resolveProjectRoot("")
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +76,18 @@ func (s *Server) SetName(name string) {
 	s.name, s.prefix = name, name+"_"
 }
 
+// SetConfigPath pins the project config every tool call runs with (and the
+// sandbox root resources are read from), instead of discovering it from the
+// working directory. An empty path restores discovery.
+func (s *Server) SetConfigPath(path string) error {
+	root, err := resolveProjectRoot(path)
+	if err != nil {
+		return err
+	}
+	s.root, s.configPath = root, path
+	return nil
+}
+
 // Logf lets callers (like cmd/ouija-mcp) emit diagnostics through the same
 // stderr logger the server uses internally.
 func (s *Server) Logf(f string, a ...any) {
@@ -84,9 +97,9 @@ func (s *Server) Logf(f string, a ...any) {
 // resolveProjectRoot resolves the sandbox root. Doing this here rather than in
 // init() keeps file I/O out of process startup, so a usage error can still be
 // reported before any config lookup.
-func resolveProjectRoot() (string, error) {
+func resolveProjectRoot(configPath string) (string, error) {
 	root := ""
-	cfg, _, err := app.DiscoverConfig("")
+	cfg, _, err := app.DiscoverConfig(configPath)
 	if err == nil && cfg.ProjectRoot != "." {
 		root = cfg.ProjectRoot
 	} else {
@@ -229,7 +242,7 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 	s.logf("tools/call %s", p.Name)
 
 	outcome, runErr := app.Run(ctx, module,
-		registry.Args{Task: p.Arguments.Task}, "", false, "")
+		registry.Args{Task: p.Arguments.Task}, s.configPath, false, "")
 	if runErr != nil {
 		s.writeToolResult(out, req.ID, toolErrorText(runErr), true)
 		return

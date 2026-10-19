@@ -29,7 +29,8 @@ type App struct {
 	// global defaults apply).
 	ConfigPath string
 
-	name string
+	name             string
+	explicitConfPath string // WithConfigPath, honoured by ServeMCP
 }
 
 type options struct {
@@ -75,10 +76,11 @@ func Setup(ctx context.Context, opts ...Option) (*App, error) {
 		return nil, err
 	}
 	return &App{
-		Engine:     out.Engine,
-		Config:     out.Config,
-		ConfigPath: out.ConfigPath,
-		name:       o.name,
+		Engine:           out.Engine,
+		Config:           out.Config,
+		ConfigPath:       out.ConfigPath,
+		name:             o.name,
+		explicitConfPath: o.configPath,
 	}, nil
 }
 
@@ -92,5 +94,12 @@ func (a *App) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("mcp: %w", err)
 	}
 	srv.SetName(a.name)
+	// Tool calls build a fresh engine per call (own budget), so the server
+	// needs the same config source Setup used — not a cwd rediscovery.
+	if a.explicitConfPath != "" {
+		if err := srv.SetConfigPath(a.explicitConfPath); err != nil {
+			return fmt.Errorf("mcp: %w", err)
+		}
+	}
 	return srv.Serve(ctx, in, out)
 }
