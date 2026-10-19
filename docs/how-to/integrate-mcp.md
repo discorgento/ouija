@@ -93,7 +93,13 @@ In Cursor settings, add a new MCP server with command `ouija` and argument `mcp`
 2. The server discovers config, builds the engine, runs the totem, and returns
    the result.
 3. Budget ceilings apply (the host prompts for approval before each call).
+   Each call gets a fresh engine, so each has its own budget.
 4. The host sees the result as a tool response.
+
+Calls run concurrently: a long `ouija_task` does not block `ping`,
+`tools/list` or another call. A host that sends `notifications/cancelled`
+stops the call (and its spending) right away, and no response is sent for it.
+When the host closes the connection, calls still running are cancelled.
 
 ---
 

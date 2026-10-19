@@ -8,6 +8,8 @@
 //   - stdout carries ONLY protocol messages; all logging goes to stderr.
 //   - messages are newline-delimited JSON (the MCP stdio framing).
 //   - only registered totems are exposed; nothing else is callable.
+//   - tools/call runs in its own goroutine: a long totem never blocks ping,
+//     tools/list or other calls, and notifications/cancelled stops it.
 package mcp
 
 import (
@@ -19,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
@@ -49,6 +52,20 @@ type Server struct {
 	logf       Logf
 	name       string
 	prefix     string
+
+	// run executes a totem for tools/call; nil means app.Run. Tests stub it.
+	run func(ctx context.Context, totem string, args registry.Args) (any, error)
+
+	writeMu sync.Mutex // concurrent tool calls share the output stream
+
+	callsMu sync.Mutex
+	calls   map[string]*inflightCall // request id → running tools/call
+	wg      sync.WaitGroup           // running tools/call goroutines
+}
+
+// inflightCall is a running tools/call the client can cancel.
+type inflightCall struct {
+	cancel context.CancelFunc
 }
 
 // New resolves the sandbox root (the config's ProjectRoot when it points
@@ -120,8 +137,15 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 
 // Run is the in-process entry point used by tests and cmd/ouija-mcp.
 // It reads from in, writes to out, and logs via s.logf.
-// Returns when in reaches EOF or an error occurs.
+// Returns when in reaches EOF or an error occurs. Tool calls still running
+// then are cancelled (the client is gone; stop spending budget), and Run waits
+// for them, so nothing writes to out after it returns.
 func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		s.wg.Wait()
+	}()
 	reader := bufio.NewReader(in)
 	writer := bufio.NewWriter(out)
 	for {
@@ -187,6 +211,13 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 		})
 	case "notifications/initialized":
 		// notification — no response
+	case "notifications/cancelled":
+		var p struct {
+			RequestID json.RawMessage `json:"requestId"`
+		}
+		if json.Unmarshal(req.Params, &p) == nil && s.cancelCall(p.RequestID) {
+			s.logf("request %s cancelled by the client", p.RequestID)
+		}
 	case "ping":
 		s.writeResult(out, req.ID, map[string]any{})
 	case "tools/list":
@@ -241,13 +272,79 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 	}
 	s.logf("tools/call %s", p.Name)
 
-	outcome, runErr := app.Run(ctx, module,
-		registry.Args{Task: p.Arguments.Task}, s.configPath, false, "")
-	if runErr != nil {
-		s.writeToolResult(out, req.ID, toolErrorText(runErr), true)
-		return
+	args := registry.Args{Task: p.Arguments.Task}
+	s.startCall(ctx, req.ID, func(callCtx context.Context) {
+		result, runErr := s.runTotem(callCtx, module, args)
+		if callCtx.Err() != nil && ctx.Err() == nil {
+			// Cancelled by the client: MCP says not to answer a cancelled request.
+			s.logf("tools/call %s stopped", p.Name)
+			return
+		}
+		if runErr != nil {
+			s.writeToolResult(out, req.ID, toolErrorText(runErr), true)
+			return
+		}
+		s.writeToolResult(out, req.ID, render(result), false)
+	})
+}
+
+// runTotem runs one totem for a tool call, on a fresh engine (its own budget).
+func (s *Server) runTotem(ctx context.Context, totem string, args registry.Args) (any, error) {
+	if s.run != nil {
+		return s.run(ctx, totem, args)
 	}
-	s.writeToolResult(out, req.ID, render(outcome.Result), false)
+	outcome, err := app.Run(ctx, totem, args, s.configPath, false, "")
+	if err != nil {
+		return nil, err
+	}
+	return outcome.Result, nil
+}
+
+// startCall runs fn in its own goroutine, under a context the client can
+// cancel with notifications/cancelled (keyed by the request id).
+func (s *Server) startCall(ctx context.Context, id json.RawMessage, fn func(ctx context.Context)) {
+	ctx, cancel := context.WithCancel(ctx)
+	call := &inflightCall{cancel: cancel}
+	key := callKey(id)
+
+	s.callsMu.Lock()
+	if s.calls == nil {
+		s.calls = make(map[string]*inflightCall)
+	}
+	s.calls[key] = call
+	s.callsMu.Unlock()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer func() {
+			s.callsMu.Lock()
+			if s.calls[key] == call { // a reused id may have replaced it
+				delete(s.calls, key)
+			}
+			s.callsMu.Unlock()
+			cancel()
+		}()
+		fn(ctx)
+	}()
+}
+
+// cancelCall cancels the running tools/call with this request id, reporting
+// whether one was running.
+func (s *Server) cancelCall(id json.RawMessage) bool {
+	s.callsMu.Lock()
+	call, ok := s.calls[callKey(id)]
+	s.callsMu.Unlock()
+	if ok {
+		call.cancel()
+	}
+	return ok
+}
+
+// callKey normalizes a JSON-RPC id (number or string) into a map key, so
+// `7` and ` 7 ` in a cancellation name the same request.
+func callKey(id json.RawMessage) string {
+	return strings.TrimSpace(string(id))
 }
 
 // toolErrorText renders a totem failure as the tool result text. When the error
@@ -404,6 +501,8 @@ func (s *Server) write(out *bufio.Writer, msg any) {
 		s.logf("marshal error: %v", err)
 		return
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	out.Write(b)
 	out.WriteByte('\n')
 	out.Flush()
