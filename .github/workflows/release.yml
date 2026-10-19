@@ -1,0 +1,71 @@
+# Release pipeline — release-please + make dist.
+#
+# Flow (no manual version editing anywhere):
+#   1. Push to main with Conventional Commits (feat/fix/perf/docs).
+#   2. release-please opens/updates a "release" PR with the version bump,
+#      the CHANGELOG.md section and the fallback in internal/version/version.go.
+#   3. Merging that PR creates the tag vX.Y.Z + the GitHub Release.
+#   4. This same workflow (same run, same token) then cross-compiles the
+#      archives with `make dist` and attaches them to the release.
+#
+# Artifacts run in the SAME workflow on purpose: releases created with the
+# default GITHUB_TOKEN do not trigger other workflows (`on: release` would
+# never fire).
+#
+# Repo settings needed once: Settings → Actions → General →
+#   "Allow GitHub Actions to create and approve pull requests".
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    name: release PR → tag + GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  artifacts:
+    name: cross-compile + attach binaries
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build the release archives (5 targets)
+        run: make dist VERSION=${{ needs.release-please.outputs.tag }}
+
+      - name: Attach artifacts and flag 0.x as pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: |
+          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
+          # While the major is 0 the project is in beta: flag the release as
+          # a pre-release. Drop this block when 1.0.0 lands.
+          case "$TAG" in
+            v0.*) gh release edit "$TAG" --prerelease ;;
+          esac
