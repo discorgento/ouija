@@ -539,13 +539,13 @@ func TestRenderLiveSummary(t *testing.T) {
 
 // /help lists every command and key, the /permit row whole.
 func TestHelp(t *testing.T) {
-	out := ansi.Strip(renderHelp(160))
+	out := ansi.Strip(renderHelp(slashCommands(), 160))
 	for _, want := range []string{"◆ commands", "◆ keys", "/permit [tool] allow|ask|deny", "Ctrl+F", "/retry"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
 		}
 	}
-	for i, l := range strings.Split(ansi.Strip(renderHelp(70)), "\n") {
+	for i, l := range strings.Split(ansi.Strip(renderHelp(slashCommands(), 70)), "\n") {
 		if ansi.StringWidth(l) > 70 {
 			t.Errorf("narrow help line %d is %d wide", i+1, ansi.StringWidth(l))
 		}
@@ -677,5 +677,51 @@ func TestHistorySearch(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.input.Value() != "explain the budget" {
 		t.Fatalf("Esc lost the draft: %q", m.input.Value())
+	}
+}
+
+// A failed command shows why and how it ended even with the details closed;
+// the details show every command's last lines.
+func TestFailedCommandOutput(t *testing.T) {
+	m := newModel(&switchEngine{cfg: &engine.Config{}}, nil, "", "")
+	l := &line{role: "assistant", tools: engine.TurnSummary{Tools: []engine.TurnTool{
+		{Name: "bash", Target: "go build", Duration: 1, Output: "ok"},
+		{Name: "bash", Target: "go test ./...", Duration: 1, Error: "exit status 1", Output: "line1\nline2\n--- FAIL: TestX\nFAIL\tpkg"},
+	}}}
+	closed := ansi.Strip(strings.Join(m.renderTurnTools(l, 80), "\n"))
+	for _, want := range []string{"✗ 1 failed", "✗ bash go test ./...  exit status 1", "│ --- FAIL: TestX", "│ FAIL    pkg"} {
+		if !strings.Contains(closed, want) {
+			t.Errorf("closed view lacks %q:\n%s", want, closed)
+		}
+	}
+	if strings.Contains(closed, "line1") || strings.Contains(closed, "│ ok") {
+		t.Errorf("closed view shows too much:\n%s", closed)
+	}
+	m.showTrace = true
+	open := ansi.Strip(strings.Join(m.renderTurnTools(l, 80), "\n"))
+	if !strings.Contains(open, "│ ok") || !strings.Contains(open, "│ line1") {
+		t.Errorf("details lack the outputs:\n%s", open)
+	}
+}
+
+// The approval of a file to be written shows its content, numbered and
+// framed, instead of the raw argument.
+func TestApprovalShowsTheNewFile(t *testing.T) {
+	content := "package main\n\nfunc main() {}\n"
+	req := &approvalRequestMsg{tool: "write_file\x00/p/main.go", input: map[string]any{
+		"path": "main.go", "content": content, "_preview": "will create main.go (3 lines, 28 bytes)",
+	}}
+	out := ansi.Strip(RenderApprovalBox(req, 1, 0, 70))
+	for _, want := range []string{"✎ main.go", "+3 lines", "1 + package main", "3 + func main() {}", "will create main.go"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("approval lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "content:") {
+		t.Errorf("the raw content argument is shown too:\n%s", out)
+	}
+	long := strings.Repeat("x\n", 40)
+	if p := ansi.Strip(renderFilePreview("a.txt", long, 60)); !strings.Contains(p, "… 16 more lines") {
+		t.Errorf("long file not cut:\n%s", p)
 	}
 }

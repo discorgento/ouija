@@ -114,6 +114,8 @@ type model struct {
 	histSearch *search
 	// files is the project's file list for @mentions (nil until first used).
 	files []string
+	// cmds are the slash commands: the chat's and one per totem.
+	cmds []slashCmd
 	// runTotem runs a totem for /task (set by Run; nil in tests); totem is
 	// the one running, drawn live; totemSink forwards its run events.
 	// sessionID names the file the conversation is saved in (sessions.go).
@@ -216,7 +218,9 @@ type pendingEditFile struct {
 // newModel creates the chat model.
 func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath string) *model {
 	s := spinner.New()
-	s.Spinner = spinner.Dot
+	// spinner.Dot's frames end in a space, which pushed every line it
+	// starts one column right: the same dots, one cell each.
+	s.Spinner = spinner.Spinner{Frames: []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}, FPS: spinner.Dot.FPS}
 	s.Style = spinnerS
 
 	pi := newPaddedInput()
@@ -249,6 +253,7 @@ func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath s
 		rejectedTools: make(map[string]bool),
 		picker:        &Picker{},
 		focused:       true,
+		cmds:          slashCommands(),
 	}
 	m.welcome = loadWelcomeInfo(m.eng.Config().ProjectRoot)
 	linkRoot = m.eng.Config().ProjectRoot

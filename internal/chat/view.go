@@ -364,10 +364,10 @@ func (m *model) renderBottom(w int) string {
 		var cmdBuf strings.Builder
 		typed := strings.TrimSpace(m.input.Value())
 		cmdW := 0
-		for _, sc := range slashCmds {
+		for _, sc := range m.cmds {
 			cmdW = max(cmdW, lipgloss.Width(sc.cmd))
 		}
-		for i, sc := range slashCmds {
+		for i, sc := range m.cmds {
 			matches := strings.HasPrefix(sc.cmd, typed)
 			sel, s, desc := " ", ftDim, ftDim
 			if !matches {
@@ -416,14 +416,28 @@ func (m *model) renderBottom(w int) string {
 func (m *model) renderStatusLine() string {
 	elapsed := time.Since(m.responseStart)
 	var what string
-	if m.currentTool != "" {
+	if t := m.totem; t != nil {
+		running, done := 0, 0
+		for _, s := range t.runs {
+			if s.done {
+				done++
+			} else {
+				running++
+			}
+		}
+		what = slashTyped.Render(t.name) + hdrMeta.Render(fmt.Sprintf(" · %d hands on the board · %d done", running, done))
+	} else if m.currentTool != "" {
 		tool, arg, _ := strings.Cut(m.currentTool, ": ")
 		c := approvalToolColor(tool)
 		what = lipgloss.NewStyle().Bold(true).Foreground(c).Render(approvalToolIcon(tool)+" "+tool) +
 			" " + hdrMeta.Render(arg)
 	} else {
 		// The gradient flows with time: the spinner's ticks redraw the screen.
-		what = theme.GradientText("thinking…", int(elapsed/(80*time.Millisecond)))
+		shift := int(elapsed / (80 * time.Millisecond))
+		if theme.NoMotion {
+			shift = 0
+		}
+		what = theme.GradientText("thinking…", shift)
 	}
 	meta := fmt.Sprintf("%ds", int(elapsed.Seconds()))
 	if m.streamingTokens > 0 {
@@ -509,6 +523,8 @@ var tips = []string{
 	"Ctrl+F searches the conversation",
 	"/undo takes the last file change back",
 	"/task plans with several independent passes",
+	"/learn <fact> teaches ouija about this project",
+	"a failed command shows its last lines; Ctrl+T shows them all",
 	"Ctrl+T shows each tool call",
 	"Alt+Y copies the last code block",
 	"/retry asks the last message again",
@@ -629,7 +645,7 @@ func (m *model) rebuildContent() {
 			msgBuf.Reset()
 
 		case "help":
-			lineBuf.WriteString(AICard.Render(renderHelp(vpW-2), vpW))
+			lineBuf.WriteString(AICard.Render(renderHelp(m.cmds, vpW-2), vpW))
 
 		case "error":
 			lineBuf.WriteString(ErrorCard.Render(renderErrorBlock(l.meta, l.text, l.hint, vpW-4), vpW))
@@ -981,7 +997,7 @@ func (m *model) renderTurnTools(l *line, width int) []string {
 		return nil
 	}
 	if !m.showTrace {
-		return []string{renderToolsSummary(l.tools, width)}
+		return append([]string{renderToolsSummary(l.tools, width)}, failedCalls(l.tools, width)...)
 	}
 	out := renderToolsBlock(l.tools, width, false)
 	for _, tr := range strings.Split(l.trace, "\n") {

@@ -60,7 +60,7 @@ func (m *model) updateCmdList() bool {
 
 	// The command name itself: list the commands it can still become.
 	m.picker.Hide()
-	for i, sc := range slashCmds {
+	for i, sc := range m.cmds {
 		if strings.HasPrefix(sc.cmd, parts[0]) {
 			m.showCmdList = true
 			m.selCmdIdx = i
@@ -137,8 +137,8 @@ func (m *model) selectCompletion() {
 		m.picker.Hide()
 		return
 	}
-	if m.selCmdIdx >= 0 && m.selCmdIdx < len(slashCmds) {
-		m.input.SetValue(slashCmds[m.selCmdIdx].cmd)
+	if m.selCmdIdx >= 0 && m.selCmdIdx < len(m.cmds) {
+		m.input.SetValue(m.cmds[m.selCmdIdx].cmd)
 	}
 	m.showCmdList = false
 }

@@ -1,0 +1,40 @@
+ ● ouija 0.0.0 │ ⎇ main │ /proj                       claude-sonnet-5-5 · anthropic │ ctx ▱▱▱▱▱▱ 0%
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+                             ouija  ·  the board is listening  ·  /help
+
+                                                                                        You · 18:27
+                                                             explain the budget @engine/budget.go ▐
+                                                                       ⊕ attached: engine/budget.go
+
+   ▎ 18:27 ouija · 7.8s · 7.1k→518 tok · $0.03
+   ▎ ◇ 2 tools read_file, bash  ✗ 1 failed   Ctrl+T details
+   ▎   ✗ bash go test ./engine/...  exit status 1
+   ▎       │ --- FAIL: TestBudget
+   ▎       │ FAIL    engine
+   ▎
+   ▎ The budget caps tokens and  USD .
+   ▎
+   ▎ • MaxTokens
+   ▎ • MaxUSD
+
+ ╭─ ✎ engine/budget.go ─────────────────────────────────────────────────────────────────── +1 −1 ─╮
+ │ ⋯ @@ -10,3 +10,3 @@                                                                            │
+ │   10   func f() {                                                                              │
+ │   11 -     return old                                                                          │
+ │   11 +     return new                                                                          │
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ✕ the API key was refused                                                                        │
+│ 401 unauthorized                                                                                 │
+│ → run `ouija setup`                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ❯ Ask about the project… (/ for commands)                                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ 1 msg  4 steps  0m0s                 $0.03  7.6k tok  tip @ attaches a file to the message · /help

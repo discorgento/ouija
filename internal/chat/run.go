@@ -168,8 +168,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 		if err := m2.saveSession(); err != nil {
 			fmt.Fprintf(os.Stderr, "conversation not saved: %v\n", err)
 		}
-		env := append(os.Environ(), "OUIJA_THEME="+m2.restartTheme)
-		err := restartSelf(restartArgs(os.Args, m2.msgCount > 0), env)
+		err := restartSelf(restartArgs(os.Args, m2.msgCount > 0), withEnv(os.Environ(), "OUIJA_THEME", m2.restartTheme))
 		fmt.Fprintf(os.Stderr, "theme %s saved; could not restart (%v) — run ouija again to see it\n", m2.restartTheme, err)
 		return
 	}

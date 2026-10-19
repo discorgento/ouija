@@ -157,7 +157,7 @@ func TestSlashWithArgsIsSentAsTyped(t *testing.T) {
 func TestSlashCommandList(t *testing.T) {
 	m, _ := newSwitchModel(t)
 	typeInput(m, "/he")
-	if !m.showCmdList || slashCmds[m.selCmdIdx].cmd != "/help" {
+	if !m.showCmdList || m.cmds[m.selCmdIdx].cmd != "/help" {
 		t.Fatalf("/he: list=%v sel=%d", m.showCmdList, m.selCmdIdx)
 	}
 	typeInput(m, "/nope")
@@ -478,5 +478,24 @@ func TestThemePickerRestarts(t *testing.T) {
 	}
 	if got := strings.Join(restartArgs([]string{"ouija", "chat"}, false), " "); got != "ouija chat" {
 		t.Fatalf("a new conversation resumed: %q", got)
+	}
+}
+
+// A restart replaces the theme the previous restart set: mono, then ouija,
+// must end on ouija.
+func TestWithEnvReplaces(t *testing.T) {
+	env := withEnv([]string{"HOME=/h", "OUIJA_THEME=mono", "TERM=x", "OUIJA_THEME=dracula"}, "OUIJA_THEME", "ouija")
+	if got := strings.Join(env, " "); got != "HOME=/h TERM=x OUIJA_THEME=ouija" {
+		t.Fatalf("env = %q", got)
+	}
+}
+
+// An approval asked while the terminal is in the background notifies.
+func TestNotifyOnApprovalInTheBackground(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	m.focused = false
+	_, cmd := m.Update(approvalRequestMsg{tool: "bash\x00ls", input: map[string]any{"command": "ls"}, respCh: make(chan approvalResponseMsg, 1)})
+	if cmd == nil || !strings.Contains(fmt.Sprint(cmd().(tea.RawMsg).Msg), "waiting for your approval") {
+		t.Fatal("no notification for an approval in the background")
 	}
 }

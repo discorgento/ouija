@@ -245,6 +245,16 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width in
 		}
 	}
 
+	// A file to be written: its content, as it will be.
+	if c, ok := req.input["content"].(string); ok && baseTool(req.tool) == "write_file" {
+		p, _ := req.input["path"].(string)
+		for _, fl := range strings.Split(renderFilePreview(p, termsafe.Clean(c), inner), "\n") {
+			line(fl)
+		}
+		b.WriteByte('\n')
+		skip["content"] = true
+	}
+
 	// Remaining arguments (not _prefixed meta-keys like _preview).
 	shown := false
 	for _, k := range slices.Sorted(maps.Keys(req.input)) {

@@ -29,12 +29,13 @@ type slashCmd struct {
 	desc string
 }
 
-// slashCmds is the canonical list of all available slash commands.
-var slashCmds = []slashCmd{
+// baseSlashCmds are the chat's own slash commands (the totems add theirs:
+// slashCommands).
+var baseSlashCmds = []slashCmd{
 	{"/clear", "Clear chat history"},
-	{"/task <description>", "Plan it with the task totem: scout → passes → reconcile, drawn live"},
 	{"/retry", "Ask the last message again (a new reply replaces the last one)"},
 	{"/changes", "List the files ouija changed in this session"},
+	{"/learn [fact]", "Teach ouija a fact about this project (or list what it knows)"},
 	{"/theme [name]", "Pick the color theme (ouija, catppuccin, dracula, mono)"},
 	{"/sessions", "Resume an earlier conversation of this project"},
 	{"/undo", "Take back ouija's latest file change (not bash commands)"},
@@ -189,9 +190,9 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if parts[0] == "/task" {
+		if t, ok := m.totemCommand(parts[0]); ok {
 			m.input.Reset()
-			return m.startTotem("task", strings.TrimSpace(strings.TrimPrefix(input, "/task")))
+			return m.startTotem(t.name, strings.TrimSpace(strings.TrimPrefix(input, parts[0])))
 		}
 		if parts[0] == "/retry" {
 			m.input.Reset()
@@ -425,6 +426,10 @@ func (m *model) handleSlash(input string) bool {
 		} else if !m.showSessionsPicker() {
 			m.addBanner("no earlier conversation in this project yet")
 		}
+		return true
+
+	case "/learn":
+		m.learn(strings.TrimSpace(strings.TrimPrefix(input, "/learn")))
 		return true
 
 	case "/changes":
@@ -730,6 +735,14 @@ func (m *model) saveTheme(name string) {
 		return
 	}
 	m.addBanner("✓ theme " + strings.ToLower(name) + " saved — it applies the next time ouija starts")
+}
+
+// withEnv returns env with key set to value, replacing every earlier entry
+// of it: with a duplicate the first one wins, so appending kept the theme of
+// the previous restart (mono, then ouija, stayed mono).
+func withEnv(env []string, key, value string) []string {
+	out := slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return strings.HasPrefix(kv, key+"=") })
+	return append(out, key+"="+value)
 }
 
 // restartArgs are the arguments ouija restarts the chat with to apply a

@@ -195,17 +195,17 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.showCmdList {
 		switch key {
 		case "down":
-			m.selCmdIdx = (m.selCmdIdx + 1) % len(slashCmds)
+			m.selCmdIdx = (m.selCmdIdx + 1) % len(m.cmds)
 			return m, nil
 		case "up":
-			m.selCmdIdx = (m.selCmdIdx - 1 + len(slashCmds)) % len(slashCmds)
+			m.selCmdIdx = (m.selCmdIdx - 1 + len(m.cmds)) % len(m.cmds)
 			return m, nil
 		case "tab":
 			m.selectCompletion()
 			m.setViewportSize()
 			return m, nil
 		case "enter":
-			cmdName := strings.Fields(slashCmds[m.selCmdIdx].cmd)[0]
+			cmdName := strings.Fields(m.cmds[m.selCmdIdx].cmd)[0]
 			m.input.SetValue(cmdName)
 			m.showCmdList = false
 			return m.handleSend()

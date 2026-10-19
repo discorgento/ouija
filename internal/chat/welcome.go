@@ -113,7 +113,31 @@ func renderWelcomeBanner(shift, width, reveal int, cfg *engine.Config, info welc
 		panels = lipgloss.JoinVertical(lipgloss.Left, session, start)
 	}
 	b.WriteString(center(panels))
+	if totems := totemsPanel(min(width, max(lipgloss.Width(panels), 60))); totems != "" {
+		b.WriteString("\n" + center(totems))
+	}
 	return b.String()
+}
+
+// totemsPanel lists the registered totems — agents written in Go that run
+// several independent passes and reconcile them — with what each does and
+// how to run it here.
+func totemsPanel(width int) string {
+	totems := listTotems()
+	if len(totems) == 0 {
+		return ""
+	}
+	nameW := 0
+	for _, t := range totems {
+		nameW = max(nameW, len(t.name)+1)
+	}
+	var body strings.Builder
+	body.WriteString(panelTitle.Render("◆ totems") + panelHint.Render("  agents in Go: several hands on the board, one answer"))
+	for _, t := range totems {
+		row := panelCmd.Render(fmt.Sprintf("%-*s", nameW, "/"+t.name)) + "  " + panelKey.Render(t.summary)
+		fmt.Fprintf(&body, "\n%s", ansi.Truncate(row, max(width-4, 20), "…"))
+	}
+	return panelBorder.Width(width).Render(body.String())
 }
 
 // renderLogo paints the figlet logo with a diagonal gradient sheen, or just the
@@ -155,7 +179,7 @@ const introTicks = 12
 // introReveal is the intro's progress at tick (see renderWelcomeBanner), or
 // -1 once it is over.
 func introReveal(tick int) int {
-	if tick >= introTicks {
+	if tick >= introTicks || theme.NoMotion {
 		return -1
 	}
 	return tick * logoWidth() / introTicks
@@ -188,7 +212,7 @@ func sessionPanel(cfg *engine.Config, info welcomeInfo) string {
 		budget = strings.Join(limits, " · ")
 	}
 
-	memory := panelHint.Render(`none yet — ouija learn "…"`)
+	memory := panelHint.Render("none yet — /learn <fact>")
 	switch {
 	case info.facts == 1:
 		memory = panelVal.Render("1 fact")
@@ -216,7 +240,7 @@ func sessionPanel(cfg *engine.Config, info welcomeInfo) string {
 func startPanel() string {
 	rows := [][2]string{
 		{"@file", "attach a file to your message"},
-		{"/task", "plan it with several passes"},
+		{"/learn", "teach ouija a fact"},
 		{"/model", "switch the model"},
 		{"/theme", "change the colors"},
 		{"Ctrl+F", "search the conversation"},
@@ -277,7 +301,7 @@ func renderSessionSummary(m *model, cfg *engine.Config, tokens, steps int, usd f
 
 // renderHelp is /help: the slash commands and the keys, a name column in pink
 // and what it does beside it — two columns when the width allows.
-func renderHelp(width int) string {
+func renderHelp(cmdList []slashCmd, width int) string {
 	section := func(title string, rows [][2]string) string {
 		nameW := 0
 		for _, r := range rows {
@@ -291,8 +315,8 @@ func renderHelp(width int) string {
 		}
 		return b.String()
 	}
-	cmds := make([][2]string, len(slashCmds))
-	for i, c := range slashCmds {
+	cmds := make([][2]string, len(cmdList))
+	for i, c := range cmdList {
 		cmds[i] = [2]string{c.cmd, c.desc}
 	}
 	left, right := section("commands", cmds), section("keys", helpKeys)
@@ -305,3 +329,35 @@ func renderHelp(width int) string {
 	}
 	return strings.TrimSuffix(b.String(), "\n")
 }
+
+// learn saves a fact about the project (docs/knowledge.md, which the chat and
+// the task totem read) and tells the model now, for this conversation too;
+// with no fact it shows what ouija knows.
+func (m *model) learn(fact string) {
+	root := m.eng.Config().ProjectRoot
+	if fact == "" {
+		known := strings.TrimSpace(knowledge.Load(root))
+		if known == "" {
+			m.say("assistant", "Nothing learned about this project yet. Teach a fact with `/learn <fact>` — "+
+				"it goes to `"+knowledge.FileName+"` and every later chat and `/task` reads it.")
+			return
+		}
+		m.say("assistant", known)
+		return
+	}
+	if err := knowledge.Save(root, fact); err != nil {
+		m.addBanner("⚠ not learned: " + err.Error())
+		return
+	}
+	if !strings.Contains(m.system, knownFactsHeading) {
+		m.system += "\n\n" + knownFactsHeading + "\n"
+	}
+	m.system += "- " + fact + "\n"
+	m.welcome.facts++
+	m.welcomeKey = "" // the session panel counts the facts
+	m.addBanner("✓ learned — saved to " + knowledge.FileName + "; ouija will know it in every chat here")
+}
+
+// knownFactsHeading introduces the project facts in the system prompt (the
+// one cmd/ouija builds the chat's prompt with).
+const knownFactsHeading = "## Known project facts"

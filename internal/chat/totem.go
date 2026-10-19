@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,9 +60,11 @@ func (m *model) startTotem(name, desc string) (tea.Model, tea.Cmd) {
 	case m.waiting:
 		return m.toast("wait for the reply, or Esc to stop it, before /" + name)
 	case strings.TrimSpace(desc) == "":
-		return m.toast("say what to plan: /" + name + " <description>")
+		if t, ok := m.totemCommand("/" + name); ok && t.needsTask {
+			return m.toast("say what for: /" + name + " <what>")
+		}
 	}
-	m.lines = append(m.lines, line{role: "user", text: "/" + name + " " + desc, ts: time.Now().Format("15:04")})
+	m.lines = append(m.lines, line{role: "user", text: strings.TrimSpace("/" + name + " " + desc), ts: time.Now().Format("15:04")})
 	m.msgCount++
 	m.waiting = true
 	m.responseStart = time.Now()
@@ -162,4 +165,50 @@ func (m *model) renderTotemBoard(width int) []string {
 		lines = append(lines, ansi.Truncate(row, width, "…"))
 	}
 	return lines
+}
+
+// totemInfo is a registered totem as the chat offers it.
+type totemInfo struct {
+	name, summary string
+	needsTask     bool // its input schema requires a task
+}
+
+// listTotems returns the registered totems.
+func listTotems() []totemInfo {
+	var out []totemInfo
+	for _, t := range registry.List() {
+		info := totemInfo{name: t.Name(), summary: strings.ReplaceAll(t.Summary(), "->", "→")}
+		switch r := registry.InputSchema(t)["required"].(type) {
+		case []string:
+			info.needsTask = slices.Contains(r, "task")
+		case []any:
+			info.needsTask = slices.Contains(r, any("task"))
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
+// slashCommands are the chat's slash commands: one per totem first (they
+// run a séance right in the chat), then the chat's own.
+func slashCommands() []slashCmd {
+	var out []slashCmd
+	for _, t := range listTotems() {
+		arg := " [what]"
+		if t.needsTask {
+			arg = " <what>"
+		}
+		out = append(out, slashCmd{"/" + t.name + arg, "totem · " + t.summary})
+	}
+	return append(out, baseSlashCmds...)
+}
+
+// totemCommand resolves a slash command naming a registered totem.
+func (m *model) totemCommand(cmd string) (totemInfo, bool) {
+	for _, t := range listTotems() {
+		if cmd == "/"+t.name {
+			return t, true
+		}
+	}
+	return totemInfo{}, false
 }

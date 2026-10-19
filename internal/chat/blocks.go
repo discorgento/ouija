@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -84,6 +85,58 @@ func renderToolsBlock(sum engine.TurnSummary, width int, live bool) []string {
 			reason, _, _ := strings.Cut(termsafe.Clean(t.Error), "\n")
 			lines = append(lines, "    "+toolFail.Render(ansi.Truncate("└ "+reason, width-6, "…")))
 		}
+		lines = append(lines, outputLines(t, maxOutputLines, width)...)
+	}
+	return lines
+}
+
+// maxOutputLines is how much of a command's output the tool details show;
+// failedOutputLines how much a failed command shows with the details closed.
+const (
+	maxOutputLines    = 8
+	failedOutputLines = 3
+)
+
+// outputLines are the last n lines a command printed, indented under its
+// call, in red for a failed one.
+func outputLines(t engine.TurnTool, n, width int) []string {
+	if t.Output == "" {
+		return nil
+	}
+	out := strings.Split(termsafe.Clean(t.Output), "\n")
+	if len(out) > n {
+		out = out[len(out)-n:]
+	}
+	style := toolMeta
+	if t.Error != "" {
+		style = toolFail.Faint(true)
+	}
+	lines := make([]string, 0, len(out))
+	for _, l := range out {
+		l = strings.ReplaceAll(l, "\t", "    ")
+		lines = append(lines, "      "+toolMeta.Render("│ ")+style.Render(ansi.Truncate(l, max(width-8, 8), "…")))
+	}
+	return lines
+}
+
+// failedCalls are a finished turn's failed calls, each with its reason and
+// the end of its output: shown even with the details closed.
+func failedCalls(sum engine.TurnSummary, width int) []string {
+	var lines []string
+	shown := 0
+	for _, t := range sum.Tools {
+		if t.Error == "" {
+			continue
+		}
+		if shown == 2 {
+			lines = append(lines, "  "+toolMeta.Render("… more failed — Ctrl+T details"))
+			break
+		}
+		shown++
+		target := ansi.Truncate(termsafe.Clean(t.Target), max(width-len(t.Name)-24, 8), "…")
+		reason, _, _ := strings.Cut(termsafe.Clean(t.Error), "\n")
+		lines = append(lines, ansi.Truncate("  "+toolFail.Render("✗ "+t.Name)+" "+toolArg.Render(target)+"  "+toolFail.Render(reason), width, "…"))
+		lines = append(lines, outputLines(t, failedOutputLines, width)...)
 	}
 	return lines
 }
@@ -268,6 +321,40 @@ func renderDiffBlock(path, diff string, width int) string {
 			}
 			row(renderDiffCell(&r, lexer, inner))
 		}
+	}
+	b.WriteString(diffFrame.Render("╰" + strings.Repeat("─", width-2) + "╯"))
+	return b.String()
+}
+
+// maxPreviewLines is how much of a file to be written the approval shows.
+const maxPreviewLines = 24
+
+// renderFilePreview frames the content a write_file call would write, as the
+// diff block frames an edit: the file and its line count on the border, the
+// lines numbered and highlighted on the added-line background.
+func renderFilePreview(path, content string, width int) string {
+	width = max(width, 24)
+	inner := width - 4
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	stats := diffAddN.Render(fmt.Sprintf("+%d lines", len(lines)))
+	title := ansi.Truncate("✎ "+termsafe.Clean(cmp.Or(path, "new file")), max(inner-lipgloss.Width(stats)-6, 4), "…")
+	fill := max(width-lipgloss.Width(title)-lipgloss.Width(stats)-8, 1)
+	if path != "" {
+		title = fileLink(termsafe.Clean(path), title)
+	}
+	var b strings.Builder
+	b.WriteString(diffFrame.Render("╭─ ") + diffPath.Render(title) + " " +
+		diffFrame.Render(strings.Repeat("─", fill)) + " " + stats + diffFrame.Render(" ─╮") + "\n")
+	side := diffFrame.Render("│")
+	lexer := lexerFor(path)
+	for i, l := range lines {
+		if i == maxPreviewLines {
+			more := fmt.Sprintf("… %d more lines", len(lines)-i)
+			b.WriteString(side + " " + toolMeta.Render(padRight(more, inner)) + " " + side + "\n")
+			break
+		}
+		r := diffRow{kind: '+', num: i + 1, text: strings.ReplaceAll(l, "\t", "    ")}
+		b.WriteString(side + " " + renderDiffCell(&r, lexer, inner) + " " + side + "\n")
 	}
 	b.WriteString(diffFrame.Render("╰" + strings.Repeat("─", width-2) + "╯"))
 	return b.String()

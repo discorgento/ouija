@@ -10,11 +10,15 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/discorgento/ouija/internal/termsafe"
+	"github.com/discorgento/ouija/internal/theme"
 )
 
 // ─── Init ─────────────────────────────────────────────────────────────
 
 func (m *model) Init() tea.Cmd {
+	if theme.NoMotion { // no intro, no flowing colors
+		return tea.Batch(textarea.Blink, m.spinner.Tick)
+	}
 	return tea.Batch(textarea.Blink, tickCmd(), m.spinner.Tick)
 }
 
@@ -185,6 +189,10 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.showApproval(msg)
+		// In the background, the turn would wait unseen: say so.
+		if !m.focused {
+			return m, notifyCmd("waiting for your approval — " + displayToolName(msg.tool))
+		}
 		return m, nil
 
 	case tickMsg:

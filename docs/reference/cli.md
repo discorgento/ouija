@@ -124,7 +124,8 @@ pricing is set, the files changed).
 | `/clear` | Clear chat history |
 | `/retry` | Ask the last message again; the new reply replaces the last one (files already changed stay changed) |
 | `/changes` | List the files ouija changed in this session, with their `+N −M` |
-| `/task <description>` | Plan it with the `task` totem inside the chat — scout, passes and reconcile drawn live, then the plan (also saved to `docs/task-plan.md`) |
+| `/<totem> [what]` | Run a totem inside the chat — `/task <what>`, `/doc <what>`, `/sticker`, and any totem you register — its runs drawn live, then its result (`task` also saves the plan to `docs/task-plan.md`) |
+| `/learn [fact]` | Teach ouija a fact about the project (saved to `docs/knowledge.md` at the project root, read by every later chat and `/task`); alone, list what it knows |
 | `/sessions` | Resume an earlier conversation of this project |
 | `/theme [name]` | Pick the color theme (`ouija`, `catppuccin`, `dracula`, `mono`) from a list with each one's colors. It applies at once: the chat restarts with the conversation restored (on Windows, at the next start) |
 | `/undo` | Take back ouija's latest file change — `write_file`, `edit_file`, `delete_file` on a file, an edit from the editor; not `bash` commands nor a deleted directory. Repeat to go further back |

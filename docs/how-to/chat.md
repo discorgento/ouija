@@ -43,6 +43,11 @@ this page covers the workflows around them.
 
 ## After each turn
 
+- **Commands' output** — a failed command shows why and its last lines under
+  the reply even with the details closed; `Ctrl+T` shows every command's
+  last lines
+- **New files** — approving a `write_file` shows the content it will write,
+  numbered and highlighted, like the diff of an edit
 - **Tool calls** — one line under the reply's header sums the turn's tools up
   (`◇ list_dir .  ✓`, or `◇ 3 tools read_file ×2, bash  ✗ 1 failed`); `Ctrl+T`
   lists each call — target, `✓`/`✗`, duration, why a failed one failed — and
@@ -63,8 +68,10 @@ this page covers the workflows around them.
 the last message again; `/changes` lists the files changed this session;
 `/undo` takes ouija's latest file change back (repeat to go further — `bash`
 commands are not covered). `@path` in a message attaches that file: typing `@`
-opens a picker of the project's files. `/task <description>` runs the `task`
-totem right here — scout, passes and reconcile drawn live — and shows the plan.
+opens a picker of the project's files. Every totem runs right here as a slash
+command — `/task <description>`, `/doc`, `/sticker`, yours — its passes drawn
+live, then its result; the welcome lists them. `/learn <fact>` teaches ouija
+about the project (`docs/knowledge.md`), for every later chat and `/task`.
 Paths in tool lines, diffs and approvals are links (OSC 8): a click opens the
 file. Each conversation is saved; `ouija chat -c` (or `/sessions`) resumes one.
 `/theme` picks the colors (ouija, catppuccin, dracula, mono) and applies them

@@ -1,0 +1,40 @@
+ ● ouija 0.0.0 │ ⎇ main │ /proj                                                               claude-sonnet-5-5 · anthropic │ ctx ▱▱▱▱▱▱ 0%
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+   ◆ commands
+   /doc <what>                    totem · Generate a code-verified client document: scout → verify → compose → .html/.pdf/.md
+   /sticker [what]                totem · Generate a laptop sticker with real project metrics
+   /task <what>                   totem · Analyze a task: scout → N passes x dimensions → reconcile → plan
+   /clear                         Clear chat history
+   /retry                         Ask the last message again (a new reply replaces the last one)
+   /changes                       List the files ouija changed in this session
+   /learn [fact]                  Teach ouija a fact about this project (or list what it knows)
+   /theme [name]                  Pick the color theme (ouija, catppuccin, dracula, mono)
+   /sessions                      Resume an earlier conversation of this project
+   /undo                          Take back ouija's latest file change (not bash commands)
+   /save [file]                   Save conversation to markdown
+   /model [name]                  Show or change model (type /model + Enter to open picker)
+   /provider [name] [model]       Show or change provider and model (Enter opens a picker for each)
+   /permit [tool] allow|ask|deny  Permission: show, set default, or per-tool level
+   /debug                         Toggle debug logs (written to a file; the path is shown)
+   /help                          Show this help
+
+   ◆ keys
+   ↑                         Edit last message (empty input)
+   Alt+↑ / Alt+↓             Cycle input history
+   Shift+Enter / Alt+Enter   Insert a newline
+   Tab                       Accept the highlighted suggestion
+   PgUp / PgDn / Home / End  Scroll the transcript
+   Ctrl+Y                    Copy last assistant response to clipboard
+   Ctrl+T                    Show or hide each turn's tool calls one per line, with the span tree
+   Alt+Y                     Copy the last code block to clipboard
+   Ctrl+F                    Search the conversation (Enter/↓ next, ↑ previous, Esc close)
+   Ctrl+R                    Search the messages you sent; Enter puts one back in the box
+   Ctrl+S                    Select mode: release the mouse to select text (again to scroll)
+   Esc                       Cancel generation / clear pending queue
+   Ctrl+C / Ctrl+D           Quit
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ❯ Ask about the project… (/ for commands)                                                                                                │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ 1 msg  0m0s                                                                            0 tok  tip @ attaches a file to the message · /help
