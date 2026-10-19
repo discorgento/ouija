@@ -66,6 +66,7 @@ var ouijaStyleJSON = fmt.Sprintf(`{
     "list": {"level_indent": 2},
     "item": {"block_prefix": "• "},
     "enumeration": {"block_prefix": ". "},
+    "task": {"ticked": "☑ ", "unticked": "☐ "},
     "block_quote": {"color": "245", "italic": true},
     "link": {"color": "%[2]s", "underline": true},
     "hr": {"color": "#5f5f5f"}
@@ -425,7 +426,11 @@ func (m *model) renderStatusLine() string {
 				running++
 			}
 		}
-		what = slashTyped.Render(t.name) + hdrMeta.Render(fmt.Sprintf(" · %d hands on the board · %d done", running, done))
+		hands := "hands"
+		if running == 1 {
+			hands = "hand"
+		}
+		what = slashTyped.Render(t.name) + hdrMeta.Render(fmt.Sprintf(" · %d %s on the board · %d done", running, hands, done))
 	} else if m.currentTool != "" {
 		tool, arg, _ := strings.Cut(m.currentTool, ": ")
 		c := approvalToolColor(tool)

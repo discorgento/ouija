@@ -207,10 +207,11 @@ func TestViewFillsTheTerminalExactly(t *testing.T) {
 	}
 }
 
-// Markdown keeps its structure: list bullets and heading markers.
+// Markdown keeps its structure: list bullets, heading markers and the
+// checkboxes of a task list (a /task plan is one; they used to vanish).
 func TestGlamourKeepsListsAndHeadings(t *testing.T) {
-	out := ansi.Strip(renderGlamourFull("## Budget\n\n- MaxTokens\n- MaxUSD", 60))
-	for _, want := range []string{"## Budget", "• MaxTokens", "• MaxUSD"} {
+	out := ansi.Strip(renderGlamourFull("## Budget\n\n- MaxTokens\n- MaxUSD\n\n- [ ] to do\n- [x] done", 60))
+	for _, want := range []string{"## Budget", "• MaxTokens", "• MaxUSD", "☐ to do", "☑ done"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered markdown lacks %q:\n%s", want, out)
 		}
