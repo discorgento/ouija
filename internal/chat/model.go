@@ -108,8 +108,22 @@ type model struct {
 	focused bool
 	// selectMode releases the mouse so the terminal can select text (Ctrl+S).
 	selectMode bool
-	// search is the Ctrl+F transcript search.
-	search search
+	// search is the Ctrl+F transcript search; histSearch the Ctrl+R search
+	// of the messages sent (nil when closed).
+	search     search
+	histSearch *search
+	// files is the project's file list for @mentions (nil until first used).
+	files []string
+	// runTotem runs a totem for /task (set by Run; nil in tests); totem is
+	// the one running, drawn live; totemSink forwards its run events.
+	// sessionID names the file the conversation is saved in (sessions.go).
+	sessionID string
+	// restartTheme is the theme the chat quits to restart with ("" = none).
+	restartTheme string
+
+	runTotem  TotemRunner
+	totem     *totemRun
+	totemSink func(totemRunMsg)
 
 	// Tool progress.
 	currentTool string
@@ -131,7 +145,17 @@ type model struct {
 	modelFetching map[string]bool
 	modelFailedAt map[string]time.Time
 	pendingCmds   []tea.Cmd
-	lastRebuild   time.Time // throttles rebuildContent during streaming (~30fps)
+	lastRebuild   time.Time // throttles the streaming redraw (streamFrame)
+
+	// Streaming redraw (rebuildStreaming): the settled transcript's lines, and
+	// whether the viewport holds only their tail; the rendered complete
+	// paragraphs of the streaming reply.
+	staticLines   []string
+	vpTail        bool
+	streamHead    string
+	streamHeadOut string
+	streamWidth   int
+	lastToken     time.Time
 
 	// Slash command autocomplete.
 	showCmdList bool    // true when showing the slash command list (7 items, small)
@@ -227,6 +251,7 @@ func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath s
 		focused:       true,
 	}
 	m.welcome = loadWelcomeInfo(m.eng.Config().ProjectRoot)
+	linkRoot = m.eng.Config().ProjectRoot
 	m.rebuildContent()
 	return m
 }

@@ -20,6 +20,11 @@ func (m *model) updateCmdList() bool {
 
 	input := m.input.Value()
 	m.showCmdList = false
+	// An @mention being typed: the project's files that match it.
+	if typed, ok := typedMention(input); ok {
+		m.showFilePicker(typed)
+		return changed()
+	}
 	if !strings.HasPrefix(strings.TrimSpace(input), "/") {
 		m.picker.Hide()
 		return changed()
@@ -102,6 +107,22 @@ func (m *model) selectCompletion() {
 	if m.picker.Visible {
 		val := m.picker.SelectedValue()
 		if val == "" {
+			return
+		}
+		switch m.picker.Label {
+		case filePickerLabel:
+			m.completeMention(val)
+			m.picker.Hide()
+			return
+		case themePickerLabel:
+			m.picker.Hide()
+			m.input.Reset()
+			m.saveTheme(val)
+			return
+		case sessionsPickerLabel:
+			m.picker.Hide()
+			m.input.Reset()
+			m.resumeSession(val)
 			return
 		}
 		input := m.input.Value()

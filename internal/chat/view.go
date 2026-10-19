@@ -3,6 +3,7 @@ package chat
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +27,10 @@ import (
 // violets, list items keep their bullets, inline code is pink on dark, and code
 // blocks are syntax-highlighted in the same palette. Code blocks get no
 // background of their own: the card's would be restored after every token.
-const ouijaStyleJSON = `{
+var ouijaStyleJSON = fmt.Sprintf(`{
     "strong": {"bold": true},
     "emph": {"italic": true},
-    "code": {"prefix": "\u00a0", "suffix": "\u00a0", "color": "213", "background_color": "#303030"},
+    "code": {"prefix": "\u00a0", "suffix": "\u00a0", "color": "%[1]s", "background_color": "#303030"},
     "code_block": {"margin": 1, "chroma": {
         "error": {"color": "#ffffff", "background_color": "#d7005f"},
         "comment": {"color": "#6c6c8a", "italic": true},
@@ -56,9 +57,9 @@ const ouijaStyleJSON = `{
         "generic_subheading": {"color": "#8a8a8a"}
     }},
     "heading": {"bold": true},
-    "h1": {"prefix": "# ", "color": "213", "bold": true},
-    "h2": {"prefix": "## ", "color": "141", "bold": true},
-    "h3": {"prefix": "### ", "color": "99", "bold": true},
+    "h1": {"prefix": "# ", "color": "%[1]s", "bold": true},
+    "h2": {"prefix": "## ", "color": "%[2]s", "bold": true},
+    "h3": {"prefix": "### ", "color": "%[3]s", "bold": true},
     "h4": {"prefix": "#### ", "bold": true},
     "h5": {"prefix": "##### ", "bold": true},
     "h6": {"prefix": "###### ", "bold": true},
@@ -66,9 +67,9 @@ const ouijaStyleJSON = `{
     "item": {"block_prefix": "• "},
     "enumeration": {"block_prefix": ". "},
     "block_quote": {"color": "245", "italic": true},
-    "link": {"color": "141", "underline": true},
+    "link": {"color": "%[2]s", "underline": true},
     "hr": {"color": "#5f5f5f"}
-}`
+}`, theme.Hex(theme.Pink), theme.Hex(theme.Lavender), theme.Hex(theme.Violet))
 
 // glamRenderers caches TermRenderer instances by word-wrap width.
 // Width rarely changes (only on terminal resize), so this avoids
@@ -397,7 +398,7 @@ func (m *model) renderBottom(w int) string {
 	} else {
 		border := theme.Violet // ready
 		switch {
-		case m.search.active:
+		case m.search.active, m.histSearch != nil:
 			border = theme.Amber
 		case m.waiting:
 			border = theme.Muted // typing now queues the message
@@ -490,7 +491,7 @@ func (m *model) renderStatusBar(width int) string {
 	case len(m.pendingQueue) > 0:
 		shortcuts = ftDim.Render("  ↑ edit · Ctrl+Y copy · Esc clear queue · /help")
 	default:
-		shortcuts = ftDim.Render("  ↑ edit · Ctrl+Y copy · /help")
+		shortcuts = "  " + ftScope.Render("tip ") + ftDim.Render(currentTip(time.Since(m.startTime))+" · /help")
 	}
 	if lipgloss.Width(left)+lipgloss.Width(right)+lipgloss.Width(shortcuts)+1 <= width {
 		right += shortcuts
@@ -500,6 +501,28 @@ func (m *model) renderStatusBar(width int) string {
 
 	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
 	return ansi.Truncate(left+strings.Repeat(" ", gap)+right, width, "…")
+}
+
+// tips teach the keys and commands one at a time, in the status bar.
+var tips = []string{
+	"@ attaches a file to the message",
+	"Ctrl+F searches the conversation",
+	"/undo takes the last file change back",
+	"/task plans with several independent passes",
+	"Ctrl+T shows each tool call",
+	"Alt+Y copies the last code block",
+	"/retry asks the last message again",
+	"ouija chat -c resumes the last conversation",
+	"Shift+Enter adds a new line",
+	"↑ edits your last message",
+}
+
+// tipEvery is how long a tip stays.
+const tipEvery = 20 * time.Second
+
+// currentTip is the tip shown elapsed into the session.
+func currentTip(elapsed time.Duration) string {
+	return tips[int(elapsed/tipEvery)%len(tips)]
 }
 
 // formatElapsed renders a session duration: "4m12s", or "1h04m" past an hour.
@@ -581,7 +604,7 @@ func (m *model) rebuildContent() {
 
 		switch l.role {
 		case "user":
-			lineBuf.WriteString(UserCard.Render(renderUserBubble(l.text, l.ts, vpW-2), vpW))
+			lineBuf.WriteString(UserCard.Render(renderUserBubble(l.text, l.ts, l.meta, vpW-2), vpW))
 
 		case "assistant":
 			pipePfx := "  " + pipeOui + " "
@@ -635,9 +658,37 @@ func (m *model) rebuildContent() {
 		buf.WriteString(l.cached)
 	}
 
+	// What is settled (the welcome and the lines) is kept apart from what is
+	// still moving (rebuildStreaming redraws only the latter).
+	static := buf.String()
+	m.staticLines = strings.Split(strings.TrimSuffix(static, "\n"), "\n")
+	m.vpTail = false
+	m.vp.SetContent(static + m.renderLive(vpW))
+
+	if m.search.query != "" {
+		m.applySearch() // the content changed under the highlights
+	}
+	if m.autoScroll {
+		m.vp.GotoBottom()
+		m.seenLines = len(m.lines)
+	}
+}
+
+// renderLive renders what moves while a reply runs, below the settled lines:
+// the turn's tools, the reply streaming in, the queued messages.
+func (m *model) renderLive(vpW int) string {
+	var buf strings.Builder
+	if m.totem != nil { // a totem's board replaces the chat turn's tools
+		pipePfx := "  " + pipeTrace + " "
+		var tb strings.Builder
+		for _, tl := range m.renderTotemBoard(msgContentWidth(vpW, pipePfx)) {
+			fmt.Fprintf(&tb, "%s%s\n", pipePfx, tl)
+		}
+		buf.WriteString(blockGap(vpW) + TraceCard.Render(tb.String(), vpW))
+	}
 	// The running turn's tools: one line counting them, or (Ctrl+T) each call
 	// as it starts and finishes.
-	if m.waiting {
+	if m.waiting && m.totem == nil {
 		pipePfx := "  " + pipeTrace + " "
 		sum, width := m.eng.Tracer().LastTurn(), msgContentWidth(vpW, pipePfx)
 		tools := renderToolsBlock(sum, width, true)
@@ -661,7 +712,7 @@ func (m *model) rebuildContent() {
 		contentWidth := msgContentWidth(vpW, pipePfx)
 		fmt.Fprintf(&msgBuf, "%s%s %s\n",
 			pipePfx, time.Now().Format("15:04"), roleOui.Render("ouija"))
-		rendered := renderGlamourFull(m.partialText, contentWidth)
+		rendered := m.renderStreamingMarkdown(m.partialText, contentWidth)
 		for _, line := range strings.Split(rendered, "\n") {
 			fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, line)
 		}
@@ -683,15 +734,83 @@ func (m *model) rebuildContent() {
 		buf.WriteString(blockGap(vpW) + BannerCard.Render(qBuf.String(), vpW))
 	}
 
-	m.vp.SetContent(buf.String())
+	return buf.String()
+}
 
-	if m.search.query != "" {
-		m.applySearch() // the content changed under the highlights
+// streamFrame is the shortest time between two redraws of a streaming reply:
+// about 20 frames a second, so the text flows instead of landing in chunks.
+const streamFrame = 50 * time.Millisecond
+
+// rebuildStreaming redraws a reply as it streams. At the bottom of the
+// transcript (the usual case) the viewport gets only the last screenful of
+// the settled lines plus the live block: measuring every line of a long
+// conversation on each frame cost more than drawing it. Scrolled up, or
+// searching, it falls back to the full rebuild.
+func (m *model) rebuildStreaming() {
+	if !m.autoScroll || m.search.query != "" || m.staticLines == nil {
+		m.rebuildContent()
+		return
 	}
-	if m.autoScroll {
-		m.vp.GotoBottom()
-		m.seenLines = len(m.lines)
+	vpW := max(m.vp.Width(), 10)
+	if vpW != m.cacheWidth {
+		m.rebuildContent()
+		return
 	}
+	keep := min(len(m.staticLines), m.vp.Height())
+	tail := append(slices.Clone(m.staticLines[len(m.staticLines)-keep:]),
+		strings.Split(m.renderLive(vpW), "\n")...) // as SetContent splits static+live
+	m.vp.SetContentLines(tail)
+	m.vpTail = true
+	m.vp.GotoBottom()
+}
+
+// fullTranscript puts the whole transcript back in the viewport when it holds
+// only the tail (rebuildStreaming), before the developer scrolls it.
+func (m *model) fullTranscript() {
+	if m.vpTail {
+		m.rebuildContent()
+	}
+}
+
+// renderStreamingMarkdown renders a reply still streaming: the paragraphs
+// already complete are rendered once and kept, only the last one is rendered
+// again on each frame. The final reply is rendered whole.
+func (m *model) renderStreamingMarkdown(text string, width int) string {
+	cut := settledMarkdown(text)
+	if cut == 0 {
+		return renderGlamourFull(text, width)
+	}
+	head, tail := text[:cut], text[cut:]
+	if head != m.streamHead || width != m.streamWidth {
+		m.streamHead, m.streamWidth = head, width
+		m.streamHeadOut = renderGlamourFull(head, width)
+	}
+	if strings.TrimSpace(tail) == "" {
+		return m.streamHeadOut
+	}
+	return m.streamHeadOut + "\n\n" + renderGlamourFull(tail, width)
+}
+
+// settledMarkdown returns where the complete paragraphs of text end: after
+// its last blank line outside a code fence (0 when there is none).
+func settledMarkdown(text string) int {
+	cut, inFence, pos := 0, false, 0
+	for _, l := range strings.SplitAfter(text, "\n") {
+		pos += len(l)
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+		}
+		if trimmed == "" && !inFence && strings.HasSuffix(l, "\n") {
+			cut = pos
+		}
+	}
+	if cut >= len(text) {
+		// Ending on a blank line: everything is settled but keep the last
+		// paragraph live (it may be a list or a table still growing).
+		return 0
+	}
+	return cut
 }
 
 // ─── Budget tracking ────────────────────────────────────────────────
@@ -826,18 +945,32 @@ var (
 			PaddingRight(1).
 			Border(lipgloss.Border{Right: "▐"}, false, true, false, false).
 			BorderForeground(theme.Pink)
-	bubbleHead = lipgloss.NewStyle().Foreground(theme.Muted)
+	bubbleHead   = lipgloss.NewStyle().Foreground(theme.Muted)
+	mentionStyle = lipgloss.NewStyle().Bold(true).Foreground(theme.Lavender)
 )
 
 // renderUserBubble renders a message of the developer as a bubble on the
 // right, at most three quarters of width wide, with "You · HH:MM" above it:
 // their side of the conversation reads apart from ouija's at a glance.
-func renderUserBubble(text, ts string, width int) string {
+//
+// attached lists the files the message @mentions (shown under it); the
+// mentions themselves are highlighted.
+func renderUserBubble(text, ts, attached string, width int) string {
 	maxW := max(min(width*3/4, width-4), 12)
 	lines := wrapLines(text, "", maxW-2) // padding (1) + edge (1)
+	for i, l := range lines {
+		lines[i] = mentionRe.ReplaceAllStringFunc(l, func(m string) string {
+			lead := m[:len(m)-len(strings.TrimLeft(m, " \t"))]
+			return lead + mentionStyle.Render(strings.TrimLeft(m, " \t"))
+		})
+	}
 	bubble := bubbleStyle.Render(strings.Join(lines, "\n"))
 	head := roleYou.Render("You") + bubbleHead.Render(" · "+ts)
-	block := lipgloss.JoinVertical(lipgloss.Right, head, bubble)
+	parts := []string{head, bubble}
+	if attached != "" {
+		parts = append(parts, bubbleHead.Render(ansi.Truncate("⊕ attached: "+attached, maxW, "…")))
+	}
+	block := lipgloss.JoinVertical(lipgloss.Right, parts...)
 	return lipgloss.PlaceHorizontal(width, lipgloss.Right, block)
 }
 

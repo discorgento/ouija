@@ -27,7 +27,8 @@ func (m *model) beginGeneration(input string) tea.Cmd {
 	m.liveTools = ""
 	m.eng.Tracer().NextTurn()
 	m.setViewportSize() // room for the status line; re-renders
-	return tea.Batch(m.startChat(input), m.spinner.Tick)
+	// The files the message @mentions go with it (read now, as they are).
+	return tea.Batch(m.startChat(m.withAttachments(input)), m.spinner.Tick)
 }
 
 // cancelGeneration stops the response in flight — only its per-generation
@@ -40,6 +41,7 @@ func (m *model) cancelGeneration() {
 	m.waiting = false
 	m.partialText = ""
 	m.currentTool = ""
+	m.totem = nil
 	m.gen++
 	for _, q := range m.approvalQueue { // their run is gone
 		q.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
@@ -56,7 +58,8 @@ func (m *model) dispatchQueued() tea.Cmd {
 	}
 	next := m.pendingQueue[0]
 	m.pendingQueue = m.pendingQueue[1:]
-	m.lines = append(m.lines, line{role: "user", text: next, ts: time.Now().Format("15:04")})
+	m.lines = append(m.lines, line{role: "user", text: next, ts: time.Now().Format("15:04"),
+		meta: strings.Join(m.mentionedFiles(next), " · ")})
 	m.msgCount++
 	return m.beginGeneration(next)
 }

@@ -37,6 +37,10 @@ type EngineAPI interface {
 	SetContextWindow(tokens int)
 	// SaveConfigAt persists config changes back to disk.
 	SaveConfigAt(path string) error
+	// Undo takes the latest file change back (/undo); SnapshotFile records a
+	// file before the chat changes it itself (an edit from the editor).
+	Undo() (string, error)
+	SnapshotFile(path string)
 	// SetLogger routes the engine's logs (/debug sends them to a file: the
 	// terminal belongs to the TUI).
 	SetLogger(l *slog.Logger)

@@ -85,6 +85,7 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.MouseWheelMsg:
+		m.fullTranscript() // the viewport may hold only the tail
 		vp, _ := m.vp.Update(msg)
 		m.vp = vp
 		evt := msg.Mouse()
@@ -105,10 +106,14 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.waiting {
 			return m, nil
 		}
-		// A tool started or finished: redraw the turn's live tools list.
+		// A tool started or finished, or tokens arrived since the last frame:
+		// redraw what moves.
 		if key := liveToolsKey(m.eng.Tracer().LastTurn()); key != m.liveTools {
 			m.liveTools = key
-			m.rebuildContent()
+			m.rebuildStreaming()
+		} else if m.lastRebuild.Before(m.lastToken) {
+			m.rebuildStreaming()
+			m.lastRebuild = time.Now()
 		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -121,6 +126,13 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		m.focused = false
 		return m, nil
+
+	case totemRunMsg:
+		m.totemEvent(msg)
+		return m, nil
+
+	case totemDoneMsg:
+		return m.totemDone(msg)
 
 	case toastClearMsg:
 		if msg.id == m.toastID {
@@ -137,18 +149,14 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.partialText += termsafe.Clean(msg.text)
+		m.lastToken = time.Now()
 		// Estimate output tokens during streaming so the footer updates live.
 		m.streamingTokens = len(m.partialText) / 4
-		// Rebuild at low frequency (2fps) during streaming —
-		// frequent enough for text to appear in chunks, rare enough
-		// so SetContent → maxLineWidth does not freeze scrolling.
-		// Between rebuilds, the viewport is not touched.
-		if time.Since(m.lastRebuild) > 500*time.Millisecond {
-			m.rebuildContent()
+		// Redraw at most every streamFrame; the spinner's tick draws what
+		// arrived since (the last tokens of a reply).
+		if time.Since(m.lastRebuild) >= streamFrame {
+			m.rebuildStreaming()
 			m.lastRebuild = time.Now()
-		}
-		if m.autoScroll {
-			m.vp.GotoBottom()
 		}
 		return m, nil
 
@@ -263,7 +271,8 @@ func (m *model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	editedContent := string(b)
 
-	// Write the edited content to the real file.
+	// Write the edited content to the real file (recorded first, for /undo).
+	m.eng.SnapshotFile(pe.path)
 	if err := os.WriteFile(pe.path, []byte(editedContent), 0o644); err != nil {
 		// Not applied: the model must not be told "already applied".
 		pe.respCh <- approvalResponseMsg{allowed: false, cancelled: true}

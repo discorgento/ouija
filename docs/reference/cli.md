@@ -9,6 +9,12 @@
 
 ## ouija
 
+### `ouija`
+
+On a terminal, opens the chat (`ouija chat`); the first time — no global
+config yet — it runs `ouija setup` first. Piped or scripted, it prints the
+help, as `ouija help` does.
+
 ### `ouija help`
 
 Prints the totem list and usage summary.
@@ -100,9 +106,15 @@ tools (subject to approval), token streaming, and conversation history.
 |---|---|---|
 | `--config` | `""` | Explicit config path |
 | `--trace-file` | `""` | Write a Perfetto/Chrome Trace JSON file |
+| `--continue`, `-c` | `false` | Resume this project's latest conversation (`/sessions` picks an older one) |
+
+Each conversation is saved after every reply, 0600, under the user cache
+directory (`ouija/sessions/`, one directory per project, the latest 30 kept):
+it holds what the tools read, so it is never written into the project.
 
 After the TUI exits, the session span tree is always rendered to stderr, followed
-by a one-line summary (messages · tokens · steps, plus cost when pricing is set).
+by a card summing the session up (time, messages, tokens, model, cost when
+pricing is set, the files changed).
 `--trace-file` additionally writes the Perfetto JSON file.
 
 #### Slash commands (inside the TUI)
@@ -112,6 +124,10 @@ by a one-line summary (messages · tokens · steps, plus cost when pricing is se
 | `/clear` | Clear chat history |
 | `/retry` | Ask the last message again; the new reply replaces the last one (files already changed stay changed) |
 | `/changes` | List the files ouija changed in this session, with their `+N −M` |
+| `/task <description>` | Plan it with the `task` totem inside the chat — scout, passes and reconcile drawn live, then the plan (also saved to `docs/task-plan.md`) |
+| `/sessions` | Resume an earlier conversation of this project |
+| `/theme [name]` | Pick the color theme (`ouija`, `catppuccin`, `dracula`, `mono`) from a list with each one's colors. It applies at once: the chat restarts with the conversation restored (on Windows, at the next start) |
+| `/undo` | Take back ouija's latest file change — `write_file`, `edit_file`, `delete_file` on a file, an edit from the editor; not `bash` commands nor a deleted directory. Repeat to go further back |
 | `/save [file]` | Export conversation to Markdown |
 | `/model [name]` | Show or switch model (with interactive picker) |
 | `/provider [name] [model]` | Show or switch provider and model; Enter on `/provider` or `/provider <name>` opens a picker, so you always choose the model |
@@ -128,6 +144,8 @@ by a one-line summary (messages · tokens · steps, plus cost when pricing is se
 | `Ctrl+T` | Show or hide each turn's tool calls one per line, with the span tree |
 | `Alt+Y` | Copy the last code block to clipboard |
 | `Ctrl+F` | Search the conversation: matches highlighted, `Enter`/`↓` next, `↑` previous, `Esc` close |
+| `Ctrl+R` | Search the messages you sent; `Enter` puts one back in the input box |
+| `@` | Attach a project file to the message: a picker of the project's files, filtered as you type |
 | `Ctrl+S` | Select mode: release the mouse to select text (again to scroll with the wheel) |
 | `Up` (empty input) | Load last user message for editing |
 | `Alt+Up` / `Alt+Down` | Cycle through input history |

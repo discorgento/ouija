@@ -3,6 +3,7 @@ package chat
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -31,6 +32,7 @@ type search struct {
 
 // openSearch turns the input box into the search box.
 func (m *model) openSearch() (tea.Model, tea.Cmd) {
+	m.fullTranscript() // search the whole transcript, not the streaming tail
 	m.search = search{active: true, draft: m.input.Value()}
 	m.input.Reset()
 	m.input.Placeholder = "search the conversation…"
@@ -110,4 +112,79 @@ func (m *model) searchStatus() string {
 		return "no match · Esc close"
 	}
 	return fmt.Sprintf("%d/%d · Enter/↓ next · ↑ previous · Esc close", m.search.current+1, m.search.matches)
+}
+
+// ─── History search (Ctrl+R) ──────────────────────────────────────────
+
+// historyPickerLabel is the picker's label while it searches the messages
+// sent before.
+const historyPickerLabel = "History"
+
+// openHistorySearch lists the messages sent this session, the latest first,
+// filtered as the developer types; Enter puts one back in the input box.
+func (m *model) openHistorySearch() (tea.Model, tea.Cmd) {
+	if len(m.inputHistory) == 0 {
+		return m.toast("no messages sent yet")
+	}
+	m.histSearch = &search{active: true, draft: m.input.Value()}
+	m.input.Reset()
+	m.input.Placeholder = "search your messages…"
+	m.filterHistory()
+	return m, nil
+}
+
+// filterHistory shows the sent messages containing the query.
+func (m *model) filterHistory() {
+	q := strings.ToLower(m.input.Value())
+	var items []string
+	for i := len(m.inputHistory) - 1; i >= 0; i-- {
+		h := m.inputHistory[i]
+		if strings.Contains(strings.ToLower(h), q) {
+			items = append(items, h)
+		}
+	}
+	if len(items) == 0 {
+		m.picker.Hide()
+	} else {
+		labels := make([]string, len(items))
+		for i, it := range items {
+			labels[i] = ansi.Truncate(strings.Join(strings.Fields(it), " "), 90, "…")
+		}
+		m.picker.Show(labels, items, historyPickerLabel)
+	}
+	m.setViewportSize()
+}
+
+// handleHistoryKey handles a key while the history search is open.
+func (m *model) handleHistoryKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.Keystroke() {
+	case "esc", "escape", "ctrl+r":
+		draft := m.histSearch.draft
+		m.closeHistorySearch(draft)
+		return m, nil
+	case "enter", "tab":
+		chosen := m.picker.SelectedValue()
+		if chosen == "" {
+			chosen = m.histSearch.draft
+		}
+		m.closeHistorySearch(chosen)
+		return m, nil
+	case "up", "down":
+		m.picker.HandleKey(msg.Keystroke())
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	m.filterHistory()
+	return m, cmd
+}
+
+// closeHistorySearch ends the history search with text in the input box.
+func (m *model) closeHistorySearch(text string) {
+	m.histSearch = nil
+	m.picker.Hide()
+	m.input.Placeholder = inputPlaceholder
+	m.input.SetValue(text)
+	m.input.CursorEnd()
+	m.setViewportSize()
 }

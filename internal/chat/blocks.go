@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/discorgento/ouija/engine"
@@ -61,7 +62,11 @@ func renderToolsBlock(sum engine.TurnSummary, width int, live bool) []string {
 		c := approvalToolColor(t.Name)
 		name := lipgloss.NewStyle().Bold(true).Foreground(c).Render(fmt.Sprintf("%s %-*s", approvalToolIcon(t.Name), nameW, t.Name))
 		target := ansi.Truncate(termsafe.Clean(t.Target), targetW, "…")
-		target = toolArg.Render(target) + strings.Repeat(" ", targetW-ansi.StringWidth(target))
+		pad := strings.Repeat(" ", targetW-ansi.StringWidth(target))
+		if pathTools[t.Name] {
+			target = fileLink(termsafe.Clean(t.Target), target)
+		}
+		target = toolArg.Render(target) + pad
 		status := toolOK.Render("✓")
 		switch {
 		case t.Error != "":
@@ -150,8 +155,12 @@ func renderToolsSummary(sum engine.TurnSummary, width int) string {
 	var what string
 	if len(sum.Tools) == 1 {
 		t := sum.Tools[0]
+		target := termsafe.Clean(t.Target)
+		if pathTools[t.Name] {
+			target = fileLink(target, target)
+		}
 		what = lipgloss.NewStyle().Foreground(approvalToolColor(t.Name)).Render(approvalToolIcon(t.Name)+" "+t.Name) +
-			" " + toolArg.Render(termsafe.Clean(t.Target))
+			" " + toolArg.Render(target)
 	} else {
 		parts := make([]string, len(order))
 		for i, n := range order {
@@ -230,6 +239,9 @@ func renderDiffBlock(path, diff string, width int) string {
 	// "╭─ " title " " fill " " stats " ─╮": 8 cells besides title, fill, stats.
 	fill := max(width-lipgloss.Width(title)-lipgloss.Width(stats)-8, 1)
 	var b strings.Builder
+	if path != "" {
+		title = fileLink(termsafe.Clean(path), title)
+	}
 	b.WriteString(diffFrame.Render("╭─ ") + diffPath.Render(title) + " " +
 		diffFrame.Render(strings.Repeat("─", fill)) + " " + stats + diffFrame.Render(" ─╮") + "\n")
 
@@ -237,36 +249,153 @@ func renderDiffBlock(path, diff string, width int) string {
 	row := func(content string) {
 		b.WriteString(side + " " + content + " " + side + "\n")
 	}
+	rows := parseDiff(diff)
+	lexer := lexerFor(path)
+	if width >= sideBySideWidth {
+		for _, r := range sideBySide(rows) {
+			if r.hunk != "" {
+				row(diffHunkSep.Render(padRight(ansi.Truncate("⋯ "+r.hunk, inner, "…"), inner)))
+				continue
+			}
+			half := (inner - 1) / 2
+			row(renderDiffCell(r.left, lexer, half) + diffFrame.Render("│") + renderDiffCell(r.right, lexer, inner-1-half))
+		}
+	} else {
+		for _, r := range rows {
+			if r.kind == 'h' {
+				row(diffHunkSep.Render(padRight(ansi.Truncate("⋯ "+r.text, inner, "…"), inner)))
+				continue
+			}
+			row(renderDiffCell(&r, lexer, inner))
+		}
+	}
+	b.WriteString(diffFrame.Render("╰" + strings.Repeat("─", width-2) + "╯"))
+	return b.String()
+}
+
+// sideBySideWidth is the width from which a diff shows old and new side by
+// side.
+const sideBySideWidth = 140
+
+// diffRow is one line of a diff: kind is 'h' (hunk header), '-', '+' or ' '
+// (context); num is its line number in the old file ('-') or the new one.
+type diffRow struct {
+	kind byte
+	num  int
+	text string
+}
+
+// parseDiff reads a diff from engine.BuildDiffSnippet into rows, numbering
+// the lines from the hunk headers.
+func parseDiff(diff string) []diffRow {
+	var rows []diffRow
 	oldN, newN := 0, 0
 	for _, l := range strings.Split(strings.TrimRight(diff, "\n"), "\n") {
 		if m := hunkHeader.FindStringSubmatch(l); m != nil {
 			oldN, _ = strconv.Atoi(m[1])
 			newN, _ = strconv.Atoi(m[2])
-			row(diffHunkSep.Render(padRight("⋯ "+strings.TrimSpace(l), inner)))
+			rows = append(rows, diffRow{kind: 'h', text: strings.TrimSpace(l)})
 			continue
 		}
 		body := strings.ReplaceAll(strings.TrimPrefix(l, "  "), "\t", "    ")
-		var num int
-		var style lipgloss.Style
-		sign := " "
 		switch {
 		case strings.HasPrefix(body, "-"):
-			num, style, sign, body = oldN, diffDelLine, "-", body[1:]
+			rows = append(rows, diffRow{kind: '-', num: oldN, text: body[1:]})
 			oldN++
 		case strings.HasPrefix(body, "+"):
-			num, style, sign, body = newN, diffAddLine, "+", body[1:]
+			rows = append(rows, diffRow{kind: '+', num: newN, text: body[1:]})
 			newN++
 		default:
-			num, style = newN, diffCtxLine
+			rows = append(rows, diffRow{kind: ' ', num: newN, text: body})
 			oldN++
 			newN++
 		}
-		gutter := toolMeta.Render(fmt.Sprintf("%4d ", num))
-		text := padRight(ansi.Truncate(sign+" "+body, inner-5, "…"), inner-5)
-		row(gutter + style.Render(text))
 	}
-	b.WriteString(diffFrame.Render("╰" + strings.Repeat("─", width-2) + "╯"))
-	return b.String()
+	return rows
+}
+
+// sideRow is a line of a side-by-side diff: old on the left, new on the
+// right (nil: nothing on that side), or a hunk header.
+type sideRow struct {
+	left, right *diffRow
+	hunk        string
+}
+
+// sideBySide pairs a diff's rows: context on both sides, a run of removed
+// lines beside the run of added lines that follows it.
+func sideBySide(rows []diffRow) []sideRow {
+	var out []sideRow
+	for i := 0; i < len(rows); {
+		r := &rows[i]
+		switch r.kind {
+		case 'h':
+			out = append(out, sideRow{hunk: r.text})
+			i++
+		case ' ':
+			out = append(out, sideRow{left: r, right: r})
+			i++
+		default:
+			var dels, adds []*diffRow
+			for ; i < len(rows) && rows[i].kind == '-'; i++ {
+				dels = append(dels, &rows[i])
+			}
+			for ; i < len(rows) && rows[i].kind == '+'; i++ {
+				adds = append(adds, &rows[i])
+			}
+			for j := range max(len(dels), len(adds)) {
+				var sr sideRow
+				if j < len(dels) {
+					sr.left = dels[j]
+				}
+				if j < len(adds) {
+					sr.right = adds[j]
+				}
+				out = append(out, sr)
+			}
+		}
+	}
+	return out
+}
+
+var (
+	diffAddBgCode = styleCode(theme.DiffAddBg, true)
+	diffDelBgCode = styleCode(theme.DiffDelBg, true)
+)
+
+// renderDiffCell renders one diff line in width cells: its number, its sign
+// and its code, highlighted; a removed or added line on a red or green
+// background. nil is an empty cell.
+func renderDiffCell(r *diffRow, lexer chroma.Lexer, width int) string {
+	if r == nil {
+		return strings.Repeat(" ", width)
+	}
+	gutter := toolMeta.Render(fmt.Sprintf("%4d ", r.num))
+	room := max(width-5, 1)
+	var sign, bg string
+	switch r.kind {
+	case '-':
+		sign, bg = diffDelN.Render("-")+" ", diffDelBgCode
+	case '+':
+		sign, bg = diffAddN.Render("+")+" ", diffAddBgCode
+	default:
+		sign = "  "
+	}
+	code := highlightCode(lexer, r.text)
+	if code == "" {
+		code = diffCtxLine.Render(r.text)
+		if r.kind == '-' {
+			code = diffDelLine.UnsetBackground().Render(r.text)
+		} else if r.kind == '+' {
+			code = diffAddLine.UnsetBackground().Render(r.text)
+		}
+	}
+	cell := ansi.Truncate(sign+code, room, "…")
+	cell += strings.Repeat(" ", max(room-ansi.StringWidth(cell), 0))
+	if bg != "" {
+		// The background survives every reset the highlighter wrote.
+		cell = bg + strings.ReplaceAll(strings.ReplaceAll(cell, "\x1b[0m", ansi.ResetStyle), ansi.ResetStyle, ansi.ResetStyle+bg) + ansi.ResetStyle
+	}
+	return gutter + cell
 }
 
 // padRight pads plain text with spaces to width cells.

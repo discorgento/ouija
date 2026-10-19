@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"log/slog"
 	"strings"
@@ -12,11 +13,13 @@ import (
 
 // switchEngine is the slice of EngineAPI /provider touches.
 type switchEngine struct {
-	cfg      *engine.Config
-	provider string
-	model    string
-	lastReq  engine.RunRequest
-	perm     *engine.PermissionConfig
+	cfg       *engine.Config
+	provider  string
+	model     string
+	lastReq   engine.RunRequest
+	perm      *engine.PermissionConfig
+	undo      func() (string, error)
+	snapshots []string
 }
 
 func (f *switchEngine) Chat(_ context.Context, req engine.RunRequest) (string, []engine.Message, error) {
@@ -36,6 +39,13 @@ func (f *switchEngine) SetProvider(p engine.Provider) {
 func (f *switchEngine) SaveConfigAt(string) error { return nil }
 func (f *switchEngine) SetLogger(*slog.Logger)    {}
 func (f *switchEngine) SetContextWindow(n int)    { f.cfg.ContextWindow = n }
+func (f *switchEngine) Undo() (string, error) {
+	if f.undo == nil {
+		return "", errors.New("nothing to undo")
+	}
+	return f.undo()
+}
+func (f *switchEngine) SnapshotFile(path string) { f.snapshots = append(f.snapshots, path) }
 
 type namedProvider struct{ name string }
 

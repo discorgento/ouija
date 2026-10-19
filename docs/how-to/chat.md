@@ -22,7 +22,8 @@ this page covers the workflows around them.
 
 ## What happens while the model works
 
-- **Token streaming** — text renders character by character as the model responds
+- **Token streaming** — the reply flows in about 20 times a second, even in a
+  long conversation
 - **Live tools** — while the turn runs, one line counts its tool calls
   (`◇ 4 tools · 3 ✓ · 1 awaiting your approval`); `Ctrl+T` lists them as they
   start and finish
@@ -59,7 +60,16 @@ this page covers the workflows around them.
   is doing
 
 `Ctrl+F` searches the conversation and highlights the matches; `/retry` asks
-the last message again; `/changes` lists the files changed this session. On
+the last message again; `/changes` lists the files changed this session;
+`/undo` takes ouija's latest file change back (repeat to go further — `bash`
+commands are not covered). `@path` in a message attaches that file: typing `@`
+opens a picker of the project's files. `/task <description>` runs the `task`
+totem right here — scout, passes and reconcile drawn live — and shows the plan.
+Paths in tool lines, diffs and approvals are links (OSC 8): a click opens the
+file. Each conversation is saved; `ouija chat -c` (or `/sessions`) resumes one.
+`/theme` picks the colors (ouija, catppuccin, dracula, mono) and applies them
+at once — the chat restarts with the conversation restored. A diff shows old
+and new side by side on a terminal 140 columns wide or more. On
 exit, a card sums the session up: time, messages, tokens, cost and the files
 ouija changed.
 

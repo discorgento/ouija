@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -473,7 +474,7 @@ func TestSearch(t *testing.T) {
 
 // The user's message is a bubble on the right.
 func TestUserBubbleIsOnTheRight(t *testing.T) {
-	out := ansi.Strip(renderUserBubble("hello", "10:00", 80))
+	out := ansi.Strip(renderUserBubble("hello", "10:00", "", 80))
 	for _, l := range strings.Split(out, "\n") {
 		if strings.TrimSpace(l) != "" && !strings.HasSuffix(strings.TrimRight(l, " "), strings.TrimSpace(l)) {
 			t.Fatalf("line not right-aligned: %q", l)
@@ -548,5 +549,133 @@ func TestHelp(t *testing.T) {
 		if ansi.StringWidth(l) > 70 {
 			t.Errorf("narrow help line %d is %d wide", i+1, ansi.StringWidth(l))
 		}
+	}
+}
+
+// The streaming redraw shows the same screen as a full rebuild, and the full
+// transcript comes back before a scroll.
+func TestStreamingRedrawMatchesTheFullOne(t *testing.T) {
+	m := newModel(&switchEngine{cfg: &engine.Config{}}, nil, "", "")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	for i := range 40 {
+		m.lines = append(m.lines, line{role: "assistant", text: fmt.Sprintf("reply %d\n\n- a\n- b", i), ts: "10:00"})
+	}
+	m.msgCount = 1
+	m.rebuildContent()
+	m.waiting = true
+	m.partialText = "First paragraph.\n\nSecond, **still** streaming"
+	m.rebuildContent()
+	full := m.vp.View() // the transcript area (the status line moves by itself)
+	m.rebuildStreaming()
+	if !m.vpTail {
+		t.Fatal("the streaming redraw did not use the tail")
+	}
+	if got := m.vp.View(); got != full {
+		t.Fatalf("streaming screen differs from the full one:\n--- full\n%s\n--- streaming\n%s", ansi.Strip(full), ansi.Strip(got))
+	}
+	m.fullTranscript()
+	if m.vpTail || !strings.Contains(ansi.Strip(m.vp.GetContent()), "reply 0") {
+		t.Fatal("fullTranscript did not restore the whole transcript")
+	}
+}
+
+// Complete paragraphs settle at the last blank line outside a code fence.
+func TestSettledMarkdown(t *testing.T) {
+	for text, want := range map[string]int{
+		"one line":                0,
+		"para one\n\npara two":    len("para one\n\n"),
+		"para\n\n```go\nx\n\ny\n": len("para\n\n"),
+		"a\n\nb\n\n":              0,
+		"```\ncode\n```\n\nafter": len("```\ncode\n```\n\n"),
+	} {
+		if got := settledMarkdown(text); got != want {
+			t.Errorf("settledMarkdown(%q) = %d, want %d", text, got, want)
+		}
+	}
+}
+
+// Paths link to the file (OSC 8) without changing what is shown.
+func TestFileLink(t *testing.T) {
+	old := linkRoot
+	t.Cleanup(func() { linkRoot = old })
+	linkRoot = "/proj"
+	got := fileLink("engine/a b.go", "a b.go")
+	if want := "\x1b]8;;file:///proj/engine/a%20b.go\x07a b.go\x1b]8;;\x07"; got != want {
+		t.Fatalf("fileLink = %q, want %q", got, want)
+	}
+	if ansi.StringWidth(got) != len("a b.go") {
+		t.Fatal("the link changes the width")
+	}
+	linkRoot = ""
+	if fileLink("rel.go", "rel.go") != "rel.go" {
+		t.Fatal("a relative path without a root got a link")
+	}
+}
+
+// The status bar's tip changes as the session goes on, and comes round again.
+func TestTipsRotate(t *testing.T) {
+	if currentTip(0) == currentTip(tipEvery) {
+		t.Fatal("the tip did not change")
+	}
+	if currentTip(0) != currentTip(tipEvery*time.Duration(len(tips))) {
+		t.Fatal("the tips do not cycle")
+	}
+}
+
+// From sideBySideWidth on, removed and added lines sit side by side, each
+// side numbered from its own file; the code is highlighted.
+func TestDiffSideBySide(t *testing.T) {
+	diff := "  @@ -10,4 +10,5 @@\n  func f() {\n  -\treturn old\n  +\tx := 1\n  +\treturn new\n  }"
+	out := renderDiffBlock("a.go", diff, 160)
+	plain := ansi.Strip(out)
+	var row string
+	for _, l := range strings.Split(plain, "\n") {
+		if strings.Contains(l, "return old") {
+			row = l
+		}
+	}
+	if !strings.Contains(row, "11 - ") || !strings.Contains(row, "11 + ") || !strings.Contains(row, "x := 1") {
+		t.Fatalf("old and new are not side by side:\n%s", plain)
+	}
+	for i, l := range strings.Split(plain, "\n") {
+		if w := ansi.StringWidth(l); w != 160 {
+			t.Errorf("line %d is %d wide, want 160", i+1, w)
+		}
+	}
+	if !strings.Contains(out, "\x1b[1m\x1b[38;2;175;135;255mreturn") && !strings.Contains(out, "175;135;255") {
+		t.Errorf("the Go keyword is not highlighted")
+	}
+	pairs := sideBySide(parseDiff(diff))
+	if len(pairs) != 5 || pairs[2].left == nil || pairs[3].left != nil || pairs[3].right == nil {
+		t.Fatalf("pairs = %+v", pairs)
+	}
+}
+
+// Ctrl+R lists the messages sent, filters them as you type, and Enter puts
+// the chosen one in the input box; Esc gives the draft back.
+func TestHistorySearch(t *testing.T) {
+	m := newModel(&switchEngine{cfg: &engine.Config{}}, nil, "", "")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.inputHistory = []string{"explain the budget", "run the tests", "fix the budget bar"}
+	m.input.SetValue("draft")
+	m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	if m.histSearch == nil || m.picker.Label != historyPickerLabel || m.picker.Items[0] != "fix the budget bar" {
+		t.Fatalf("not open: %+v %v", m.histSearch, m.picker.Items)
+	}
+	for _, r := range "budg" {
+		m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if len(m.picker.Items) != 2 {
+		t.Fatalf("filtered = %v", m.picker.Items)
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.histSearch != nil || m.input.Value() != "explain the budget" {
+		t.Fatalf("after Enter: %q", m.input.Value())
+	}
+	m.Update(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.input.Value() != "explain the budget" {
+		t.Fatalf("Esc lost the draft: %q", m.input.Value())
 	}
 }

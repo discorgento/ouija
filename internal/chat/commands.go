@@ -18,6 +18,7 @@ import (
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/models"
 	"github.com/discorgento/ouija/internal/termsafe"
+	"github.com/discorgento/ouija/internal/theme"
 )
 
 // ─── Slash commands ────────────────────────────────────────────────────
@@ -31,8 +32,12 @@ type slashCmd struct {
 // slashCmds is the canonical list of all available slash commands.
 var slashCmds = []slashCmd{
 	{"/clear", "Clear chat history"},
+	{"/task <description>", "Plan it with the task totem: scout → passes → reconcile, drawn live"},
 	{"/retry", "Ask the last message again (a new reply replaces the last one)"},
 	{"/changes", "List the files ouija changed in this session"},
+	{"/theme [name]", "Pick the color theme (ouija, catppuccin, dracula, mono)"},
+	{"/sessions", "Resume an earlier conversation of this project"},
+	{"/undo", "Take back ouija's latest file change (not bash commands)"},
 	{"/save [file]", "Save conversation to markdown"},
 	{"/model [name]", "Show or change model (type /model + Enter to open picker)"},
 	{"/provider [name] [model]", "Show or change provider and model (Enter opens a picker for each)"},
@@ -184,6 +189,10 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		if parts[0] == "/task" {
+			m.input.Reset()
+			return m.startTotem("task", strings.TrimSpace(strings.TrimPrefix(input, "/task")))
+		}
 		if parts[0] == "/retry" {
 			m.input.Reset()
 			return m.retryLast()
@@ -224,7 +233,8 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 	m.inputHistIdx = -1
 	m.inputSaved = ""
 
-	m.lines = append(m.lines, line{role: "user", text: input, ts: time.Now().Format("15:04")})
+	m.lines = append(m.lines, line{role: "user", text: input, ts: time.Now().Format("15:04"),
+		meta: strings.Join(m.mentionedFiles(input), " · ")})
 	m.msgCount++
 	return m, m.beginGeneration(input) // re-renders with the status line
 }
@@ -348,6 +358,11 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 		m.lines = append(m.lines, line{role: "banner", text: termsafe.Clean(notice)})
 	}
 
+	// Saved after each reply, so a crash or a closed terminal loses nothing.
+	if err := m.saveSession(); err != nil && m.debugLog != nil {
+		fmt.Fprintf(m.debugLog, "session not saved: %v\n", err)
+	}
+
 	if cmd := m.dispatchQueued(); cmd != nil {
 		return m, tea.Batch(notify, cmd) // re-renders with the status line back
 	}
@@ -390,8 +405,42 @@ func (m *model) handleSlash(input string) bool {
 	case "/help":
 		return m.showHelp()
 
+	case "/theme":
+		if len(parts) < 2 {
+			names := theme.Names()
+			items := make([]string, len(names))
+			for i, n := range names {
+				items[i] = fmt.Sprintf("%-11s %s", n, theme.Swatch(n))
+			}
+			m.picker.Show(items, names, themePickerLabel)
+			m.picker.Current = theme.Current
+			return true
+		}
+		m.saveTheme(parts[1])
+		return true
+
+	case "/sessions":
+		if m.waiting {
+			m.addBanner("⚠ wait for the reply, or Esc to stop it, before /sessions")
+		} else if !m.showSessionsPicker() {
+			m.addBanner("no earlier conversation in this project yet")
+		}
+		return true
+
 	case "/changes":
 		m.say("assistant", m.sessionChanges())
+		return true
+
+	case "/undo":
+		if m.waiting {
+			m.addBanner("⚠ wait for the reply, or Esc to stop it, before /undo")
+			return true
+		}
+		if msg, err := m.eng.Undo(); err != nil {
+			m.addBanner("⚠ " + err.Error())
+		} else {
+			m.addBanner("✓ ↶ " + msg)
+		}
 		return true
 
 	case "/debug":
@@ -494,6 +543,7 @@ var helpKeys = [][2]string{
 	{"Ctrl+T", "Show or hide each turn's tool calls one per line, with the span tree"},
 	{"Alt+Y", "Copy the last code block to clipboard"},
 	{"Ctrl+F", "Search the conversation (Enter/↓ next, ↑ previous, Esc close)"},
+	{"Ctrl+R", "Search the messages you sent; Enter puts one back in the box"},
 	{"Ctrl+S", "Select mode: release the mouse to select text (again to scroll)"},
 	{"Esc", "Cancel generation / clear pending queue"},
 	{"Ctrl+C / Ctrl+D", "Quit"},
@@ -614,7 +664,7 @@ func (m *model) retryLast() (tea.Model, tea.Cmd) {
 	// what followed, so the model does not see the old answer.
 	for i := len(m.history) - 1; i >= 0; i-- {
 		if m.history[i].Role == engine.RoleUser {
-			if m.history[i].Content == text {
+			if m.history[i].Content == m.withAttachments(text) {
 				m.history = m.history[:i]
 			}
 			break
@@ -656,4 +706,41 @@ func (m *model) sessionChanges() string {
 		fmt.Fprintf(&b, "- `%s` +%d −%d%s\n", p, c.added, c.removed, edits)
 	}
 	return b.String()
+}
+
+// themePickerLabel is the picker's label while it lists the themes.
+const themePickerLabel = "Themes"
+
+// saveTheme makes name the theme of the next start: the styles are built
+// once, when ouija starts.
+func (m *model) saveTheme(name string) {
+	if err := theme.Save(name); err != nil {
+		m.addBanner("⚠ " + err.Error())
+		return
+	}
+	if strings.EqualFold(name, theme.Current) {
+		m.addBanner("✓ " + name + " is the theme already")
+		return
+	}
+	// The styles are built when ouija starts: it restarts the chat, the
+	// conversation restored, so the theme shows now.
+	if canRestart && !m.waiting {
+		m.restartTheme = strings.ToLower(name)
+		m.pendingCmds = append(m.pendingCmds, tea.Quit)
+		return
+	}
+	m.addBanner("✓ theme " + strings.ToLower(name) + " saved — it applies the next time ouija starts")
+}
+
+// restartArgs are the arguments ouija restarts the chat with to apply a
+// theme: the same command, resuming the conversation when there is one.
+func restartArgs(args []string, resume bool) []string {
+	out := append([]string(nil), args...)
+	if len(out) < 2 { // bare `ouija` opened the chat
+		out = append(out, "chat")
+	}
+	if resume && !slices.Contains(out, "--continue") && !slices.Contains(out, "-c") {
+		out = append(out, "--continue")
+	}
+	return out
 }

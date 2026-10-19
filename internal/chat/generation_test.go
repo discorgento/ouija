@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/models"
+	"github.com/discorgento/ouija/registry"
 )
 
 func newSwitchModel(t *testing.T) (*model, *switchEngine) {
@@ -401,5 +403,80 @@ func TestNotifyStripsControls(t *testing.T) {
 	}
 	if n := strings.Count(seq, "\x1b"); n != 2 { // the two introducers only
 		t.Fatalf("%d ESCs in %q", n, seq)
+	}
+}
+
+// /undo says what it took back, or why it could not.
+func TestUndoCommand(t *testing.T) {
+	m, eng := newSwitchModel(t)
+	m.handleSlash("/undo")
+	if got := m.lines[len(m.lines)-1].text; got != "⚠ nothing to undo" {
+		t.Fatalf("empty journal: %q", got)
+	}
+	eng.undo = func() (string, error) { return "restored a.go", nil }
+	m.handleSlash("/undo")
+	if got := m.lines[len(m.lines)-1].text; got != "✓ ↶ restored a.go" {
+		t.Fatalf("undo: %q", got)
+	}
+}
+
+// /task runs the totem with the description, draws its runs live and shows
+// the plan it returns.
+func TestTaskTotemInTheChat(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	var gotArgs registry.Args
+	m.runTotem = func(_ context.Context, name string, args registry.Args, onRun engine.RunCallback) (string, error) {
+		gotArgs = args
+		return "## Plan\n\n- [ ] step one", nil
+	}
+	m.input.SetValue("/task add a cache")
+	_, cmd := m.handleSend()
+	if !m.waiting || m.totem == nil || cmd == nil {
+		t.Fatalf("not running: waiting=%v totem=%v", m.waiting, m.totem)
+	}
+	m.Update(totemRunMsg{ev: engine.RunEvent{Label: "scout"}, gen: m.gen})
+	m.Update(totemRunMsg{ev: engine.RunEvent{Label: "scout", Done: true, Duration: time.Second}, gen: m.gen})
+	m.Update(totemRunMsg{ev: engine.RunEvent{Label: "p1:risks"}, gen: m.gen})
+	board := ansi.Strip(strings.Join(m.renderTotemBoard(80), "\n"))
+	if !strings.Contains(board, "séance · task") || !strings.Contains(board, "✓ scout") || !strings.Contains(board, "p1:risks") {
+		t.Fatalf("board:\n%s", board)
+	}
+	text, err := m.runTotem(context.Background(), "task", registry.Args{Task: "add a cache"}, nil)
+	m.Update(totemDoneMsg{text: text, err: err, gen: m.gen})
+	if gotArgs.Task != "add a cache" {
+		t.Fatalf("task = %q", gotArgs.Task)
+	}
+	last := m.lines[len(m.lines)-1]
+	if m.waiting || m.totem != nil || last.role != "assistant" || !strings.Contains(last.text, "step one") || !strings.HasPrefix(last.meta, "task · ") {
+		t.Fatalf("after: waiting=%v last=%+v", m.waiting, last)
+	}
+}
+
+// /theme lists the themes with their colors; choosing one quits to restart
+// the chat with it, the conversation resumed (where exec exists).
+func TestThemePickerRestarts(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	m.handleSlash("/theme")
+	if !m.picker.Visible || m.picker.Label != themePickerLabel || !strings.Contains(ansi.Strip(m.picker.Items[1]), "■") {
+		t.Fatalf("picker: %v", m.picker.Items)
+	}
+	m.picker.selected = 2 // dracula
+	m.selectCompletion()
+	if !canRestart {
+		return
+	}
+	if m.restartTheme != "dracula" || len(m.pendingCmds) == 0 {
+		t.Fatalf("restartTheme=%q pending=%d", m.restartTheme, len(m.pendingCmds))
+	}
+	if got := strings.Join(restartArgs([]string{"ouija"}, true), " "); got != "ouija chat --continue" {
+		t.Fatalf("bare ouija restarts as %q", got)
+	}
+	if got := strings.Join(restartArgs([]string{"ouija", "chat", "-c"}, true), " "); got != "ouija chat -c" {
+		t.Fatalf("restart args = %q", got)
+	}
+	if got := strings.Join(restartArgs([]string{"ouija", "chat"}, false), " "); got != "ouija chat" {
+		t.Fatalf("a new conversation resumed: %q", got)
 	}
 }

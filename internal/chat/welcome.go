@@ -215,12 +215,12 @@ func sessionPanel(cfg *engine.Config, info welcomeInfo) string {
 // startPanel lists the commands and keys worth knowing first.
 func startPanel() string {
 	rows := [][2]string{
+		{"@file", "attach a file to your message"},
+		{"/task", "plan it with several passes"},
 		{"/model", "switch the model"},
-		{"/permit", "what tools may do"},
+		{"/theme", "change the colors"},
+		{"Ctrl+F", "search the conversation"},
 		{"/help", "every command and key"},
-		{"↑", "edit your last message"},
-		{"Ctrl+Y", "copy the last reply"},
-		{"Esc", "stop a reply"},
 	}
 	var body strings.Builder
 	body.WriteString(panelTitle.Render("◆ start here"))

@@ -158,7 +158,7 @@ func approvalTitle(req *approvalRequestMsg) string {
 	case baseTool(req.tool) == "bash":
 		return "ouija wants to run a command"
 	case verb != "" && path != "":
-		return "ouija wants to " + verb + " " + path
+		return "ouija wants to " + verb + " " + fileLink(path, path)
 	}
 	return "ouija wants to use " + displayToolName(req.tool)
 }

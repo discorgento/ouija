@@ -66,8 +66,14 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.search.active {
 		return m.handleSearchKey(msg)
 	}
+	if m.histSearch != nil {
+		return m.handleHistoryKey(msg)
+	}
 	if key == "ctrl+f" {
 		return m.openSearch()
+	}
+	if key == "ctrl+r" {
+		return m.openHistorySearch()
 	}
 
 	// ── Escape: cancel or clear queue ────────────────────────────────
@@ -137,6 +143,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// ── Viewport navigation ─────────────────────────────────────────
 	if key == "pgup" || key == "pgdown" || key == "home" || key == "end" {
+		m.fullTranscript() // the viewport may hold only the tail
 		vp, cmd := m.vp.Update(msg)
 		m.vp = vp
 		if key == "pgup" || key == "home" {
@@ -155,7 +162,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.picker.Visible {
 		if key == "tab" { // complete the highlighted item, and offer the next step
 			m.selectCompletion()
-			m.input.SetValue(m.input.Value() + " ")
+			if !strings.HasSuffix(m.input.Value(), " ") {
+				m.input.SetValue(m.input.Value() + " ")
+			}
 			m.input.CursorEnd()
 			m.updateCmdList()
 			m.setViewportSize()

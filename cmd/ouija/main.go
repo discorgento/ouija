@@ -16,12 +16,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/x/term"
+
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/chat"
 	"github.com/discorgento/ouija/internal/commands"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/mcp"
+	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/internal/progress"
 	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/internal/version"
@@ -71,6 +74,9 @@ func help() string {
 	b.WriteString("      --trace-file <f>  Write a Perfetto JSON trace\n")
 	b.WriteString("      Any command: --help shows its usage\n")
 
+	b.WriteString("\n  ◆ Start\n")
+	b.WriteString("      ouija              On a terminal: open the chat (the setup first, the first time)\n")
+
 	b.WriteString("\n  ◆ Info\n")
 	b.WriteString("      version            Print the version\n")
 	b.WriteString("      help               Show this help\n")
@@ -83,12 +89,29 @@ func help() string {
 	return b.String()
 }
 
+// interactive reports whether ouija runs on a terminal (stdin and out).
+func interactive(stdout io.Writer) bool {
+	f, ok := stdout.(*os.File)
+	return ok && term.IsTerminal(f.Fd()) && term.IsTerminal(os.Stdin.Fd())
+}
+
 // run is the testable entry point: it returns the exit code instead of calling
 // os.Exit, and writes to the given streams instead of the process globals.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
-		fmt.Fprint(stdout, help())
-		return 0
+		// On a terminal, bare `ouija` opens the chat — after the setup, the
+		// first time. Piped or scripted, it prints the help as it always did.
+		if !interactive(stdout) {
+			fmt.Fprint(stdout, help())
+			return 0
+		}
+		if global, err := ouijaconfig.Load(); err == nil && global == nil {
+			fmt.Fprintln(stdout, "First run: let's set ouija up (the same as `ouija setup`).")
+			if code := runCommand(commands.Setup, nil, stderr); code != 0 {
+				return code
+			}
+		}
+		return cmdChat(nil, stderr)
 	}
 	switch args[1] {
 	case "help", "-h", "--help":
@@ -246,6 +269,8 @@ func cmdChat(args []string, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to a JSON config")
 	traceFile := fs.String("trace-file", "", "path to write Perfetto JSON trace")
+	cont := fs.Bool("continue", false, "resume this project's latest conversation")
+	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -264,7 +289,7 @@ func cmdChat(args []string, stderr io.Writer) int {
 	}
 
 	eng := out.Engine
-	chat.Run(eng, out.ProviderFactory(), chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath)
+	chat.Run(eng, out.ProviderFactory(), chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath, chat.Options{Continue: *cont})
 
 	// The whole session's span tree (each turn was also shown in the chat).
 	app.FinishTrace(eng.Tracer(), stderr, *traceFile)
