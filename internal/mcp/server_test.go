@@ -4,14 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/registry"
 
 	_ "github.com/discorgento/ouija/totems" // register the real totems for tools/list
 )
@@ -28,6 +32,7 @@ func callOn(t *testing.T, s *Server, request string) map[string]any {
 
 	var buf bytes.Buffer
 	s.handleLine(context.Background(), []byte(request), bufio.NewWriter(&buf))
+	s.wg.Wait() // tools/call and resources/read answer from their own goroutine
 
 	out := strings.TrimSpace(buf.String())
 	if out == "" {
@@ -335,5 +340,82 @@ func TestWrite_FramingIsOneLinePerMessage(t *testing.T) {
 	}
 	if !strings.Contains(out, `\n`) {
 		t.Error("newline inside the value was not escaped")
+	}
+}
+
+// A message without an id is a notification: never answered, and a
+// tools/call sent as one does not run a totem.
+func TestNotificationsAreNotAnswered(t *testing.T) {
+	s := testServer(t.TempDir())
+	ran := false
+	s.run = func(context.Context, string, registry.Args) (any, error) { ran = true; return nil, nil }
+	for _, req := range []string{
+		`{"jsonrpc":"2.0","method":"ping"}`,
+		`{"jsonrpc":"2.0","id":null,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","method":"tools/call","params":{"name":"ouija_task","arguments":{"task":"x"}}}`,
+	} {
+		if resp := callOn(t, s, req); resp != nil {
+			t.Errorf("%s answered: %v", req, resp)
+		}
+	}
+	if ran {
+		t.Fatal("an id-less tools/call ran a totem")
+	}
+}
+
+// Valid JSON that is not a request is -32600 with its id; only bad JSON is -32700.
+func TestInvalidRequests(t *testing.T) {
+	for req, want := range map[string]float64{
+		`{"jsonrpc":"2.0","id":3,"method":5}`: -32600,
+		`null`:                                -32600,
+		`{}`:                                  -32600,
+		`{"jsonrpc":"2.0","id":4,`:            -32700,
+	} {
+		resp := call(t, req)
+		e, _ := resp["error"].(map[string]any)
+		if e == nil || e["code"] != want {
+			t.Errorf("%s → %v, want code %v", req, resp, want)
+		}
+	}
+	if resp := call(t, `{"jsonrpc":"2.0","id":3,"method":5}`); resp["id"] != float64(3) {
+		t.Errorf("invalid request lost its id: %v", resp)
+	}
+}
+
+// resources/read refuses what is not a regular file and sends binary as a blob.
+func TestResourceReadTypes(t *testing.T) {
+	root := t.TempDir()
+	png := []byte{0x89, 'P', 'N', 'G', 0xff, 0x00, 0xfe}
+	if err := os.WriteFile(filepath.Join(root, "bin.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := testServer(root)
+	resp := callOn(t, s, `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"ouija://project/bin.png"}}`)
+	c := resultOf(t, resp)["contents"].([]any)[0].(map[string]any)
+	if b, _ := base64.StdEncoding.DecodeString(c["blob"].(string)); !bytes.Equal(b, png) || c["text"] != nil {
+		t.Fatalf("binary contents = %v", c)
+	}
+	resp = callOn(t, s, `{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"ouija://project/dir"}}`)
+	if resp["error"] == nil {
+		t.Fatalf("a directory was read: %v", resp)
+	}
+}
+
+// Run returns when its context ends, even with stdin still open (SIGINT /
+// SIGTERM used to be ignored until stdin closed).
+func TestRunStopsOnContext(t *testing.T) {
+	r, w := io.Pipe()
+	defer w.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- testServer(t.TempDir()).Run(ctx, r, io.Discard) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run kept running after its context was cancelled")
 	}
 }

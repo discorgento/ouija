@@ -15,6 +15,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
@@ -136,18 +138,45 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 		cancel()
 		s.wg.Wait()
 	}()
-	reader := bufio.NewReader(in)
 	writer := bufio.NewWriter(out)
+	// Reads happen on their own goroutine so ctx can end Run: blocked in a
+	// read, Run ignored SIGINT/SIGTERM (caught by the caller's NotifyContext)
+	// and only stopped when stdin closed. That goroutine may outlive Run while
+	// a read is pending — stdin cannot be interrupted — but it hands over
+	// nothing more.
+	type read struct {
+		line []byte
+		err  error
+	}
+	lines := make(chan read)
+	go func() {
+		reader := bufio.NewReader(in)
+		for {
+			line, err := reader.ReadBytes('\n')
+			select {
+			case lines <- read{line, err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
 	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 {
-			s.handleLine(ctx, line, writer)
-		}
-		if err == io.EOF {
+		select {
+		case <-ctx.Done():
 			return nil
-		}
-		if err != nil {
-			return err
+		case r := <-lines:
+			if len(r.line) > 0 {
+				s.handleLine(ctx, r.line, writer)
+			}
+			if r.err == io.EOF {
+				return nil
+			}
+			if r.err != nil {
+				return r.err
+			}
 		}
 	}
 }
@@ -183,12 +212,30 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 	if len(line) == 0 {
 		return
 	}
-	var req rpcRequest
-	if err := json.Unmarshal(line, &req); err != nil {
+	if !json.Valid(line) {
 		s.writeError(out, nil, -32700, "parse error")
 		return
 	}
+	// Valid JSON that is not a request object (null, an array, a non-string
+	// method, no jsonrpc 2.0) is an Invalid Request — answered with whatever
+	// id it carries, so the client can match it.
+	var req rpcRequest
+	if err := json.Unmarshal(line, &req); err != nil || req.JSONRPC != "2.0" || req.Method == "" {
+		var probe struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.Unmarshal(line, &probe)
+		s.writeError(out, probe.ID, -32600, "invalid request")
+		return
+	}
+	// A notification (no id) is never answered, and only notifications/*
+	// methods mean anything as one: an id-less tools/call used to run a totem
+	// and reply with "id": null.
 	isNotification := len(req.ID) == 0 || string(req.ID) == "null"
+	if isNotification && !strings.HasPrefix(req.Method, "notifications/") {
+		s.logf("ignored %s sent as a notification (no id)", req.Method)
+		return
+	}
 
 	switch req.Method {
 	case "initialize":
@@ -218,7 +265,9 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 	case "resources/list":
 		s.writeResult(out, req.ID, map[string]any{"resources": resourceList()})
 	case "resources/read":
-		s.handleResourceRead(ctx, out, req)
+		// Off the read loop, like tools/call: a slow file (a FIFO, a network
+		// mount) must not stop every other request.
+		s.startCall(ctx, req.ID, func(callCtx context.Context) { s.handleResourceRead(callCtx, out, req) })
 	default:
 		if !isNotification {
 			s.writeError(out, req.ID, -32601, "method not found: "+req.Method)
@@ -398,14 +447,31 @@ func (s *Server) handleResourceRead(ctx context.Context, out *bufio.Writer, req 
 		return
 	}
 
+	// Regular files only, within a size cap: a FIFO blocked the server and a
+	// multi-GB file would be read into memory whole.
+	fi, err := os.Stat(full)
+	switch {
+	case err != nil:
+		s.writeError(out, req.ID, -32602, "cannot read: "+err.Error())
+		return
+	case !fi.Mode().IsRegular():
+		s.writeError(out, req.ID, -32602, "not a regular file: "+rel)
+		return
+	case fi.Size() > maxResourceBytes:
+		s.writeError(out, req.ID, -32602, fmt.Sprintf("file too large (%d bytes, limit %d): %s", fi.Size(), maxResourceBytes, rel))
+		return
+	}
 	data, err := os.ReadFile(full)
 	if err != nil {
 		s.writeError(out, req.ID, -32602, "cannot read: "+err.Error())
 		return
 	}
 
-	s.writeResourceResult(out, req.ID, p.URI, string(data), mimeType(rel))
+	s.writeResourceData(out, req.ID, p.URI, data, mimeType(rel))
 }
+
+// maxResourceBytes caps one resources/read.
+const maxResourceBytes = 10 << 20
 
 // mimeType returns a best-guess MIME type for a file path.
 func mimeType(path string) string {
@@ -440,15 +506,22 @@ func mimeType(path string) string {
 	}
 }
 
-// writeResourceResult sends a resources/read response.
+// writeResourceResult sends a resources/read response with text contents.
 func (s *Server) writeResourceResult(out *bufio.Writer, id json.RawMessage, uri, text, mime string) {
-	s.writeResult(out, id, map[string]any{
-		"contents": []map[string]any{{
-			"uri":      uri,
-			"mimeType": mime,
-			"text":     text,
-		}},
-	})
+	s.writeResourceData(out, id, uri, []byte(text), mime)
+}
+
+// writeResourceData sends file contents: as "text" when they are UTF-8 text,
+// else base64 in "blob", as MCP specifies — sent as text, a PNG's bytes were
+// replaced by U+FFFD and could not be recovered.
+func (s *Server) writeResourceData(out *bufio.Writer, id json.RawMessage, uri string, data []byte, mime string) {
+	content := map[string]any{"uri": uri, "mimeType": mime}
+	if utf8.Valid(data) && !strings.HasPrefix(mime, "image/") || mime == "image/svg+xml" && utf8.Valid(data) {
+		content["text"] = string(data)
+	} else {
+		content["blob"] = base64.StdEncoding.EncodeToString(data)
+	}
+	s.writeResult(out, id, map[string]any{"contents": []map[string]any{content}})
 }
 
 // --- JSON-RPC writers (single-line JSON + newline framing) ---
