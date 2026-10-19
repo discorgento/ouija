@@ -11,18 +11,24 @@
 ```
 cmd/              → Entry points (ouija CLI + `ouija mcp`, ouija-mcp standalone MCP server)
   └─ imports _ "github.com/discorgento/ouija/totems"  → auto-registered via go generate
+
+Public packages (importable by external totem modules):
+engine/           → Core agent loop, tools, sandbox, permissions, budget, tracing
+  └─ providers/   → Model adapters (anthropic, openai/openrouter/ollama, opencode)
+registry/         → Totem interface, registration and lookup
+schema/           → JSON Schema generation helpers
+bootstrap/        → Config discovery → ready engine (+ MCP) for embedders
+
 internal/
   ├─ app/         → Orchestration: config discovery, engine setup, totem lifecycle
-  ├─ engine/      → Core agent loop, providers, tools, budget, tracing
   ├─ mcp/         → MCP server (stdio) + harness registration (install/status)
-  ├─ registry/    → Totem registration and lookup
   ├─ chat/        → Bubble Tea TUI (interactive chat)
-  ├─ commands/    → CLI commands (setup, init, config, learn, generate)
+  ├─ commands/    → CLI commands (setup, init, config, learn, generate, doctor)
   ├─ ouijaconfig/ → XDG-compliant config management
   ├─ knowledge/   → Project knowledge storage
-  ├─ schema/      → JSON Schema generation helpers
   ├─ models/      → Provider/model catalog (in memory, no file I/O)
   ├─ art/         → Shared figlet banner/logo (CLI + TUI)
+  ├─ doccheck/    → Tests that the docs' links, anchors and index stay valid
   ├─ version/     → Build version (injectable via -ldflags -X)
   └─ tools/genimports → Build helper: auto-generates totem import list
 totems/           → Registered totems (task, doc, sticker)
