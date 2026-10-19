@@ -32,11 +32,7 @@ func writeFileTool(ctx context.Context, root string, in map[string]any) ToolResu
 		return errInternal(fmt.Sprintf("mkdir %s: %v", dir, err))
 	}
 
-	mode := fs.FileMode(0o644)
-	if fi, fiErr := os.Stat(full); fiErr == nil {
-		mode = fi.Mode().Perm()
-	}
-	if err := os.WriteFile(full, []byte(content), mode); err != nil {
+	if err := writeKeepingMode(full, []byte(content)); err != nil {
 		return errInternal(fmt.Sprintf("write %s: %v", p, err))
 	}
 
@@ -72,11 +68,7 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	}
 
 	updated := strings.Replace(orig, oldStr, newStr, 1)
-	mode := fs.FileMode(0o644)
-	if fi, fiErr := os.Stat(full); fiErr == nil {
-		mode = fi.Mode().Perm()
-	}
-	if err := os.WriteFile(full, []byte(updated), mode); err != nil {
+	if err := writeKeepingMode(full, []byte(updated)); err != nil {
 		return errInternal(fmt.Sprintf("write %s: %v", p, err))
 	}
 
@@ -85,7 +77,18 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	return ToolResult{Data: fmt.Sprintf("✓ edited %s\n%s", p, diff)}
 }
 
-// deleteFileTool removes a file or empty directory.
+// writeKeepingMode writes data to path, keeping an existing file's
+// permissions (an executable script stays executable); new files get 0644.
+func writeKeepingMode(path string, data []byte) error {
+	mode := fs.FileMode(0o644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	return os.WriteFile(path, data, mode)
+}
+
+// deleteFileTool removes a file or a directory with its contents (the
+// approval preview warns how many items a directory holds).
 // Path must be within the project root. Refuses to delete the project root.
 // Prevents deletion outside the sandbox via symlink traversal.
 func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolResult {

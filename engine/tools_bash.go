@@ -667,18 +667,12 @@ func globMatches(root, word string) []string {
 	if !strings.ContainsAny(word, "*?[") {
 		return nil
 	}
-	switch {
-	case word == "~" || strings.HasPrefix(word, "~/"):
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil
-		}
-		word = filepath.Join(home, word[1:])
-	case !filepath.IsAbs(word):
-		if root == "" {
-			return nil
-		}
-		word = filepath.Join(root, word)
+	if root == "" && !filepath.IsAbs(word) && !isHomeWord(word) {
+		return nil
+	}
+	word = wordPath(root, word)
+	if word == "" {
+		return nil
 	}
 	matches, err := filepath.Glob(word)
 	if err != nil {
@@ -767,15 +761,28 @@ func shellWordValues(cmd string) []string {
 // its symlinks resolved. Words that are not paths simply resolve to a
 // harmless location under root.
 func physicalCandidate(root, word string) string {
+	if word = wordPath(root, word); word == "" {
+		return ""
+	}
+	return physicalPath(word)
+}
+
+// isHomeWord reports whether word starts with the shell's `~` (home).
+func isHomeWord(word string) bool { return word == "~" || strings.HasPrefix(word, "~/") }
+
+// wordPath is the path a command word names from root: `~` is the home
+// directory, a relative word is relative to root. "" when the home directory
+// is unknown.
+func wordPath(root, word string) string {
 	switch {
-	case word == "~" || strings.HasPrefix(word, "~/"):
+	case isHomeWord(word):
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return ""
 		}
-		word = filepath.Join(home, word[1:])
+		return filepath.Join(home, word[1:])
 	case !filepath.IsAbs(word):
-		word = filepath.Join(root, word)
+		return filepath.Join(root, word)
 	}
-	return physicalPath(word)
+	return word
 }
