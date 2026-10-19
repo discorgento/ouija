@@ -9,9 +9,11 @@ import (
 	llsyscall "github.com/landlock-lsm/go-landlock/landlock/syscall"
 )
 
-// minSandboxABI is the oldest Landlock ABI the sandbox accepts: V3 (Linux 6.2)
-// also restricts truncating files outside the writable directories.
-const minSandboxABI = 3
+// minSandboxABI is the oldest Landlock ABI the sandbox accepts: V9 is the
+// first that confines connecting to Unix sockets by path. Below it a confined
+// command could still reach the ssh-agent or tmux socket under /tmp and act
+// outside the sandbox — refusing is better than a sandbox in name only.
+const minSandboxABI = 9
 
 // sandboxAvailable fails closed: a sandbox the user asked for but the kernel
 // cannot enforce is an error, never a silent unconfined run.
@@ -21,17 +23,21 @@ func sandboxAvailable() error {
 		return fmt.Errorf("%w: Landlock is not available on this kernel (%v)", errSandboxUnsupported, err)
 	}
 	if v < minSandboxABI {
-		return fmt.Errorf("%w: Landlock ABI %d is too old, need %d (Linux 6.2+)", errSandboxUnsupported, v, minSandboxABI)
+		return fmt.Errorf("%w: Landlock ABI %d is too old, need %d (a recent kernel: older ones cannot confine Unix sockets)", errSandboxUnsupported, v, minSandboxABI)
 	}
 	return nil
 }
 
 // applySandbox confines the current process (all its threads) to p, with the
-// strongest Landlock ABI the kernel offers — on recent kernels that also
-// covers connecting to Unix sockets — and at least minSandboxABI, which
-// sandboxAvailable checked in the parent.
+// strongest Landlock ABI the kernel offers and at least minSandboxABI, which
+// sandboxAvailable checked in the parent: the filesystem (connecting to Unix
+// sockets by path included) and the scopes — abstract Unix sockets and
+// signals to processes outside the sandbox, which RestrictPaths alone left
+// open (an X11 abstract socket, `kill` of any of the user's processes). The
+// network is not restricted, as documented.
 func applySandbox(p sandboxPolicy) error {
-	return landlock.V10.BestEffort().RestrictPaths(
+	cfg := landlock.Config{HandledAccessFS: landlock.V10.HandledAccessFS, Scoped: landlock.V10.Scoped}
+	return cfg.BestEffort().Restrict(
 		landlock.RODirs(p.ReadDirs...).IgnoreIfMissing(),
 		landlock.ROFiles(p.ReadFiles...).IgnoreIfMissing(),
 		landlock.RWDirs(p.WriteDirs...).IgnoreIfMissing(),

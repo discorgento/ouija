@@ -116,6 +116,9 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 	if err != nil {
 		return sandboxPolicy{}, err
 	}
+	if err := checkSandboxGrant(rootAbs); err != nil {
+		return sandboxPolicy{}, fmt.Errorf("project root %s: %w", rootAbs, err)
+	}
 	p := sandboxPolicy{
 		ReadDirs:   append([]string(nil), sandboxReadDirs...),
 		ReadFiles:  append([]string(nil), sandboxReadFiles...),
@@ -139,8 +142,8 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 			} else if !filepath.IsAbs(path) {
 				path = filepath.Join(rootAbs, path)
 			}
-			if isProtectedPath(path) {
-				return nil, fmt.Errorf("sandbox path %q is a protected location (credentials, ouija's config)", raw)
+			if err := checkSandboxGrant(path); err != nil {
+				return nil, fmt.Errorf("sandbox path %q: %w", raw, err)
 			}
 			out = append(out, path)
 		}
@@ -159,6 +162,41 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 		p.WriteDirs = append(p.WriteDirs, write...)
 	}
 	return p, nil
+}
+
+// guardedDirs are the credential directories a sandbox grant must never
+// contain: a grant covers its whole subtree, so allowing `~` or `~/.config`
+// (or running with the home directory as the project root) opened them all.
+var guardedDirs = []string{".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure",
+	filepath.Join(".config", "ouija"), filepath.Join(".config", "gcloud")}
+
+// checkSandboxGrant refuses a path that is protected itself, or is the
+// filesystem root or an ancestor of a credential directory.
+func checkSandboxGrant(path string) error {
+	clean := filepath.Clean(path)
+	if isProtectedPath(clean) {
+		return errors.New("a protected location (credentials, ouija's config)")
+	}
+	if clean == filepath.Dir(clean) { // the filesystem root
+		return errors.New("the whole filesystem")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	guarded := []string{}
+	for _, d := range guardedDirs {
+		guarded = append(guarded, filepath.Join(home, d))
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		guarded = append(guarded, filepath.Join(dir, "ouija"))
+	}
+	for _, g := range guarded {
+		if rel, err := filepath.Rel(clean, g); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("it contains %s, which the sandbox must keep out of reach", g)
+		}
+	}
+	return nil
 }
 
 // errSandboxUnsupported is returned where the OS cannot confine a command.

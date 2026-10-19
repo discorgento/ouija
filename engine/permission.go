@@ -4,6 +4,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -133,10 +134,18 @@ func (cfg *PermissionConfig) Check(tool, absPath string) Level {
 
 // ─── Protected paths ────────────────────────────────────────────────
 
+// foldCase: macOS and Windows filesystems ignore case by default, so `.ENV`
+// opens `.env` and `.SSH/id_rsa` the key — the names are matched lowercased
+// there. A variable so tests can exercise it on Linux.
+var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+
 // isProtectedPath checks whether a resolved absolute path is protected.
 // Protected paths can never be accessed even with Allow level.
 // Checks both filename patterns and directory components anywhere in the path.
 func isProtectedPath(absPath string) bool {
+	if foldCase {
+		absPath = strings.ToLower(absPath)
+	}
 	// ── Protected filenames (regardless of location) ────────────────
 	base := filepath.Base(absPath)
 	switch base {
@@ -190,6 +199,9 @@ func isProtectedPath(absPath string) bool {
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
 		g := filepath.Join(dir, "ouija")
+		if foldCase {
+			g = strings.ToLower(g)
+		}
 		if absPath == g || strings.HasPrefix(absPath, g+sep) {
 			return true
 		}

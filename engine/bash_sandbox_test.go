@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -104,4 +105,34 @@ func fmtData(r ToolResult) string {
 		return r.Error.Message
 	}
 	return r.String()
+}
+
+// Signals to processes outside the sandbox are refused (the scopes were never
+// applied: a confined command could kill any of the user's processes).
+func TestBashSandboxScopesSignals(t *testing.T) {
+	_, _, run := sandboxFixture(t, &SandboxConfig{Enabled: true})
+	res := run(fmt.Sprintf("kill -0 %d && echo SIGNALLED || echo refused", os.Getpid()))
+	if strings.Contains(fmtData(res), "SIGNALLED") {
+		t.Fatalf("a confined command signalled a process outside the sandbox: %q", fmtData(res))
+	}
+}
+
+// A grant may not cover a credential directory: not the home directory, not
+// ~/.config, not the filesystem root.
+func TestCheckSandboxGrant(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for path, ok := range map[string]bool{
+		home:                                  false,
+		filepath.Join(home, ".config"):        false,
+		"/":                                   false,
+		filepath.Join(home, ".ssh", "id_rsa"): false,
+		filepath.Join(home, ".cache", "go-build"): true,
+		filepath.Join(home, "projects", "app"):    true,
+	} {
+		if err := checkSandboxGrant(path); (err == nil) != ok {
+			t.Errorf("checkSandboxGrant(%s) = %v, want ok=%v", path, err, ok)
+		}
+	}
 }

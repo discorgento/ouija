@@ -231,3 +231,19 @@ func TestSaveConfigAtDropsKeyOfOtherProvider(t *testing.T) {
 		t.Fatalf("same-provider key dropped: %s", b)
 	}
 }
+
+// On a case-insensitive filesystem every spelling of a protected name is
+// protected.
+func TestProtectedPathFoldsCase(t *testing.T) {
+	old := foldCase
+	foldCase = true
+	t.Cleanup(func() { foldCase = old })
+	for _, p := range []string{"/p/.ENV", "/p/.Env.local", "/home/u/.SSH/id_rsa", "/p/.OUIJA/config.json", "/home/u/.Config/Ouija/config.json"} {
+		if !isProtectedPath(p) {
+			t.Errorf("%s not protected with case folding", p)
+		}
+	}
+	if isProtectedPath("/p/README.md") {
+		t.Error("README.md protected")
+	}
+}
