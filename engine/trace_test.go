@@ -383,3 +383,25 @@ func TestWallTime(t *testing.T) {
 		t.Fatalf("wallTime = %v; want 5s (two sequential roots, one never ended)", got)
 	}
 }
+
+// NextTurn narrows the per-turn render without dropping spans from the
+// session render (the chat's --trace-file used to export only the last turn).
+func TestTracerNextTurn(t *testing.T) {
+	tr := NewTracer(true)
+	first := tr.Start("chat")
+	first.StartChild("tool.read_file").End()
+	first.End()
+	tr.NextTurn()
+	if got := tr.RenderLastRootString(); got != "" {
+		t.Fatalf("new turn with no spans rendered %q", got)
+	}
+	s := tr.Start("chat")
+	s.StartChild("tool.grep").End()
+	s.End()
+	if got := tr.RenderLastRootString(); !strings.Contains(got, "grep") || strings.Contains(got, "read_file") {
+		t.Fatalf("turn render = %q; want only this turn's grep", got)
+	}
+	if got := tr.RenderString(); !strings.Contains(got, "read_file") || !strings.Contains(got, "grep") {
+		t.Fatalf("session render lost a turn: %q", got)
+	}
+}

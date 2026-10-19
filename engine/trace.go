@@ -112,9 +112,10 @@ func (s *Span) StartChild(name string) *Span {
 // Tracer is the root factory for spans. It collects a tree of spans that
 // can be rendered as a console tree or exported as Perfetto JSON.
 type Tracer struct {
-	mu     sync.Mutex
-	roots  []*Span
-	active bool
+	mu        sync.Mutex
+	roots     []*Span
+	turnStart int // index of the first root of the current turn (NextTurn)
+	active    bool
 }
 
 // NewTracer creates a Tracer. When active is false, all Start calls return
@@ -143,6 +144,19 @@ func (t *Tracer) Reset() {
 	}
 	t.mu.Lock()
 	t.roots = nil
+	t.turnStart = 0
+	t.mu.Unlock()
+}
+
+// NextTurn starts a new turn: RenderLastRootString then shows only the spans
+// recorded after this call, while Render and the Perfetto export still cover
+// every span since the last Reset (the whole chat session).
+func (t *Tracer) NextTurn() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.turnStart = len(t.roots)
 	t.mu.Unlock()
 }
 
@@ -200,11 +214,16 @@ func renderTree(buf *strings.Builder, title string, roots []*Span, total time.Du
 	}
 }
 
-// RenderLastRootString renders the spans recorded since the last Reset — the
-// chat resets after each response, so that is the latest turn (one root per
-// ReAct iteration) — into a compact tree. Useful for a per-turn trace in a TUI.
+// RenderLastRootString renders the current turn — the spans recorded since the
+// last NextTurn or Reset, one root per ReAct iteration — into a compact tree.
+// Useful for a per-turn trace in a TUI.
 func (t *Tracer) RenderLastRootString() string {
-	roots := t.snapshot()
+	if t == nil || !t.active {
+		return ""
+	}
+	t.mu.Lock()
+	roots := slices.Clone(t.roots[t.turnStart:])
+	t.mu.Unlock()
 	if len(roots) == 0 {
 		return ""
 	}

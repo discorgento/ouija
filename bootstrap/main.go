@@ -87,11 +87,7 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 	defer a.Engine.Close()
 
 	out, err := a.Run(ctx, name, totemArgs)
-	if flags.TraceFile != "" {
-		if terr := a.Engine.Tracer().WritePerfettoFile(flags.TraceFile); terr != nil {
-			fmt.Fprintf(stderr, "trace file: %v\n", terr)
-		}
-	}
+	app.FinishTrace(a.Engine.Tracer(), stderr, flags.TraceFile) // active only with --trace-file
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
