@@ -2,6 +2,8 @@ package registry
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,13 +12,9 @@ import (
 
 type fakeTotem struct{ name, summary string }
 
-func (f *fakeTotem) Name() string    { return f.name }
-func (f *fakeTotem) Summary() string { return f.summary }
-func (f *fakeTotem) Init(context.Context, *engine.Engine, *engine.Config) error {
-	return nil
-}
+func (f *fakeTotem) Name() string                                           { return f.name }
+func (f *fakeTotem) Summary() string                                        { return f.summary }
 func (f *fakeTotem) Run(context.Context, *engine.Engine, Args) (any, error) { return nil, nil }
-func (f *fakeTotem) Cleanup() error                                         { return nil }
 
 func TestRegisterAndGet(t *testing.T) {
 	const name = "test-register-and-get"
@@ -91,4 +89,138 @@ func TestHelp_ListsTotemsAndFlags(t *testing.T) {
 	if strings.Contains(help, "--trace ") {
 		t.Error("Help() advertises --trace, which is not a real flag")
 	}
+}
+
+// lifecycleTotem records which hooks Invoke drives, in order.
+type lifecycleTotem struct {
+	calls   []string
+	initErr error
+	runErr  error
+	schema  map[string]any
+}
+
+func (l *lifecycleTotem) Name() string    { return "lifecycle" }
+func (l *lifecycleTotem) Summary() string { return "" }
+func (l *lifecycleTotem) Init(context.Context, *engine.Engine) error {
+	l.calls = append(l.calls, "init")
+	return l.initErr
+}
+func (l *lifecycleTotem) Run(_ context.Context, _ *engine.Engine, a Args) (any, error) {
+	l.calls = append(l.calls, "run:"+a.Task)
+	return "result", l.runErr
+}
+func (l *lifecycleTotem) Cleanup() error {
+	l.calls = append(l.calls, "cleanup")
+	return nil
+}
+func (l *lifecycleTotem) InputSchema() map[string]any { return l.schema }
+
+func TestInvokeLifecycle(t *testing.T) {
+	ok := &lifecycleTotem{}
+	res, err := Invoke(context.Background(), nil, ok, Args{Task: "x"})
+	if err != nil || res != "result" || strings.Join(ok.calls, ",") != "init,run:x,cleanup" {
+		t.Fatalf("calls=%v res=%v err=%v", ok.calls, res, err)
+	}
+
+	failInit := &lifecycleTotem{initErr: errors.New("boom")}
+	if _, err := Invoke(context.Background(), nil, failInit, Args{Task: "x"}); err == nil || !strings.Contains(err.Error(), "init: boom") {
+		t.Fatalf("init error = %v", err)
+	}
+	if strings.Join(failInit.calls, ",") != "init,cleanup" {
+		t.Fatalf("a failed Init must skip Run and still clean up: %v", failInit.calls)
+	}
+
+	// A totem with neither hook just runs.
+	if _, err := Invoke(context.Background(), nil, &fakeTotem{name: "plain"}, Args{Task: "x"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInvokeChecksRequiredInputs(t *testing.T) {
+	if _, err := Invoke(context.Background(), nil, &fakeTotem{name: "plain"}, Args{}); err == nil ||
+		!strings.Contains(err.Error(), "missing the task") {
+		t.Fatalf("default schema must require a task, got %v", err)
+	}
+	l := &lifecycleTotem{schema: map[string]any{"type": "object", "required": []any{"depth"}}}
+	if _, err := Invoke(context.Background(), nil, l, Args{}); err == nil || !strings.Contains(err.Error(), `"depth"`) {
+		t.Fatalf("missing depth: err = %v", err)
+	}
+	if len(l.calls) != 0 {
+		t.Fatalf("hooks ran despite missing inputs: %v", l.calls)
+	}
+	if _, err := Invoke(context.Background(), nil, l, Args{Params: map[string]any{"depth": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	optional := &lifecycleTotem{schema: map[string]any{"type": "object", "required": []string{}}}
+	if _, err := Invoke(context.Background(), nil, optional, Args{}); err != nil {
+		t.Fatalf("a schema without required inputs must run with none: %v", err)
+	}
+}
+
+func TestArgsDecode(t *testing.T) {
+	var in struct {
+		Depth int      `json:"depth"`
+		Tags  []string `json:"tags"`
+	}
+	a := Args{Params: map[string]any{"depth": float64(3), "tags": []any{"a", "b"}}}
+	if err := a.Decode(&in); err != nil || in.Depth != 3 || len(in.Tags) != 2 {
+		t.Fatalf("Decode = %+v, %v", in, err)
+	}
+	if err := (Args{Params: map[string]any{"depth": "deep"}}).Decode(&in); err == nil {
+		t.Fatal("a mistyped param must fail to decode")
+	}
+}
+
+func TestParamsFlag(t *testing.T) {
+	p := ParamsFlag{}
+	for _, s := range []string{"depth=3", "dry=true", `tags=["a","b"]`, "name=hello world", "empty="} {
+		if err := p.Set(s); err != nil {
+			t.Fatalf("Set(%q): %v", s, err)
+		}
+	}
+	if p["depth"] != float64(3) || p["dry"] != true || p["name"] != "hello world" || p["empty"] != "" {
+		t.Fatalf("parsed = %#v", p)
+	}
+	if tags, _ := p["tags"].([]any); len(tags) != 2 {
+		t.Fatalf("tags = %#v", p["tags"])
+	}
+	if err := p.Set("novalue"); err == nil {
+		t.Fatal("a value without = must be rejected")
+	}
+}
+
+type fakeRenderer struct{ text string }
+
+func (f fakeRenderer) Render() string { return f.text }
+
+func TestRender(t *testing.T) {
+	if got := Render(fakeRenderer{text: "custom"}); got != "custom" {
+		t.Errorf("Render(Renderer) = %q, want the Render() output", got)
+	}
+	if got := Render(map[string]any{"a": 1}); !strings.Contains(got, `"a": 1`) {
+		t.Errorf("Render(non-renderer) = %q, want indented JSON", got)
+	}
+}
+
+func TestInputSchemaDefault(t *testing.T) {
+	s := InputSchema(&fakeTotem{name: "plain"})
+	if r, _ := s["required"].([]string); len(r) != 1 || r[0] != "task" {
+		t.Fatalf("default schema = %v", s)
+	}
+}
+
+type legacyTotem struct{ fakeTotem }
+
+func (legacyTotem) Init(context.Context, *engine.Engine, *engine.Config) error { return nil }
+
+// A totem still on the old Init signature must fail at registration, not
+// silently lose its setup.
+func TestRegisterRejectsLegacyInit(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil || !strings.Contains(fmt.Sprint(r), "old signature") {
+			t.Fatalf("Register(legacy) recovered %v; want a panic naming the old signature", r)
+		}
+	}()
+	Register(&legacyTotem{fakeTotem{name: "legacy"}})
 }

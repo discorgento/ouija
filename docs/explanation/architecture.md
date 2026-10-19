@@ -42,14 +42,15 @@ CLI args → app.DiscoverConfig()
            → app.ValidateConfig()
            → app.BuildProvider() → creates provider from registry
            → engine.New() → wires provider, config, budget, tracer, logger
-           → totem.Init(ctx, eng, cfg)
+           → registry.Invoke(ctx, eng, totem, args)
+               → required inputs (InputSchema) → Init (optional)
            → totem.Run(ctx, eng, args)
                → eng.Run() or eng.Chat()
                    → runAgent() → fresh DoomDetector → agent.Run()
                        → model proposes tool call
                        → harness validates + executes
                        → repeat until a final answer (text or submit_result)
-           → totem.Cleanup()
+           → Cleanup (optional, always)
            → render result (Renderer or JSON)
 ```
 
@@ -144,11 +145,15 @@ context-aware cleanup (no race windows, no timer leaks).
 ## Totem lifecycle
 
 ```
-app.Run(totemName, args)
-  ├─ Init(ctx, eng, cfg)    → setup (returns error → abort)
+registry.Invoke(ctx, eng, totem, args)   ← app.Run, the MCP server, bootstrap.Main
+  ├─ required inputs        → from InputSchema (default: a required task)
+  ├─ Init(ctx, eng)         → optional Initializer; error → abort
   ├─ Run(ctx, eng, args)    → main logic (uses eng.Run/Chat internally)
-  └─ Cleanup()              → always runs, even on Init/Run error
+  └─ Cleanup()              → optional Cleaner; always runs, even on Init/Run error
 ```
+
+A totem's own settings live under `totems.<name>` in the project config and
+are read with `Config.TotemConfig`; the engine never interprets them.
 
 ---
 

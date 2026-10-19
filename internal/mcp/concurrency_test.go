@@ -167,3 +167,42 @@ func TestRunCancelsAndWaitsForInflightCallsOnEOF(t *testing.T) {
 		t.Fatal("Run returned before the in-flight call finished")
 	}
 }
+
+// tools/list publishes each totem's own input schema: sticker declares an
+// optional task, the others keep the default required one.
+func TestToolsListUsesTotemInputSchema(t *testing.T) {
+	res := resultOf(t, call(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	tools, _ := res["tools"].([]any)
+	required := map[string]any{}
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		schema, _ := tool["inputSchema"].(map[string]any)
+		required[tool["name"].(string)] = schema["required"]
+	}
+	if r, _ := required[defaultPrefix+"sticker"].([]any); len(r) != 0 {
+		t.Errorf("sticker requires %v; want an optional task", r)
+	}
+	if r, _ := required[defaultPrefix+"task"].([]any); len(r) != 1 || r[0] != "task" {
+		t.Errorf("task requires %v; want [task]", r)
+	}
+}
+
+// tools/call hands every argument to the totem: Task from "task", and all of
+// them as Params.
+func TestToolCallPassesParams(t *testing.T) {
+	var got registry.Args
+	s := testServer(t.TempDir())
+	s.run = func(_ context.Context, _ string, args registry.Args) (any, error) {
+		got = args
+		return "ok", nil
+	}
+	ps := startPipeServer(t, s)
+	ps.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ouija_task","arguments":{"task":"x","depth":2}}}`)
+	ps.next()
+	if err := ps.closeIn(); err != nil {
+		t.Fatal(err)
+	}
+	if got.Task != "x" || got.Params["depth"] != float64(2) || got.Params["task"] != "x" {
+		t.Fatalf("args = %+v", got)
+	}
+}

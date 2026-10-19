@@ -51,8 +51,6 @@ func (t *Totem) Name() string { return "task" }
 func (t *Totem) Summary() string {
 	return "Analyze a task: scout -> N passes x dimensions -> reconcile -> plan"
 }
-func (t *Totem) Init(_ context.Context, _ *engine.Engine, _ *engine.Config) error { return nil }
-func (t *Totem) Cleanup() error                                                   { return nil }
 
 type passResult struct {
 	Pass      int

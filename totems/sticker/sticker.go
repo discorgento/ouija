@@ -30,8 +30,14 @@ func (t *Totem) Name() string { return "sticker" }
 func (t *Totem) Summary() string {
 	return "Generate a laptop sticker with real project metrics"
 }
-func (t *Totem) Init(_ context.Context, _ *engine.Engine, _ *engine.Config) error { return nil }
-func (t *Totem) Cleanup() error                                                   { return nil }
+
+// InputSchema makes the free-text request optional: `ouija sticker` alone
+// scouts the project, while the MCP tool and the CLI still accept a hint.
+func (t *Totem) InputSchema() map[string]any {
+	return schema.Obj(map[string]any{
+		"task": schema.Str("optional hint about what to highlight"),
+	})
+}
 
 //go:embed template.svg
 var templateSVG string

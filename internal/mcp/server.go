@@ -236,19 +236,12 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 }
 
 func toolList(prefix string) []map[string]any {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"task": map[string]any{"type": "string", "description": "the task/request to work on"},
-		},
-		"required": []string{"task"},
-	}
 	var tools []map[string]any
 	for _, m := range registry.List() {
 		tools = append(tools, map[string]any{
 			"name":        prefix + m.Name(),
 			"description": m.Summary(),
-			"inputSchema": schema,
+			"inputSchema": registry.InputSchema(m), // the totem's own, or {task}
 		})
 	}
 	return tools
@@ -256,10 +249,8 @@ func toolList(prefix string) []map[string]any {
 
 func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcRequest) {
 	var p struct {
-		Name      string `json:"name"`
-		Arguments struct {
-			Task string `json:"task"`
-		} `json:"arguments"`
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		s.writeError(out, req.ID, -32602, "invalid params")
@@ -272,7 +263,8 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 	}
 	s.logf("tools/call %s", p.Name)
 
-	args := registry.Args{Task: p.Arguments.Task}
+	task, _ := p.Arguments["task"].(string)
+	args := registry.Args{Task: task, Params: p.Arguments}
 	s.startCall(ctx, req.ID, func(callCtx context.Context) {
 		result, runErr := s.runTotem(callCtx, module, args)
 		if callCtx.Err() != nil && ctx.Err() == nil {
@@ -284,7 +276,7 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 			s.writeToolResult(out, req.ID, toolErrorText(runErr), true)
 			return
 		}
-		s.writeToolResult(out, req.ID, render(result), false)
+		s.writeToolResult(out, req.ID, registry.Render(result), false)
 	})
 }
 
@@ -466,16 +458,6 @@ func (s *Server) writeResourceResult(out *bufio.Writer, id json.RawMessage, uri,
 			"text":     text,
 		}},
 	})
-}
-
-// render turns a totem result into text: its Render() when it has one, else
-// indented JSON.
-func render(v any) string {
-	if r, ok := v.(registry.Renderer); ok {
-		return r.Render()
-	}
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
 }
 
 // --- JSON-RPC writers (single-line JSON + newline framing) ---

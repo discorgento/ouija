@@ -33,17 +33,82 @@ standalone binary. If you also want the standard ouija CLI (`setup`, `chat`,
 type Totem interface {
     Name() string
     Summary() string
-    Init(ctx context.Context, eng *engine.Engine, cfg *engine.Config) error
-    Run(ctx context.Context, eng *engine.Engine, args Args) (any, error)
-    Cleanup() error
+    Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error)
 }
 ```
 
 - **Name** — CLI command name (e.g. `"review"` becomes `ouija review`)
 - **Summary** — one-line description shown in `ouija help`
-- **Init** — called once before Run. Setup connections, validate args, etc.
-- **Run** — main logic. Use `eng.Run()` or `eng.Chat()` for agentic work.
-- **Cleanup** — always called, even on Init/Run error. Close files, release resources.
+- **Run** — main logic. Use `eng.Run()` or `eng.Chat()` for agentic work. The
+  project config is `eng.Config()`.
+
+Hosts run a totem through `registry.Invoke`, which checks its required inputs
+and drives the optional hooks below — the ouija CLI, the MCP server and
+`bootstrap.Main` all do, so a totem behaves the same everywhere.
+
+### Optional: lifecycle hooks
+
+```go
+type Initializer interface { Init(ctx context.Context, eng *engine.Engine) error }
+type Cleaner     interface { Cleanup() error }
+```
+
+- **Init** — called before Run: open connections, validate the config. An
+  error aborts the run.
+- **Cleanup** — called after Run, and after a failed Init too. Close files,
+  release resources.
+
+Implement them only when you need them. (`Init` used to take a third
+`*engine.Config` argument; a totem still on that signature is refused at
+`registry.Register` with a message saying what to change.)
+
+### Optional: typed inputs
+
+`args.Task` is the free-text request — the CLI's first argument, the MCP
+tool's `task`. For named inputs, declare a JSON Schema and decode
+`args.Params` into a struct:
+
+```go
+func (t *Totem) InputSchema() map[string]any {
+    return schema.Obj(map[string]any{
+        "task":  schema.Str("what to review"),
+        "depth": map[string]any{"type": "integer", "description": "how many layers to follow"},
+    }, "task", "depth") // required inputs
+}
+
+func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
+    var in struct {
+        Depth int `json:"depth"`
+    }
+    if err := args.Decode(&in); err != nil {
+        return nil, err
+    }
+    // …
+}
+```
+
+The schema is the MCP tool's `inputSchema`, and the CLI takes the inputs as
+`--set key=value` (a JSON value such as `3`, `true` or `["a","b"]` keeps its
+type): `ouija review "the auth flow" --set depth=2`. A missing required input is
+an error before Init or Run. Without `InputSchema`, the input is a required
+`task` string.
+
+### Optional: settings
+
+A totem's own settings live in the project config under `totems.<name>`; read
+them with `eng.Config().TotemConfig(name, &v)`, after filling `v` with your
+defaults (an absent section leaves `v` untouched):
+
+```json
+{ "totems": { "review": { "maxFiles": 40 } } }
+```
+
+```go
+c := reviewConfig{MaxFiles: 20}
+if err := eng.Config().TotemConfig("review", &c); err != nil {
+    return nil, err
+}
+```
 
 ### Optional: Renderer
 
@@ -312,7 +377,7 @@ func main() {
         fmt.Fprintf(os.Stderr, "unknown totem: %s\n\n%s", name, registry.Help())
         os.Exit(1)
     }
-    res, err := totem.Run(ctx, app.Engine, registry.Args{Task: os.Args[2]})
+    res, err := registry.Invoke(ctx, app.Engine, totem, registry.Args{Task: os.Args[2]})
     if err != nil {
         fmt.Fprintln(os.Stderr, "error:", err)
         os.Exit(1)

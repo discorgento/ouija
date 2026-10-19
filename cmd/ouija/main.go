@@ -130,14 +130,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "path to a JSON config")
 	traceFile := fs.String("trace-file", "", "path to write Perfetto JSON trace")
 	jsonOut := fs.Bool("json", false, "print the raw JSON result")
+	params := registry.ParamsFlag{}
+	fs.Var(params, "set", "named input key=value (repeatable; JSON values allowed)")
 	if err := fs.Parse(args[flagStart:]); err != nil {
 		return 2
+	}
+	if task != "" {
+		params["task"] = task
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	out, runErr := app.Run(ctx, name, registry.Args{Task: task}, *configPath, true, *traceFile)
+	out, runErr := app.Run(ctx, name, registry.Args{Task: task, Params: params}, *configPath, true, *traceFile)
 	if out != nil && out.ConfigPath != "" {
 		fmt.Fprintf(stderr, "[ouija] config: %s\n", out.ConfigPath)
 	}
@@ -153,11 +158,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if r, ok := out.Result.(registry.Renderer); ok && !*jsonOut {
-		fmt.Fprintln(stdout, r.Render())
-	} else {
+	if *jsonOut {
 		b, _ := json.MarshalIndent(out.Result, "", "  ")
 		fmt.Fprintln(stdout, string(b))
+	} else {
+		fmt.Fprintln(stdout, registry.Render(out.Result))
 	}
 
 	tokens, steps, usd := out.Engine.Spent()

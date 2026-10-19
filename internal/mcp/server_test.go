@@ -304,21 +304,6 @@ func TestRawID(t *testing.T) {
 	}
 }
 
-type fakeRenderer struct{ text string }
-
-func (f fakeRenderer) Render() string { return f.text }
-
-func TestRender(t *testing.T) {
-	if got := render(fakeRenderer{text: "custom"}); got != "custom" {
-		t.Errorf("render(Renderer) = %q, want the Render() output", got)
-	}
-
-	got := render(map[string]any{"a": 1})
-	if !strings.Contains(got, `"a": 1`) {
-		t.Errorf("render(non-renderer) = %q, want indented JSON", got)
-	}
-}
-
 func TestToolErrorText(t *testing.T) {
 	t.Run("typed error carries its code", func(t *testing.T) {
 		got := toolErrorText(engine.ErrAuth("no key"))

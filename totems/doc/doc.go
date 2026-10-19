@@ -31,8 +31,6 @@ func (t *Totem) Name() string { return "doc" }
 func (t *Totem) Summary() string {
 	return "Generate a code-verified client document: scout -> verify -> compose -> .html/.pdf/.md"
 }
-func (t *Totem) Init(_ context.Context, _ *engine.Engine, _ *engine.Config) error { return nil }
-func (t *Totem) Cleanup() error                                                   { return nil }
 
 // docAspects are the fact-gathering angles for a document (vs. task's analysis dimensions).
 var docAspects = []string{"configuration", "behavior", "integration"}

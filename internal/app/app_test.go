@@ -404,7 +404,7 @@ type fakeTotem struct {
 
 func (f *fakeTotem) Name() string    { return f.name }
 func (f *fakeTotem) Summary() string { return "test-only totem" }
-func (f *fakeTotem) Init(context.Context, *engine.Engine, *engine.Config) error {
+func (f *fakeTotem) Init(context.Context, *engine.Engine) error {
 	f.inited = true
 	return f.initErr
 }
@@ -461,7 +461,7 @@ func TestRun_InitErrorStillCleansUp(t *testing.T) {
 	f := &fakeTotem{name: "app-test-init-error", initErr: errors.New("boom")}
 	registry.Register(f)
 
-	_, err := Run(context.Background(), f.Name(), registry.Args{}, cfgPath, false, "")
+	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "")
 	if err == nil {
 		t.Fatal("Run() error = nil after an Init failure, want an error")
 	}
@@ -486,12 +486,12 @@ func TestRun_CleanupErrorIsReported(t *testing.T) {
 	f := &fakeTotem{name: "app-test-cleanup-error", cleanupErr: errors.New("cleanup boom")}
 	registry.Register(f)
 
-	_, err := Run(context.Background(), f.Name(), registry.Args{}, cfgPath, false, "")
+	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "")
 	if err == nil {
 		t.Fatal("Run() error = nil after a Cleanup failure, want an error")
 	}
-	if !strings.Contains(err.Error(), "cleanup") {
-		t.Errorf("error = %q, want it to mention the cleanup step", err)
+	if !strings.Contains(err.Error(), "cleanup: cleanup boom") || !f.ran {
+		t.Errorf("error = %q (ran=%v), want the run to happen and the cleanup error reported", err, f.ran)
 	}
 }
 

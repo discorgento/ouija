@@ -120,12 +120,10 @@ type %[2]s struct{}
 
 func (t *%[2]s) Name() string    { return %[3]q }
 func (t *%[2]s) Summary() string { return %[4]q }
-func (t *%[2]s) Init(_ context.Context, _ *engine.Engine, _ *engine.Config) error { return nil }
 func (t *%[2]s) Run(_ context.Context, eng *engine.Engine, args registry.Args) (any, error) {
 	// TODO: implement the totem logic.
 	return &result{Name: t.Name(), Task: args.Task}, nil
 }
-func (t *%[2]s) Cleanup() error { return nil }
 
 type result struct {
 	Name string %[5]sjson:"name"%[6]s
@@ -251,7 +249,6 @@ type %[2]s struct{}
 
 func (t *%[2]s) Name() string    { return %[3]q }
 func (t *%[2]s) Summary() string { return %[4]q }
-func (t *%[2]s) Init(_ context.Context, _ *engine.Engine, _ *engine.Config) error { return nil }
 
 // Run is your agent: the engine comes with tools, budget, sandbox and trace
 // ready. eng.Run executes one ReAct pass; call it as many times as your flow
@@ -263,7 +260,6 @@ func (t *%[2]s) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	}
 	return &result{Name: t.Name(), Text: res.Text}, nil
 }
-func (t *%[2]s) Cleanup() error { return nil }
 
 type result struct {
 	Name string %[5]sjson:"name"%[6]s
@@ -335,14 +331,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := t.Init(ctx, app.Engine, app.Config); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %%v\n", err)
-		os.Exit(1)
-	}
-	out, runErr := t.Run(ctx, app.Engine, registry.Args{Task: strings.Join(fs.Args(), " ")})
-	if err := t.Cleanup(); err != nil {
-		fmt.Fprintf(os.Stderr, "cleanup: %%v\n", err)
-	}
+	out, runErr := registry.Invoke(ctx, app.Engine, t, registry.Args{Task: strings.Join(fs.Args(), " ")})
 	if runErr != nil {
 		fmt.Fprintf(os.Stderr, "error: %%v\n", runErr)
 		os.Exit(1)

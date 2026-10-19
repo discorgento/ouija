@@ -95,7 +95,6 @@ type Totem struct{}
 
 func (t *Totem) Name() string    { return "sentinel" }
 func (t *Totem) Summary() string { return "Example external totem" }
-func (t *Totem) Init(context.Context, *engine.Engine, *engine.Config) error { return nil }
 func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
     res, err := eng.Run(ctx, engine.RunRequest{Label: "sentinel", Prompt: args.Task})
     if err != nil {
@@ -103,7 +102,6 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
     }
     return map[string]string{"summary": res.Text}, nil
 }
-func (t *Totem) Cleanup() error { return nil }
 
 func init() { registry.Register(&Totem{}) }
 ```
@@ -143,7 +141,7 @@ func main() {
         }
         return
     }
-    // ... dispatch to registry.Get(os.Args[1]).Run(ctx, app.Engine, ...)
+    // ... registry.Invoke(ctx, app.Engine, totem, registry.Args{Task: …})
 }
 ```
 

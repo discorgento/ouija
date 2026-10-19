@@ -265,21 +265,10 @@ func Run(ctx context.Context, name string, args registry.Args, configPath string
 		return nil, err
 	}
 
-	// Lifecycle: Init → Run → Cleanup (Cleanup always runs).
-	var runErr error
-	if initErr := mod.Init(ctx, out.Engine, out.Config); initErr != nil {
-		if cerr := mod.Cleanup(); cerr != nil {
-			out.Engine.Logger().Warn("totem cleanup failed after init error", "totem", name, "error", cerr)
-		}
-		out.Engine.Close()
-		return nil, fmt.Errorf("init: %w", initErr)
-	}
-	res, runErr := mod.Run(ctx, out.Engine, args)
+	// Lifecycle (required inputs → Init → Run → Cleanup) lives in Invoke, so
+	// every host runs totems the same way.
+	res, runErr := registry.Invoke(ctx, out.Engine, mod, args)
 	out.Result = res
-
-	if cerr := mod.Cleanup(); cerr != nil && runErr == nil {
-		runErr = fmt.Errorf("cleanup: %w (after run)", cerr)
-	}
 
 	// Render trace tree to stderr (tracer no-op when inactive).
 	out.Engine.Tracer().Render(os.Stderr)

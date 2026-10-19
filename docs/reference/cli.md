@@ -60,7 +60,7 @@ Interactive scaffold for a new totem. Prompts for name and description, writes
 `go install ./cmd/ouija`.
 
 With `--external [dir]` it scaffolds a standalone Go module instead — `go.mod`,
-the totem, a `cmd/<name>/main.go` host on `bootstrap.Setup`, `README.md` and
+the totem, a one-line `cmd/<name>/main.go` host on `bootstrap.Main`, `README.md` and
 `.gitignore` — then runs `go mod tidy` and builds the binary. For agents that
 live in your own repo, not in ouija's.
 
@@ -140,10 +140,13 @@ Default permission: **allow** for the read-only tools (`read_file`, `grep`,
 `edit_file`, `delete_file`, `bash`). Configurable per-tool via `/permit` or the
 project config.
 
-### `ouija <totem> [task] [--config <file>] [--trace-file <file>] [--json]`
+### `ouija <totem> [task] [--set <key>=<value>]… [--config <file>] [--trace-file <file>] [--json]`
 
-Run a registered totem. The task is optional at the CLI level: `sticker` runs
-without one, while `task` and `doc` reject an empty task with an error.
+Run a registered totem. Whether the task is required comes from the totem's
+input schema: `sticker` runs without one, while `task` and `doc` reject a
+missing task before running. `--set key=value` (repeatable) passes a named input
+the totem declares; a value that parses as JSON (`3`, `true`, `["a","b"]`) keeps
+that type, anything else is a string.
 
 Registered totems: `task` (analysis → plan), `doc` (code-verified client
 document), `sticker` (laptop sticker from project metrics). `ouija help` lists
