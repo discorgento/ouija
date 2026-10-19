@@ -81,6 +81,12 @@ func Generate(args []string) error {
 		}
 	}
 
+	if !external {
+		if err := checkOuijaCheckout("."); err != nil {
+			return err
+		}
+	}
+
 	name := ""
 	summary := ""
 	printBanner()
@@ -226,6 +232,18 @@ func scaffoldInternal(wd, name, summary string) error {
 	fmt.Println("  See CONTRIBUTING.md for project rules. Check existing totems")
 	fmt.Println("  (sticker, doc, task) for implementation examples.")
 
+	return nil
+}
+
+// checkOuijaCheckout refuses an in-repo scaffold outside the ouija source
+// tree: it writes totems/<name> and runs go generate / go install here, which
+// failed only after the form, leaving an empty totems/ behind.
+func checkOuijaCheckout(dir string) error {
+	for _, rel := range []string{filepath.Join("cmd", "ouija"), filepath.Join("totems", "imports_gen.go")} {
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			return fmt.Errorf("this is not an ouija checkout (no %s) — run it from the ouija repository, or use `ouija generate totem --external [dir]` for a standalone module", rel)
+		}
+	}
 	return nil
 }
 

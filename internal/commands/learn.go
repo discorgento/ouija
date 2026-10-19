@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/termsafe"
 )
@@ -17,7 +18,7 @@ func Learn(args []string) error {
 	// exiting the process from inside a library function.
 	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
-		return err
+		return app.ErrUsage // flag already printed why
 	}
 	rest := fs.Args()
 

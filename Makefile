@@ -73,18 +73,10 @@ dist: ## Cross-compile 5 targets (linux/darwin/windows) → dist/*.tar.gz + SHA2
 	fi; echo "ok → $(DIST)/SHA256SUMS"
 	@echo "ok →"; ls -lh $(DIST) | tail -n +2
 
-install: ## Install both binaries into $$GOBIN/$$GOPATH/bin (idempotent: skips identical versions)
+install: ## Install both binaries into $$GOBIN/$$GOPATH/bin (go install is cached, so re-running is cheap)
 	@d="$$($(GO) env GOBIN)"; [ -n "$$d" ] || d="$$($(GO) env GOPATH)/bin"; \
-	version=$$($$d/ouija version 2>/dev/null || echo "none"); \
-	src_version=$$($(GO) run $(LDFLAGS) ./cmd/ouija version 2>/dev/null); \
-	if [ "$$version" = "$$src_version" ]; then \
-	  echo "🔮  $$version already installed in $$d (idempotent)"; \
-	else \
-	  echo "🔧  installing $$src_version (current: $$version)"; \
-	  $(GO) install $(LDFLAGS) ./cmd/ouija ./cmd/ouija-mcp; \
-	  v=$$($$d/ouija version 2>/dev/null || echo "$$src_version"); \
-	  echo "🔮  $$v installed in $$d"; \
-	fi; \
+	$(GO) install $(LDFLAGS) ./cmd/ouija ./cmd/ouija-mcp && \
+	echo "🔮  $$($$d/ouija version 2>/dev/null) installed in $$d"; \
 	case ":$$PATH:" in *":$$d:"*) echo "✓  $$d already on PATH" ;; \
 	*) echo "→  export PATH=\"$$d:\$$PATH\"  # add it to ~/.zshrc / ~/.bashrc" ;; esac
 

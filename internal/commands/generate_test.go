@@ -153,3 +153,12 @@ func TestOuijaRequire(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckOuijaCheckout(t *testing.T) {
+	if err := checkOuijaCheckout(t.TempDir()); err == nil || !strings.Contains(err.Error(), "--external") {
+		t.Fatalf("outside a checkout: %v", err)
+	}
+	if err := checkOuijaCheckout("../.."); err != nil {
+		t.Fatalf("in the repo: %v", err)
+	}
+}

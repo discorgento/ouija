@@ -122,7 +122,7 @@ func Setup(args []string) error {
 			fmt.Printf("  %s key: ✓\n", name)
 		}
 	}
-	if configured == 0 {
+	if configured == 0 && !providers.Keyless(defProv) {
 		fmt.Println("  (no API keys configured — run `ouija setup` again)")
 	}
 	return nil

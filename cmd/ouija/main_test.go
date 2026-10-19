@@ -63,11 +63,34 @@ func TestRun_VersionVariants(t *testing.T) {
 func TestRun_UnknownCommand(t *testing.T) {
 	code, _, stderr := runCLI(t, "definitely-not-a-totem")
 
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1", code)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 (usage)", code)
 	}
-	if !strings.Contains(stderr, "unknown totem") {
-		t.Errorf("stderr = %q, want it to name the unknown totem", stderr)
+	if !strings.Contains(stderr, "unknown command or totem") {
+		t.Errorf("stderr = %q, want it to name the unknown command", stderr)
+	}
+	if _, _, stderr := runCLI(t, "doctr"); !strings.Contains(stderr, `did you mean "doctor"`) {
+		t.Errorf("typo: stderr = %q, want a suggestion", stderr)
+	}
+}
+
+// `<command> --help` prints its usage and does nothing else (mcp install
+// --help used to install; init --help to write a config).
+func TestRun_CommandHelp(t *testing.T) {
+	for _, args := range [][]string{{"mcp", "install", "--help"}, {"init", "--help"}, {"doctor", "-h"}, {"trust", "--help"}, {"setup", "--help"}} {
+		code, stdout, _ := runCLI(t, args...)
+		if code != 0 || !strings.Contains(stdout, "usage: ouija "+args[0]) {
+			t.Errorf("%v: exit %d, stdout %q", args, code, stdout)
+		}
+	}
+	if code, _, _ := runCLI(t, "doctor", "extra"); code != 2 {
+		t.Errorf("doctor extra: exit %d, want 2", code)
+	}
+	if code, _, _ := runCLI(t, "trust", "--bogus"); code != 2 {
+		t.Errorf("trust --bogus: exit %d, want 2", code)
+	}
+	if code, _, _ := runCLI(t, "mcp", "status", "extra"); code != 2 {
+		t.Errorf("mcp status extra: exit %d, want 2", code)
 	}
 }
 

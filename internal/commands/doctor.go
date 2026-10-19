@@ -82,15 +82,30 @@ func (r *report) fail(label, text string) {
 func (r *report) binary() {
 	r.ok("version", "ouija "+version.Version)
 
-	if exe, err := os.Executable(); err == nil {
+	exe, _ := os.Executable()
+	if exe != "" {
 		r.ok("binary", exe)
 	}
 
 	if p, err := exec.LookPath("ouija"); err == nil {
-		r.ok("on PATH", p)
+		// Harnesses run the one on PATH: a different, older binary there
+		// (a stale `go install`, an archive) serves them while this one
+		// reports all good.
+		if exe != "" && !sameFile(exe, p) {
+			r.warn("on PATH", p+" is a different binary from this one — harnesses run that one; reinstall or fix PATH")
+		} else {
+			r.ok("on PATH", p)
+		}
 	} else {
 		r.warn("on PATH", "`ouija` is not on PATH — harnesses spawn it by name")
 	}
+}
+
+// sameFile reports whether two paths are the same file, symlinks resolved.
+func sameFile(a, b string) bool {
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
 func (r *report) configFiles() {
