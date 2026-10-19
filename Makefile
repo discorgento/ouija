@@ -53,8 +53,8 @@ dist: ## Cross-compile 5 targets (linux/darwin/windows) → dist/*.tar.gz + SHA2
 	  if [ "$$os" = windows ]; then ext=".exe"; fi; \
 	  out=$(DIST)/ouija-$$os-$$arch; mkdir -p $$out; \
 	  echo "→ $$os/$$arch"; \
-	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $$out/ouija$$ext ./cmd/ouija; \
-	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build $(LDFLAGS) -o $$out/ouija-mcp$$ext ./cmd/ouija-mcp; \
+	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -trimpath $(LDFLAGS) -o $$out/ouija$$ext ./cmd/ouija; \
+	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -trimpath $(LDFLAGS) -o $$out/ouija-mcp$$ext ./cmd/ouija-mcp; \
 	done
 	@cd $(DIST) && for d in ouija-*/; do d=$${d%/}; tar -czf "$$d.tar.gz" "$$d" && rm -rf "$$d"; done
 	@cd $(DIST) && if command -v sha256sum >/dev/null 2>&1; then \
@@ -67,7 +67,7 @@ dist: ## Cross-compile 5 targets (linux/darwin/windows) → dist/*.tar.gz + SHA2
 install: ## Install both binaries into $$GOBIN/$$GOPATH/bin (idempotent: skips identical versions)
 	@d="$$($(GO) env GOBIN)"; [ -n "$$d" ] || d="$$($(GO) env GOPATH)/bin"; \
 	version=$$($$d/ouija version 2>/dev/null || echo "none"); \
-	src_version=$$($(GO) run -ldflags "$(LDFLAGS)" ./cmd/ouija version 2>/dev/null); \
+	src_version=$$($(GO) run $(LDFLAGS) ./cmd/ouija version 2>/dev/null); \
 	if [ "$$version" = "$$src_version" ]; then \
 	  echo "🔮  $$version already installed in $$d (idempotent)"; \
 	else \
