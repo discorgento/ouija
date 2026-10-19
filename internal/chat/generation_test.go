@@ -2,12 +2,15 @@ package chat
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/models"
@@ -57,8 +60,8 @@ func TestTurnDiffs(t *testing.T) {
 		{Role: engine.RoleAssistant, Content: "done again"},
 	}
 	got := turnDiffs(msgs)
-	if len(got) != 1 || got[0] != "+abc" {
-		t.Fatalf("turnDiffs = %q; want only this turn's diff", got)
+	if len(got) != 1 || got[0] != (turnDiff{path: "b.go", diff: "+abc"}) {
+		t.Fatalf("turnDiffs = %+v; want only this turn's diff, of b.go", got)
 	}
 }
 
@@ -298,12 +301,44 @@ func TestDebugToggle(t *testing.T) {
 	}
 }
 
-// Ctrl+Y says what happened instead of failing silently.
+// Ctrl+Y and Alt+Y say what happened instead of failing silently — in the
+// status bar, not the transcript.
 func TestCopyFeedback(t *testing.T) {
 	m, _ := newSwitchModel(t)
 	m.handleCopyMessage()
-	if got := m.lines[len(m.lines)-1].text; got != "nothing to copy yet" {
-		t.Fatalf("empty transcript: %q", got)
+	if m.toastText != "nothing to copy yet" || len(m.lines) != 0 {
+		t.Fatalf("empty transcript: toast %q, %d lines", m.toastText, len(m.lines))
+	}
+	m.handleCopyCode()
+	if m.toastText != "no code block to copy yet" {
+		t.Fatalf("no code block: toast %q", m.toastText)
+	}
+}
+
+// The last fenced block of the latest reply that has one is what Alt+Y copies.
+func TestLastCodeBlock(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	m.lines = []line{
+		{role: "assistant", text: "```go\nold()\n```"},
+		{role: "assistant", text: "run:\n```sh\ngo test ./...\n```\nthen\n```sh\nmake lint\n```"},
+		{role: "assistant", text: "no code here"},
+	}
+	if got := m.lastCodeBlock(); got != "make lint" {
+		t.Fatalf("lastCodeBlock = %q, want make lint", got)
+	}
+}
+
+// A failed turn becomes an error card naming the failure and the next step.
+func TestErrorCard(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	err := &engine.OError{Code: engine.ErrCodeAuth, Message: "401 unauthorized"}
+	m.handleResponse(chatResponse{err: err, gen: m.gen})
+	l := m.lines[len(m.lines)-1]
+	if l.role != "error" || l.meta != "the API key was refused" || !strings.Contains(l.hint, "ouija setup") {
+		t.Fatalf("error line = %+v", l)
+	}
+	if out := ansi.Strip(renderErrorBlock(l.meta, l.text, l.hint, 60)); !strings.Contains(out, "✕ the API key was refused") || !strings.Contains(out, "→ run `ouija setup`") {
+		t.Fatalf("error card:\n%s", out)
 	}
 }
 
@@ -333,5 +368,38 @@ func TestGitGuardNoticeShown(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no git-guard banner in %+v", m.lines)
+	}
+}
+
+// A long reply that ends in the background asks for a desktop notification;
+// one in the foreground, or a quick one, does not.
+func TestNotifyWhenALongReplyEndsInTheBackground(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	m.waiting = true
+	m.responseStart = time.Now().Add(-notifyAfter - time.Second)
+	if _, cmd := m.handleResponse(chatResponse{text: "done", gen: m.gen}); cmd != nil {
+		t.Fatal("notified while focused")
+	}
+	m.focused = false
+	m.waiting = true
+	m.responseStart = time.Now().Add(-notifyAfter - time.Second)
+	_, cmd := m.handleResponse(chatResponse{text: "done", gen: m.gen})
+	if cmd == nil {
+		t.Fatal("no notification in the background")
+	}
+	raw, ok := cmd().(tea.RawMsg)
+	if !ok || !strings.Contains(fmt.Sprint(raw.Msg), "\x1b]9;ouija: reply ready\x07") {
+		t.Fatalf("notification = %#v", cmd())
+	}
+}
+
+// What the model wrote cannot end the notification's escape sequence early.
+func TestNotifyStripsControls(t *testing.T) {
+	seq := fmt.Sprint(notifyCmd("a\x07b\x1b]0;x")().(tea.RawMsg).Msg)
+	if n := strings.Count(seq, "\x07"); n != 2 { // the two terminators only
+		t.Fatalf("%d BELs in %q", n, seq)
+	}
+	if n := strings.Count(seq, "\x1b"); n != 2 { // the two introducers only
+		t.Fatalf("%d ESCs in %q", n, seq)
 	}
 }

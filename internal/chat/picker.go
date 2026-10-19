@@ -69,6 +69,7 @@ type Picker struct {
 	Items   []string // display labels
 	Values  []string // actual values (nil = use Items)
 	Label   string   // section header (e.g. "Models")
+	Current string   // the value in use now, marked in the list ("" = none)
 	Visible bool
 
 	// Internal state.
@@ -81,6 +82,7 @@ func (p *Picker) Show(items, values []string, label string) {
 	p.Items = items
 	p.Values = values
 	p.Label = label
+	p.Current = ""
 	p.selected = 0
 	p.offset = 0
 	p.Visible = true
@@ -129,6 +131,14 @@ func (p *Picker) HandleKey(key string) (handled, confirmed bool) {
 	return false, false
 }
 
+// valueAt returns the value of item i (its label when there are no values).
+func (p *Picker) valueAt(i int) string {
+	if p.Values != nil && i < len(p.Values) {
+		return p.Values[i]
+	}
+	return p.Items[i]
+}
+
 // SelectedValue returns the currently selected value.
 // Falls back to Items when Values is nil or out of range.
 func (p *Picker) SelectedValue() string {
@@ -175,7 +185,7 @@ func (p *Picker) Render(width int) string {
 	}
 
 	var buf strings.Builder
-	fmt.Fprintf(&buf, "%s:\n", p.Label)
+	fmt.Fprintf(&buf, "%s %s\n", pickerLabel.Render(p.Label), ftScope.Render(fmt.Sprintf("(%d) · ↑↓ choose · Enter pick · Esc close", len(p.Items))))
 
 	total := len(p.Items)
 	start := p.offset
@@ -187,10 +197,14 @@ func (p *Picker) Render(width int) string {
 		sel := " "
 		sty := ftDim
 		if i == p.selected {
-			sel = "❯"
+			sel = pickerCursor.Render("❯")
 			sty = ftVal
 		}
-		fmt.Fprintf(&buf, " %s %s\n", sel, sty.Render(p.Items[i]))
+		current := ""
+		if p.Current != "" && p.valueAt(i) == p.Current {
+			current = toolOK.Render("  ● current")
+		}
+		fmt.Fprintf(&buf, " %s %s%s\n", sel, sty.Render(p.Items[i]), current)
 	}
 	if total > end {
 		fmt.Fprintf(&buf, "    %s\n", ftDim.Render(fmt.Sprintf("… and %d more", total-end)))

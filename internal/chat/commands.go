@@ -31,6 +31,8 @@ type slashCmd struct {
 // slashCmds is the canonical list of all available slash commands.
 var slashCmds = []slashCmd{
 	{"/clear", "Clear chat history"},
+	{"/retry", "Ask the last message again (a new reply replaces the last one)"},
+	{"/changes", "List the files ouija changed in this session"},
 	{"/save [file]", "Save conversation to markdown"},
 	{"/model [name]", "Show or change model (type /model + Enter to open picker)"},
 	{"/provider [name] [model]", "Show or change provider and model (Enter opens a picker for each)"},
@@ -52,6 +54,7 @@ func (m *model) openPicker(cmd string) (tea.Model, tea.Cmd) {
 	case "/provider":
 		names, labels := store.ProvidersFor(providers.Names())
 		m.picker.Show(labels, names, "Providers")
+		m.picker.Current = m.eng.Config().Provider
 	}
 	m.setViewportSize()
 	return m, nil
@@ -153,6 +156,9 @@ func (m *model) showModelPicker(provider string) bool {
 		items[i] = display
 	}
 	m.picker.Show(items, values, modelPickerLabel)
+	if provider == m.eng.Config().Provider {
+		m.picker.Current = m.eng.Config().Model
+	}
 	return true
 }
 
@@ -177,6 +183,10 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 				m.setViewportSize()
 				return m, nil
 			}
+		}
+		if parts[0] == "/retry" {
+			m.input.Reset()
+			return m.retryLast()
 		}
 		handled := m.handleSlash(input)
 		if handled {
@@ -279,10 +289,22 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	m.usd = usd
 	now := time.Now().Format("15:04")
 
+	// A long reply that ends while the terminal is in the background says so.
+	var notify tea.Cmd
+	if !m.focused && m.lastDuration >= notifyAfter {
+		body := "reply ready"
+		if msg.err != nil {
+			body = "the reply failed"
+		}
+		notify = notifyCmd(body)
+	}
+
 	// ── Handle error ────────────────────────────────────────────────
 	if msg.err != nil {
-		m.say("assistant", fmt.Sprintf("error: %v", msg.err))
-		return m, m.dispatchQueued() // a failed reply must not strand the queue
+		title, hint := errorHelp(msg.err)
+		m.lines = append(m.lines, line{role: "error", text: termsafe.Clean(msg.err.Error()), meta: title, hint: hint, ts: now})
+		m.rebuildContent()
+		return m, tea.Batch(notify, m.dispatchQueued()) // a failed reply must not strand the queue
 	}
 
 	// Save updated conversation history.
@@ -292,21 +314,32 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	// Model and tool text reaches the screen only without terminal controls
 	// (an escape sequence could set the clipboard or redraw the transcript).
 	msg.text = termsafe.Clean(msg.text)
+
+	// This turn's tool calls and tokens (beginGeneration started the turn) go
+	// with the reply they led to; the tracer keeps every turn, for the session
+	// trace and --trace-file.
+	var sum engine.TurnSummary
+	var tree string
+	if tr := m.eng.Tracer(); tr != nil {
+		sum, tree = tr.LastTurn(), termsafe.Clean(tr.RenderLastRootString())
+	}
+
 	if msg.text != "" {
-		m.lines = append(m.lines,
-			line{role: "assistant", text: msg.text, ts: now},
-		)
+		meta := formatDuration(m.lastDuration)
+		if sum.InputTokens > 0 {
+			meta += fmt.Sprintf(" · %s→%s tok", formatTokens(sum.InputTokens), formatTokens(sum.OutputTokens))
+		}
+		if cost := m.usd - m.usdAtTurn; cost >= 0.005 {
+			meta += fmt.Sprintf(" · $%.2f", cost)
+		}
+		m.lines = append(m.lines, line{role: "assistant", text: msg.text, ts: now, meta: meta, tools: sum, trace: tree})
+	} else if len(sum.Tools) > 0 {
+		m.lines = append(m.lines, line{role: "trace", tools: sum, trace: tree, ts: now}) // tools without a reply
 	}
 
-	// This turn's trace (beginGeneration started the turn). The tracer keeps
-	// every turn, for the session trace and --trace-file.
-	if trace := m.eng.Tracer().RenderLastRootString(); trace != "" {
-		m.lines = append(m.lines, line{role: "trace", text: termsafe.Clean(trace), ts: now})
-	}
-
-	// ── Show this turn's write/edit diffs as code blocks ────────────
-	for _, diff := range turnDiffs(m.history) {
-		m.lines = append(m.lines, line{role: "codeblock", text: termsafe.Clean(diff), lang: "diff", ts: now})
+	// ── Show this turn's write/edit diffs ───────────────────────────
+	for _, d := range turnDiffs(m.history) {
+		m.lines = append(m.lines, line{role: "diff", text: termsafe.Clean(d.diff), path: termsafe.Clean(d.path), ts: now})
 	}
 
 	// Out of the tool output, where it would be easy to miss: a command
@@ -316,10 +349,10 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 	}
 
 	if cmd := m.dispatchQueued(); cmd != nil {
-		return m, cmd // re-renders with the status line back
+		return m, tea.Batch(notify, cmd) // re-renders with the status line back
 	}
 	m.rebuildContent()
-	return m, nil
+	return m, notify
 }
 
 // ─── Slash command dispatch ──────────────────────────────────────────
@@ -356,6 +389,10 @@ func (m *model) handleSlash(input string) bool {
 
 	case "/help":
 		return m.showHelp()
+
+	case "/changes":
+		m.say("assistant", m.sessionChanges())
+		return true
 
 	case "/debug":
 		m.toggleDebugLog()
@@ -441,28 +478,25 @@ func (m *model) toggleDebugLog() {
 
 // showHelp renders a formatted list of slash commands.
 func (m *model) showHelp() bool {
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("# ouija chat — %s\n\n", time.Now().Format("2006-01-02 15:04")))
-	b.WriteString("## Slash commands\n\n")
-	b.WriteString("| Command | Description |\n")
-	b.WriteString("|---------|-------------|\n")
-	for _, sc := range slashCmds {
-		b.WriteString(fmt.Sprintf("| `%s` | %s |\n", sc.cmd, sc.desc))
-	}
-	b.WriteString("\n## Shortcuts\n\n")
-	b.WriteString("| Key | Action |\n")
-	b.WriteString("|-----|--------|\n")
-	b.WriteString("| `↑` | Edit last message (empty input) |\n")
-	b.WriteString("| `Alt+↑` / `Alt+↓` | Cycle input history |\n")
-	b.WriteString("| `Shift+Enter` / `Alt+Enter` | Insert a newline |\n")
-	b.WriteString("| `Tab` | Accept the highlighted suggestion |\n")
-	b.WriteString("| `PgUp` / `PgDn` / `Home` / `End` | Scroll the transcript |\n")
-	b.WriteString("| `Ctrl+Y` | Copy last assistant response to clipboard |\n")
-	b.WriteString("| `Esc` | Cancel generation / clear pending queue |\n")
-	b.WriteString("| `Ctrl+C` / `Ctrl+D` | Quit |\n")
-
-	m.say("assistant", b.String())
+	m.lines = append(m.lines, line{role: "help", ts: time.Now().Format("15:04")})
+	m.rebuildContent()
 	return true
+}
+
+// helpKeys are the chat's keys, as /help lists them.
+var helpKeys = [][2]string{
+	{"↑", "Edit last message (empty input)"},
+	{"Alt+↑ / Alt+↓", "Cycle input history"},
+	{"Shift+Enter / Alt+Enter", "Insert a newline"},
+	{"Tab", "Accept the highlighted suggestion"},
+	{"PgUp / PgDn / Home / End", "Scroll the transcript"},
+	{"Ctrl+Y", "Copy last assistant response to clipboard"},
+	{"Ctrl+T", "Show or hide each turn's tool calls one per line, with the span tree"},
+	{"Alt+Y", "Copy the last code block to clipboard"},
+	{"Ctrl+F", "Search the conversation (Enter/↓ next, ↑ previous, Esc close)"},
+	{"Ctrl+S", "Select mode: release the mouse to select text (again to scroll)"},
+	{"Esc", "Cancel generation / clear pending queue"},
+	{"Ctrl+C / Ctrl+D", "Quit"},
 }
 
 // persistConfig writes the current config back to the project config file.
@@ -555,4 +589,71 @@ func (m *model) handleSave(filename string) bool {
 		m.say("assistant", fmt.Sprintf("✓ saved to `%s`", filename))
 	}
 	return true
+}
+
+// retryLast asks the last message again: its reply (tools, text, diffs) leaves
+// the transcript and the history, and a new generation answers it. The files
+// a tool already changed stay changed.
+func (m *model) retryLast() (tea.Model, tea.Cmd) {
+	if m.waiting {
+		return m.toast("wait for the reply, or Esc to stop it, before /retry")
+	}
+	last := -1
+	for i := len(m.lines) - 1; i >= 0; i-- {
+		if m.lines[i].role == "user" {
+			last = i
+			break
+		}
+	}
+	if last < 0 {
+		return m.toast("nothing to retry yet")
+	}
+	text := m.lines[last].text
+	m.lines = m.lines[:last+1]
+	// The history holds the message only when its turn succeeded: drop it and
+	// what followed, so the model does not see the old answer.
+	for i := len(m.history) - 1; i >= 0; i-- {
+		if m.history[i].Role == engine.RoleUser {
+			if m.history[i].Content == text {
+				m.history = m.history[:i]
+			}
+			break
+		}
+	}
+	return m, m.beginGeneration(text)
+}
+
+// sessionChanges lists the files changed this session with their +N −M, as
+// markdown for the transcript.
+func (m *model) sessionChanges() string {
+	type change struct{ added, removed, edits int }
+	var order []string
+	byPath := map[string]*change{}
+	for _, l := range m.lines {
+		if l.role != "diff" {
+			continue
+		}
+		c, ok := byPath[l.path]
+		if !ok {
+			c = &change{}
+			byPath[l.path] = c
+			order = append(order, l.path)
+		}
+		a, r := diffStats(l.text)
+		c.added, c.removed, c.edits = c.added+a, c.removed+r, c.edits+1
+	}
+	if len(order) == 0 {
+		return "No files changed in this session yet."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "**%d file(s) changed this session**\n\n", len(order))
+	for _, p := range order {
+		c := byPath[p]
+		edits := ""
+		if c.edits > 1 {
+			edits = fmt.Sprintf(" · %d edits", c.edits)
+		}
+		fmt.Fprintf(&b, "- `%s` +%d −%d%s\n", p, c.added, c.removed, edits)
+	}
+	return b.String()
 }

@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/discorgento/ouija/internal/theme"
+
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/art"
 	"github.com/discorgento/ouija/internal/models"
@@ -18,11 +20,15 @@ import (
 
 // line is one rendered chat entry.
 type line struct {
-	role   string // "user" | "assistant" | "banner" | "codeblock"
-	text   string
-	ts     string // timestamp (HH:MM)
-	lang   string // language hint for code blocks (e.g. "php", "js")
-	cached string // pre-rendered ANSI content (populated lazily, cleared on resize)
+	role   string             // "user" | "assistant" | "banner" | "trace" | "diff"
+	text   string             // the message; the span tree for "trace"; the diff for "diff"
+	ts     string             // timestamp (HH:MM)
+	meta   string             // assistant: how long the reply took, its cost; error: what failed
+	path   string             // diff: the file changed
+	hint   string             // error: what to do about it
+	tools  engine.TurnSummary // trace, assistant: the turn's tool calls and tokens
+	trace  string             // trace, assistant: the turn's span tree (Ctrl+T)
+	cached string             // pre-rendered ANSI content (populated lazily, cleared on resize)
 }
 
 // model is the Bubble Tea model for the chat TUI.
@@ -79,10 +85,35 @@ type model struct {
 	// Animated welcome — hue cycles via tick, freezes after 20 ticks (10s).
 	hueShift      int
 	tickCount     int
-	welcomeBanner string // cached rendered banner, refreshed on tick
+	welcomeBanner string      // cached rendered banner (card included)
+	welcomeKey    string      // what welcomeBanner was rendered for
+	welcome       welcomeInfo // git branch and memory, read at startup
+
+	// Turn bookkeeping: the cost spent before the turn (its cost is the
+	// difference), the live tools list's state (redrawn when it changes).
+	usdAtTurn float64
+	liveTools string
+
+	// Ephemeral notice in the status bar (copied, mode switched…); it clears
+	// itself when toastID's timer fires.
+	toastText string
+	toastID   int
+
+	// seenLines is how many transcript lines the developer has seen: lines
+	// past it arrived while they were scrolled up ("↓ 3 new").
+	seenLines int
+
+	// focused is false while the terminal window is in the background (when
+	// the terminal reports focus): a long reply then ends with a notification.
+	focused bool
+	// selectMode releases the mouse so the terminal can select text (Ctrl+S).
+	selectMode bool
+	// search is the Ctrl+F transcript search.
+	search search
 
 	// Tool progress.
 	currentTool string
+	showTrace   bool // Ctrl+T: each turn's tools one per line, and the span tree
 
 	// Streaming partial response.
 	partialText string
@@ -173,6 +204,9 @@ func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath s
 	var welcome []line
 
 	vp := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
+	// Search hits are highlighted.
+	vp.HighlightStyle = searchHit
+	vp.SelectedHighlightStyle = searchHitFocus
 	// SoftWrap false: content is already pre-wrapped (glamour / writeWrapped).
 	vp.SoftWrap = false
 
@@ -190,8 +224,9 @@ func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath s
 		hueShift:      0,
 		rejectedTools: make(map[string]bool),
 		picker:        &Picker{},
+		focused:       true,
 	}
-	m.welcomeBanner = renderWelcomeBanner(0, m.eng.Config().ProjectRoot)
+	m.welcome = loadWelcomeInfo(m.eng.Config().ProjectRoot)
 	m.rebuildContent()
 	return m
 }
@@ -199,30 +234,30 @@ func newModel(eng EngineAPI, buildProvider ProviderFactory, system, configPath s
 // ─── Colors & Styles ───────────────────────────────────────────────────
 
 var (
-	purple = lipgloss.Color("93")  // deep purple — ouija (AI)
-	pink   = lipgloss.Color("213") // bright warm pink — user
-	violet = lipgloss.Color("99")  // rich violet — headers
-	gray   = lipgloss.Color("60")
-	white  = lipgloss.Color("#ffffff")
+	purple = theme.Purple // deep purple — ouija (AI)
+	pink   = theme.Pink   // bright warm pink — user
+	violet = theme.Violet // rich violet — headers
+	gray   = theme.Muted
+	white  = theme.Text
 
 	roleYou = lipgloss.NewStyle().Bold(true).Foreground(pink)
 	roleOui = lipgloss.NewStyle().Bold(true).Foreground(purple)
 
 	txtDim = lipgloss.NewStyle().Foreground(gray)
 
-	bannerColors = []color.Color{
-		lipgloss.Color("213"),
-		lipgloss.Color("141"),
-		lipgloss.Color("99"),
-		lipgloss.Color("93"),
-		lipgloss.Color("140"),
-		lipgloss.Color("225"),
-	}
-	bannerTag    = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("141"))
-	bannerAction = lipgloss.NewStyle().Foreground(lipgloss.Color("93"))
+	bannerTag    = lipgloss.NewStyle().Italic(true).Foreground(theme.Lavender)
+	bannerAction = lipgloss.NewStyle().Foreground(theme.Purple)
 
-	hdrOui  = lipgloss.NewStyle().Bold(true).Foreground(violet)
-	hdrMeta = lipgloss.NewStyle().Faint(true).Foreground(white)
+	pillNew      = lipgloss.NewStyle().Bold(true).Foreground(theme.Surface).Background(theme.Pink)
+	pillSelect   = lipgloss.NewStyle().Bold(true).Foreground(theme.Surface).Background(theme.Amber)
+	slashTyped   = lipgloss.NewStyle().Bold(true).Foreground(theme.Pink)
+	pickerCursor = lipgloss.NewStyle().Bold(true).Foreground(theme.Pink)
+	pickerLabel  = lipgloss.NewStyle().Bold(true).Foreground(theme.Lavender)
+
+	hdrOui    = lipgloss.NewStyle().Bold(true).Foreground(violet)
+	hdrMeta   = lipgloss.NewStyle().Faint(true).Foreground(white)
+	hdrModel  = lipgloss.NewStyle().Bold(true).Foreground(theme.Lavender)
+	hdrBranch = lipgloss.NewStyle().Foreground(theme.Pink)
 
 	ftDim   = lipgloss.NewStyle().Faint(true).Foreground(white)
 	ftScope = lipgloss.NewStyle().Foreground(gray)
@@ -230,16 +265,18 @@ var (
 
 	pipeYou   = lipgloss.NewStyle().SetString("▎").Foreground(pink).String()
 	pipeOui   = lipgloss.NewStyle().SetString("▎").Foreground(purple).String()
-	pipeTrace = lipgloss.NewStyle().SetString("▎").Foreground(lipgloss.Color("243")).String()
+	pipeTrace = lipgloss.NewStyle().SetString("▎").Foreground(theme.Gray).String()
 	sepLine   = lipgloss.NewStyle().Faint(true).Foreground(gray)
 	spinnerS  = lipgloss.NewStyle().Foreground(purple)
 
-	cardBg    = lipgloss.Color("#1e1930") // lighter dark purple — user card
-	cardBgOui = lipgloss.Color("#12101e") // darker dark purple — AI card
+	// No background of ouija's own: the terminal's shows through, so the UI
+	// matches the terminal theme instead of patching it with two purples.
+	cardBg    color.Color = lipgloss.NoColor{}
+	cardBgOui color.Color = lipgloss.NoColor{}
 
 	// inputCardFrame is the total horizontal frame of the input card:
-	// Padding(1,1) = 2 (left + right).
-	inputCardFrame = 2
+	// border (2) + Padding(0,1) (2).
+	inputCardFrame = 4
 )
 
 // ouijaArt references the shared figlet rendering.

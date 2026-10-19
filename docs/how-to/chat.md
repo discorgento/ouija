@@ -23,23 +23,59 @@ this page covers the workflows around them.
 ## What happens while the model works
 
 - **Token streaming** — text renders character by character as the model responds
+- **Live tools** — while the turn runs, one line counts its tool calls
+  (`◇ 4 tools · 3 ✓ · 1 awaiting your approval`); `Ctrl+T` lists them as they
+  start and finish
 - **Tool progress** — shows which tool is currently executing (e.g.
-  `read_file: src/Foo.php`) in a persistent status bar between the viewport and
-  the input — always visible, never scrolls away
+  `◎ read_file src/Foo.php`), the seconds spent and the tokens streamed so far,
+  in a persistent status line between the viewport and the input — always
+  visible, never scrolls away
+- **Context gauge** — the header shows how full the model's context window is
+  (`ctx ▰▰▱▱▱▱ 32%`) when the window is known
 - **Budget bar** — visual progress bar in the footer for the most restrictive
-  budget ceiling (tokens/steps/USD)
+  budget ceiling (USD or tokens), shown only when one is set
 - **Queue while generating** — keep typing while the model responds; messages
   queue up and auto-send when the model finishes
 - **Cancel** — `Esc` while generating cancels the current response; `Esc` while
   idle clears the queue
 - **Edit last message** — press `Up` with empty input to reload the last message
 
+## After each turn
+
+- **Tool calls** — one line under the reply's header sums the turn's tools up
+  (`◇ list_dir .  ✓`, or `◇ 3 tools read_file ×2, bash  ✗ 1 failed`); `Ctrl+T`
+  lists each call — target, `✓`/`✗`, duration, why a failed one failed — and
+  the span tree. The header shows the reply's time, tokens and cost
+- **Diffs** — each file a turn changed is shown framed, with its `+N −M`, line
+  numbers and the removed and added lines on red and green
+- **Code** — code blocks in replies are syntax-highlighted; `Alt+Y` copies the
+  last one
+- **Cost** — each reply's header shows how long it took and what it cost
+- **Errors** — a failed turn shows in a red card that names the failure (key
+  refused, budget spent, network…) and the next step
+- **Notification** — when a reply took over 10 seconds and the terminal is in
+  the background, ouija asks for a desktop notification (OSC 9 / OSC 777:
+  iTerm2, kitty, WezTerm, foot, GNOME terminals). The tab title shows what ouija
+  is doing
+
+`Ctrl+F` searches the conversation and highlights the matches; `/retry` asks
+the last message again; `/changes` lists the files changed this session. On
+exit, a card sums the session up: time, messages, tokens, cost and the files
+ouija changed.
+
+Scrolled up while a reply arrives, the status bar counts the new lines
+(`↓ 3 new · End`). Mouse text selection works in select mode (`Ctrl+S`), or with
+`Shift`+drag in most terminals.
+
 ## Approving tool calls
 
 By default, read-only tools (`read_file`, `list_dir`, `grep`, `glob`) run
 without a prompt; write and exec tools (`write_file`, `edit_file`,
-`delete_file`, `bash`) require approval (`ask`). The prompt shows the tool icon,
-name, call number, and all arguments. Five options, navigable with arrow keys:
+`delete_file`, `bash`) require approval (`ask`). The prompt says what the call
+asks in words ("ouija wants to edit `engine/budget.go`"), framed in the color of
+its risk (green reads, amber writes, red shell and anything outside the
+project), with the command — whole, wrapped, never cut — or the diff it would run or
+apply, and the other arguments. Up to five options, navigable with arrow keys:
 
 - **Yes** (`y`) — approve this call once
 - **No** (`n`) — reject; the model is told to try a different approach

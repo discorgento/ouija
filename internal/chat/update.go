@@ -2,13 +2,13 @@ package chat
 
 import (
 	"os"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
-	"charm.land/lipgloss/v2"
 	"github.com/discorgento/ouija/internal/termsafe"
 )
 
@@ -18,8 +18,11 @@ func (m *model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, tickCmd(), m.spinner.Tick)
 }
 
+// welcomeTicks is how long the welcome gradient flows: 60 × 120ms ≈ 7s.
+const welcomeTicks = 60
+
 func tickCmd() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg{}
 	})
 }
@@ -102,9 +105,28 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.waiting {
 			return m, nil
 		}
+		// A tool started or finished: redraw the turn's live tools list.
+		if key := liveToolsKey(m.eng.Tracer().LastTurn()); key != m.liveTools {
+			m.liveTools = key
+			m.rebuildContent()
+		}
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
+	case tea.FocusMsg:
+		m.focused = true
+		return m, nil
+
+	case tea.BlurMsg:
+		m.focused = false
+		return m, nil
+
+	case toastClearMsg:
+		if msg.id == m.toastID {
+			m.toastText = ""
+		}
+		return m, nil
 
 	case chatResponse:
 		return m.handleResponse(msg)
@@ -136,6 +158,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.currentTool = termsafe.Clean(msg.tool + ": " + msg.arg)
+		// Text the model wrote before this call and the text after it are two
+		// paragraphs ("…oriented.Let me…" ran them together).
+		if m.partialText != "" && !strings.HasSuffix(m.partialText, "\n") {
+			m.partialText += "\n\n"
+		}
 		m.rebuildContent()
 		return m, nil
 
@@ -154,14 +181,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.tickCount++
-		if m.tickCount > 20 {
-			// Freeze banner after 10s (500ms × 20); nobody's staring at it.
+		if m.tickCount > welcomeTicks {
+			// Freeze the gradient after a few seconds; nobody's staring at it.
 			return m, nil
 		}
-		m.hueShift++
-		// Refresh welcome banner color cycling on tick only (avoids
-		// recomputing the entire banner on every keystroke/token).
-		m.welcomeBanner = renderWelcomeBanner(m.hueShift, m.eng.Config().ProjectRoot)
+		m.hueShift++ // rebuildContent re-renders the welcome for the new shift
 		m.rebuildContent()
 		return m, tickCmd()
 
@@ -193,26 +217,10 @@ func (m *model) setViewportSize() {
 	// line of a long message the box used to shrink to one line.
 	m.input.SetHeight(min(m.input.LineCount(), m.input.MaxHeight))
 
-	var n int
-	if m.approvalReq != nil {
-		// Render the approval box and measure its actual visual height.
-		body := RenderApprovalBox(m.approvalReq, m.toolCallN, m.approvalIdx)
-		cardContent := ApprovalCard.Render(body, m.width)
-		boxHeight := lipgloss.Height(cardContent)
-		n = 4 + boxHeight // header(2) + blank(1) + box(h) + footer(1)
-	} else {
-		// 4 = header(2) + blank_after_vp(1) + footer(1)
-		// +2 = card vertical padding (1 top + 1 bottom)
-		n = 4 + m.input.Height() + 2
-	}
-	if m.waiting {
-		n++ // +1 for persistent status line between viewport and input
-	}
-	if m.picker.Visible {
-		n += m.picker.Height()
-	} else if m.showCmdList {
-		n += len(slashCmds) + 2 // items + padding(1,1) top/bottom
-	}
+	// Measure the chrome as View draws it: counting its parts by hand drifted
+	// from the cards' padding and the screen came out taller than the terminal.
+	w := max(m.width, 20)
+	n := strings.Count(m.renderHeader(w), "\n") + strings.Count(m.renderBottom(w), "\n")
 
 	vpHeight := m.height - n
 	if vpHeight < 5 {

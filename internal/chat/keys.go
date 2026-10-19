@@ -62,6 +62,14 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil // other keys are ignored during the prompt
 	}
 
+	// ── Search box open: keys go to it ───────────────────────────────
+	if m.search.active {
+		return m.handleSearchKey(msg)
+	}
+	if key == "ctrl+f" {
+		return m.openSearch()
+	}
+
 	// ── Escape: cancel or clear queue ────────────────────────────────
 	// NB: msg.String() returns "esc" (not "escape") in bubbletea v2.
 	if key == "esc" || key == "escape" {
@@ -79,14 +87,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if len(m.pendingQueue) > 0 {
 			// Clear queue.
 			m.pendingQueue = nil
-			m.lines = append(m.lines,
-				line{role: "banner", text: "○ queue cleared"},
-			)
-			m.rebuildContent()
-			if m.autoScroll {
-				m.vp.GotoBottom()
-			}
-			return m, nil
+			m.rebuildContent() // the queue preview goes
+			return m.toast("○ queue cleared")
 		}
 		return m, nil
 	}
@@ -94,6 +96,35 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// ── Copy last assistant response ──────────────────────────────────
 	if key == "ctrl+y" {
 		return m.handleCopyMessage()
+	}
+
+	// ── Copy the last code block ──────────────────────────────────────
+	if key == "alt+y" {
+		return m.handleCopyCode()
+	}
+
+	// ── Select mode: give the mouse back to the terminal ─────────────
+	if key == "ctrl+s" {
+		m.selectMode = !m.selectMode
+		if m.selectMode {
+			return m.toast("select mode: drag to select text · Ctrl+S to scroll with the wheel again")
+		}
+		return m.toast("mouse wheel scrolls again")
+	}
+
+	// ── Span tree under the turns' tool lists ─────────────────────────
+	if key == "ctrl+t" {
+		m.showTrace = !m.showTrace
+		for i := range m.lines {
+			if len(m.lines[i].tools.Tools) > 0 {
+				m.lines[i].cached = ""
+			}
+		}
+		m.rebuildContent()
+		if m.showTrace {
+			return m.toast("tool details shown · Ctrl+T hides them")
+		}
+		return m.toast("tool details hidden")
 	}
 
 	// ── Input history ────────────────────────────────────────────────

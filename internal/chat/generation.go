@@ -23,6 +23,8 @@ func (m *model) beginGeneration(input string) tea.Cmd {
 	m.responseStart = time.Now()
 	m.partialText = ""
 	m.streamingTokens = 0
+	m.usdAtTurn = m.usd
+	m.liveTools = ""
 	m.eng.Tracer().NextTurn()
 	m.setViewportSize() // room for the status line; re-renders
 	return tea.Batch(m.startChat(input), m.spinner.Tick)
@@ -130,10 +132,16 @@ func turnGitNotices(msgs []engine.Message) []string {
 	return out
 }
 
+// turnDiff is one file change of a turn: the file and its diff.
+type turnDiff struct {
+	path string
+	diff string
+}
+
 // turnDiffs returns the diffs of the write/edit results of the last turn —
 // the messages from the last user message on — so a diff shown once is never
 // shown again under a later reply.
-func turnDiffs(msgs []engine.Message) []string {
+func turnDiffs(msgs []engine.Message) []turnDiff {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if msgs[i].Role == engine.RoleUser {
@@ -141,19 +149,28 @@ func turnDiffs(msgs []engine.Message) []string {
 			break
 		}
 	}
-	var out []string
+	var out []turnDiff
 	for _, msg := range msgs[start:] {
 		if msg.Role != engine.RoleTool {
 			continue
 		}
-		if !strings.HasPrefix(msg.Content, "✓ edited") && !strings.HasPrefix(msg.Content, "✓ wrote") {
+		head, diff, ok := strings.Cut(msg.Content, "\n")
+		if !ok || strings.TrimSpace(diff) == "" {
 			continue
 		}
-		if idx := strings.IndexByte(msg.Content, '\n'); idx > 0 {
-			if diff := msg.Content[idx+1:]; strings.TrimSpace(diff) != "" {
-				out = append(out, diff)
+		// "✓ edited <path>" / "✓ wrote <path> (N bytes)"
+		var path string
+		if p, found := strings.CutPrefix(head, "✓ edited "); found {
+			path = p
+		} else if p, found := strings.CutPrefix(head, "✓ wrote "); found {
+			if i := strings.LastIndex(p, " ("); i > 0 {
+				p = p[:i]
 			}
+			path = p
+		} else {
+			continue
 		}
+		out = append(out, turnDiff{path: path, diff: diff})
 	}
 	return out
 }

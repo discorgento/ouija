@@ -34,8 +34,12 @@ type tokenMsg struct {
 	gen  int // the generation that streamed it; others are stale
 }
 
-// tickMsg fires every 500ms for the welcome animation.
+// tickMsg drives the welcome animation.
 type tickMsg struct{}
+
+// toastClearMsg clears the status-bar notice it was set for (id), unless a
+// newer one replaced it.
+type toastClearMsg struct{ id int }
 
 // approvalRequestMsg is sent from the engine goroutine to the TUI event
 // loop when a tool requires user approval. The TUI must send a response

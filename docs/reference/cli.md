@@ -110,6 +110,8 @@ by a one-line summary (messages · tokens · steps, plus cost when pricing is se
 | Command | Description |
 |---|---|
 | `/clear` | Clear chat history |
+| `/retry` | Ask the last message again; the new reply replaces the last one (files already changed stay changed) |
+| `/changes` | List the files ouija changed in this session, with their `+N −M` |
 | `/save [file]` | Export conversation to Markdown |
 | `/model [name]` | Show or switch model (with interactive picker) |
 | `/provider [name] [model]` | Show or switch provider and model; Enter on `/provider` or `/provider <name>` opens a picker, so you always choose the model |
@@ -123,6 +125,10 @@ by a one-line summary (messages · tokens · steps, plus cost when pricing is se
 |---|---|
 | `Esc` | Cancel generation / clear pending queue |
 | `Ctrl+Y` | Copy last assistant response to clipboard |
+| `Ctrl+T` | Show or hide each turn's tool calls one per line, with the span tree |
+| `Alt+Y` | Copy the last code block to clipboard |
+| `Ctrl+F` | Search the conversation: matches highlighted, `Enter`/`↓` next, `↑` previous, `Esc` close |
+| `Ctrl+S` | Select mode: release the mouse to select text (again to scroll with the wheel) |
 | `Up` (empty input) | Load last user message for editing |
 | `Alt+Up` / `Alt+Down` | Cycle through input history |
 | `Shift+Enter` / `Alt+Enter` | Insert a newline |

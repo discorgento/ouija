@@ -3,7 +3,6 @@ package chat
 import (
 	"fmt"
 	"image/color"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -11,29 +10,63 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/discorgento/ouija/internal/theme"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/version"
 )
 
 // ─── Glamour renderer ─────────────────────────────────────────────────
 
 // ouijaStyleJSON is a custom glamour style matching the ouija color scheme.
-// Base text is violet (#875fff ≈ lipgloss.Color("99")), with pink bold,
-// lavender italic, and code blocks with dark backgrounds.
+// Base text is the terminal's own color; headings keep their # prefix in the palette's pink and
+// violets, list items keep their bullets, inline code is pink on dark, and code
+// blocks are syntax-highlighted in the same palette. Code blocks get no
+// background of their own: the card's would be restored after every token.
 const ouijaStyleJSON = `{
-    "document": {"color": "#ffffff"},
-    "text": {"color": "#ffffff"},
-    "strong": {"color": "#ffffff", "bold": true},
-    "emph": {"color": "#ffffff", "italic": true},
-    "code": {"color": "#d4d4d4", "background_color": "#303030"},
-    "code_block": {"color": "#d4d4d4", "background_color": "#1e1e1e"},
-    "heading": {"color": "#ffffff", "bold": true},
-    "h1": {"color": "#ffffff", "bold": true},
-    "h2": {"color": "#ffffff", "bold": true},
-    "block_quote": {"color": "#c0c0c0", "italic": true},
-    "link": {"color": "#ffffff", "underline": true},
+    "strong": {"bold": true},
+    "emph": {"italic": true},
+    "code": {"prefix": "\u00a0", "suffix": "\u00a0", "color": "213", "background_color": "#303030"},
+    "code_block": {"margin": 1, "chroma": {
+        "error": {"color": "#ffffff", "background_color": "#d7005f"},
+        "comment": {"color": "#6c6c8a", "italic": true},
+        "comment_preproc": {"color": "#ff87d7"},
+        "keyword": {"color": "#af87ff", "bold": true},
+        "keyword_reserved": {"color": "#af87ff", "bold": true},
+        "keyword_namespace": {"color": "#ff5fd7"},
+        "keyword_type": {"color": "#87afff"},
+        "operator": {"color": "#d7afff"},
+        "punctuation": {"color": "#9e9e9e"},
+        "name_builtin": {"color": "#ff87d7"},
+        "name_tag": {"color": "#af87ff"},
+        "name_attribute": {"color": "#87d7ff"},
+        "name_class": {"color": "#ffd787", "bold": true},
+        "name_decorator": {"color": "#ffd787"},
+        "name_function": {"color": "#87d7ff"},
+        "literal_number": {"color": "#ffaf5f"},
+        "literal_string": {"color": "#afd787"},
+        "literal_string_escape": {"color": "#87ffd7"},
+        "generic_deleted": {"color": "#ff5f5f"},
+        "generic_inserted": {"color": "#87ff87"},
+        "generic_emph": {"italic": true},
+        "generic_strong": {"bold": true},
+        "generic_subheading": {"color": "#8a8a8a"}
+    }},
+    "heading": {"bold": true},
+    "h1": {"prefix": "# ", "color": "213", "bold": true},
+    "h2": {"prefix": "## ", "color": "141", "bold": true},
+    "h3": {"prefix": "### ", "color": "99", "bold": true},
+    "h4": {"prefix": "#### ", "bold": true},
+    "h5": {"prefix": "##### ", "bold": true},
+    "h6": {"prefix": "###### ", "bold": true},
+    "list": {"level_indent": 2},
+    "item": {"block_prefix": "• "},
+    "enumeration": {"block_prefix": ". "},
+    "block_quote": {"color": "245", "italic": true},
+    "link": {"color": "141", "underline": true},
     "hr": {"color": "#5f5f5f"}
 }`
 
@@ -91,25 +124,6 @@ func getGlamRenderer(width int) *glamour.TermRenderer {
 	return r
 }
 
-// renderGlamour renders plain markdown text into ANSI-styled terminal
-// output without word wrapping. Used for code blocks and other cases
-// where width is handled externally.
-func renderGlamour(texts ...string) string {
-	text := strings.Join(texts, " ")
-	if text == "" {
-		return ""
-	}
-	r := getGlamRenderer(0) // WithWordWrap(0) — no wrapping
-	if r == nil {
-		return text
-	}
-	out, err := r.Render(text)
-	if err != nil {
-		return text
-	}
-	return strings.TrimSuffix(out, "\n")
-}
-
 // ─── Card component ────────────────────────────────────────────────────
 
 // card is a reusable card component with background, foreground,
@@ -122,10 +136,11 @@ func renderGlamour(texts ...string) string {
 type card struct {
 	bg     color.Color
 	fg     color.Color
-	bgCode string // cached ANSI for background
-	fgCode string // cached ANSI for foreground
-	padV   int    // vertical padding (top + bottom)
-	padH   int    // horizontal padding (left + right)
+	bgCode string      // cached ANSI for background
+	fgCode string      // cached ANSI for foreground
+	padV   int         // vertical padding (top + bottom)
+	padH   int         // horizontal padding (left + right)
+	border color.Color // rounded border color (nil = no border)
 }
 
 // newCard creates a card with the given background and foreground colours.
@@ -146,6 +161,12 @@ func (c card) WithPadding(v, h int) card {
 	return c
 }
 
+// WithBorder returns a copy framed by a rounded border in c.
+func (c card) WithBorder(border color.Color) card {
+	c.border = border
+	return c
+}
+
 // Render renders the content inside the card at the given width.
 // The card's background colour is preserved across any ANSI resets
 // that rendered content (e.g. glamour) may contain.
@@ -155,6 +176,9 @@ func (c card) Render(content string, width int) string {
 		Background(c.bg).
 		Padding(c.padV, c.padH).
 		Width(width)
+	if c.border != nil {
+		s = s.Border(lipgloss.RoundedBorder()).BorderForeground(c.border).BorderBackground(c.bg)
+	}
 	rendered := s.Render(strings.TrimSuffix(content, "\n"))
 	rendered = keepCardBG(rendered, c.bgCode, c.fgCode)
 	// The trailing \n terminates the last padding line — lipgloss
@@ -192,26 +216,31 @@ func msgContentWidth(vpW int, pipePfx string) int {
 // Named card instances — each one maps to a specific visual element.
 var (
 	// Message cards  ──────────────────────────────────────────────
-	UserCard   = newCard(cardBg, white)                    // user messages
-	AICard     = newCard(cardBgOui, white)                 // AI messages, codeblocks, streaming
-	BannerCard = newCard(cardBgOui, gray)                  // system banners
-	TraceCard  = newCard(cardBgOui, lipgloss.Color("255")) // tool trace
+	UserCard   = newCard(cardBgOui, white).WithPadding(0, 1) // user messages (a bubble inside)
+	AICard     = newCard(cardBgOui, white).WithPadding(0, 1) // AI messages, diffs, streaming
+	BannerCard = newCard(cardBgOui, gray).WithPadding(0, 1)  // system banners
+	TraceCard  = newCard(cardBgOui, white).WithPadding(0, 1) // tool trace
 
 	// UI component cards  ─────────────────────────────────────────
-	HeaderCard   = newCard(cardBg, white).WithPadding(0, 1) // top bar (slim)
-	InputCard    = newCard(cardBg, white)                   // text input
-	FooterCard   = newCard(cardBg, white)                   // status bar
-	SlashCard    = newCard(cardBg, white)                   // command picker
-	ApprovalCard = newCard(cardBg, white)                   // approval prompt
-	StatusCard   = newCard(cardBg, white).WithPadding(0, 1) // AI activity status (slim)
-	WelcomeCard  = newCard(cardBgOui, white)                // animated welcome banner
+	HeaderCard   = newCard(cardBg, white).WithPadding(0, 1)                          // top bar (slim)
+	InputCard    = newCard(cardBg, white).WithPadding(0, 1)                          // text input (framed by state: WithBorder)
+	FooterCard   = newCard(cardBg, white).WithPadding(0, 1)                          // status bar (slim)
+	SlashCard    = newCard(cardBg, white).WithPadding(0, 1).WithBorder(theme.Muted)  // command picker
+	ApprovalCard = newCard(cardBg, white)                                            // approval prompt
+	StatusCard   = newCard(cardBg, white).WithPadding(0, 1)                          // AI activity status (slim)
+	WelcomeCard  = newCard(cardBgOui, white)                                         // animated welcome banner
+	ErrorCard    = newCard(cardBgOui, white).WithPadding(0, 1).WithBorder(theme.Red) // failed turn
 )
 
 // keepCardBG replaces every ANSI reset (\x1b[m) in the rendered string
 // with reset + the card's own style codes (fg+bg). Glamour emits resets
 // inside markdown which would clear the card background — this restores
 // the card colours after each reset without needing raw ANSI strings.
+//
+// Both reset spellings count: lipgloss writes \x1b[m, the syntax highlighter
+// \x1b[0m.
 func keepCardBG(s, bgCode, fgCode string) string {
+	s = strings.ReplaceAll(s, "\x1b[0m", ansi.ResetStyle)
 	return strings.ReplaceAll(s, ansi.ResetStyle, ansi.ResetStyle+fgCode+bgCode)
 }
 
@@ -223,45 +252,108 @@ func (m *model) View() tea.View {
 	// parses ANSI from ALL lines — infeasible at 60fps.
 	// rebuildContent is called explicitly in Update when
 	// content changes (handleSend, handleResponse, handleResize, tokenMsg).
+	w := max(m.width, 20)
+	// The last line must not end in a newline: it would be one line more than
+	// the terminal has and push the header off the screen.
+	screen := m.renderHeader(w) + m.vp.View() + "\n" + m.renderBottom(w)
+	v := tea.NewView(strings.TrimSuffix(screen, "\n"))
+	v.AltScreen = true
+	// Cell motion, not all motion: only the wheel is used, and every mouse
+	// move redrew the screen.
+	v.MouseMode = tea.MouseModeCellMotion
+	if m.selectMode {
+		v.MouseMode = tea.MouseModeNone // the terminal selects text again
+	}
+	v.ReportFocus = true // a long reply ends with a notification in the background
+	v.WindowTitle = m.windowTitle()
+	return v
+}
 
+// renderHeader renders the top bar: logo, branch and project on the left,
+// model, provider and context-window use on the right. What does not fit is
+// dropped (the context gauge, then the project path) so it never wraps.
+func (m *model) renderHeader(w int) string {
+	cfg := m.eng.Config()
+	width := w - 2
+	sep := sepLine.Render(" │ ")
+
+	left := hdrOui.Render("● ") + theme.GradientText("ouija", m.hueShift) + " " + ftDim.Render(version.Version)
+	if m.welcome.branch != "" {
+		left += sep + hdrBranch.Render("⎇ "+m.welcome.branch)
+	}
+	path := ""
+	if cfg.ProjectRoot != "" {
+		path = sep + hdrMeta.Render(displayPath(cfg.ProjectRoot))
+	}
+
+	right := hdrModel.Render(cfg.Model) + hdrMeta.Render(" · "+cfg.Provider)
+	ctx := ""
+	if cfg.ContextWindow > 0 {
+		used := engine.ContextTokens(m.system, m.history)
+		ratio := float64(used) / float64(cfg.ContextWindow)
+		ctx = sep + hdrMeta.Render("ctx ") + contextGauge(6, ratio) + " " + ftScope.Render(fmt.Sprintf("%d%%", int(ratio*100)))
+	}
+
+	fits := func(l, r string) bool { return lipgloss.Width(l)+lipgloss.Width(r)+1 <= width }
+	switch {
+	case fits(left+path, right+ctx):
+		left, right = left+path, right+ctx
+	case fits(left, right+ctx):
+		right += ctx
+	}
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	top := ansi.Truncate(left+strings.Repeat(" ", gap)+right, width, "…")
+	return HeaderCard.Render(top+"\n"+sepLine.Render(strings.Repeat("─", width)), w)
+}
+
+// contextGauge renders how full the context window is as ▰▱ cells, colored
+// like the budget bar: violet, amber past half, red past 80%.
+func contextGauge(cells int, ratio float64) string {
+	ratio = min(max(ratio, 0), 1)
+	filled := int(ratio*float64(cells) + 0.5)
+	if ratio > 0 && filled == 0 {
+		filled = 1 // anything in the window shows
+	}
+	return lipgloss.NewStyle().Foreground(severityColor(ratio)).Render(strings.Repeat("▰", filled)) +
+		lipgloss.NewStyle().Foreground(theme.Muted).Render(strings.Repeat("▱", cells-filled))
+}
+
+// severityColor is the color of a gauge at ratio: violet, amber past half,
+// red past 80%.
+func severityColor(ratio float64) color.Color {
+	switch {
+	case ratio > 0.8:
+		return theme.Red
+	case ratio > 0.5:
+		return theme.Amber
+	}
+	return theme.Purple
+}
+
+// bannerStyle colors a transcript notice by its leading symbol: success,
+// warning, error or cancellation; anything else stays muted.
+func bannerStyle(text string) lipgloss.Style {
+	s := lipgloss.NewStyle().Foreground(theme.Gray)
+	switch {
+	case strings.HasPrefix(text, "✓"):
+		return s.Foreground(theme.Green)
+	case strings.HasPrefix(text, "⚠"):
+		return s.Foreground(theme.Amber)
+	case strings.HasPrefix(text, "✕"), strings.HasPrefix(text, "✗"):
+		return s.Foreground(theme.Red)
+	}
+	return s
+}
+
+// renderBottom renders everything below the viewport: AI status line, slash
+// list or picker, approval prompt or input, and the status bar. setViewportSize
+// measures it, so the viewport always gets exactly the lines left over.
+func (m *model) renderBottom(w int) string {
 	var buf strings.Builder
-	w := m.width
-	if w < 20 {
-		w = 20
-	}
-
-	// ── top bar ─────────────────────────────────────────────────────
-	indicator := hdrOui.Render("●")
-	if m.waiting {
-		indicator = m.spinner.View()
-	}
-	left := fmt.Sprintf("%s %s", hdrOui.Render("ouija"), ftDim.Render(version.Version))
-	displayRoot := m.eng.Config().ProjectRoot
-	if displayRoot != "" {
-		home, _ := os.UserHomeDir()
-		if home != "" && strings.HasPrefix(displayRoot, home) {
-			displayRoot = "~" + displayRoot[len(home):]
-		}
-	}
-	headerContent := fmt.Sprintf("%s %s  %s %s\n%s",
-		indicator, left,
-		hdrMeta.Render(displayRoot),
-		hdrMeta.Render(fmt.Sprintf("· %s · %s", m.eng.Config().Model, m.eng.Config().Provider)),
-		sepLine.Render(strings.Repeat("─", w-2)))
-	buf.WriteString(HeaderCard.Render(headerContent, w))
-
-	// ── chat viewport ──────────────────────────────────────────────
-	buf.WriteString(m.vp.View())
-	buf.WriteByte('\n')
 
 	// ── AI status line (persistent, never scrolls) ─────────────────
-	if m.waiting {
-		status := "thinking..."
-		if m.currentTool != "" {
-			status = m.currentTool
-		}
-		buf.WriteString(StatusCard.Render(
-			fmt.Sprintf(" %s %s", m.spinner.View(), status), w))
+	if m.waiting && m.approvalReq == nil { // the approval card shows the call
+		buf.WriteString(StatusCard.Render(m.renderStatusLine(), w))
 	}
 
 	// ── slash command list / picker ────────────────────────────────
@@ -269,73 +361,130 @@ func (m *model) View() tea.View {
 		buf.WriteString(m.picker.Render(w))
 	} else if m.showCmdList {
 		var cmdBuf strings.Builder
+		typed := strings.TrimSpace(m.input.Value())
+		cmdW := 0
+		for _, sc := range slashCmds {
+			cmdW = max(cmdW, lipgloss.Width(sc.cmd))
+		}
 		for i, sc := range slashCmds {
-			sel := " "
-			s := ftDim
-			if i == m.selCmdIdx {
-				sel = "❯"
-				s = ftVal
+			matches := strings.HasPrefix(sc.cmd, typed)
+			sel, s, desc := " ", ftDim, ftDim
+			if !matches {
+				s, desc = ftScope, ftScope // cannot become what is typed
 			}
-			fmt.Fprintf(&cmdBuf, " %s %s  %s\n", sel, s.Render(sc.cmd), ftDim.Render(sc.desc))
+			if i == m.selCmdIdx {
+				sel, s, desc = pickerCursor.Render("❯"), ftVal, hdrMeta
+			}
+			name := s.Render(sc.cmd)
+			if matches {
+				name = slashTyped.Render(typed) + s.Render(sc.cmd[len(typed):])
+			}
+			pad := strings.Repeat(" ", cmdW-lipgloss.Width(sc.cmd))
+			row := fmt.Sprintf(" %s %s%s  %s", sel, name, pad, desc.Render(sc.desc))
+			fmt.Fprintf(&cmdBuf, "%s\n", ansi.Truncate(row, w-2, "…"))
 		}
 		buf.WriteString(SlashCard.Render(cmdBuf.String(), w))
 	}
 
 	// ── Approval prompt or pending edit state ─────────────────────
 	if m.approvalReq != nil {
-		body := RenderApprovalBox(m.approvalReq, m.toolCallN, m.approvalIdx)
-		buf.WriteString(ApprovalCard.Render(body, w))
+		// border (2) + padding (2) around the body
+		body := RenderApprovalBox(m.approvalReq, m.toolCallN, m.approvalIdx, w-4)
+		buf.WriteString(ApprovalCard.WithBorder(approvalToolColor(m.approvalReq.tool)).Render(body, w))
 	} else if m.pendingEdit != nil {
-		editMsg := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("208")).Render("  ✎ editing in external editor...\n")
+		editMsg := lipgloss.NewStyle().Italic(true).Foreground(theme.Orange).Render("  ✎ editing in external editor...\n")
 		buf.WriteString(ApprovalCard.Render(editMsg, w))
 	} else {
-		fmt.Fprintf(&buf, "%s", InputCard.Render(m.input.View(), w))
+		border := theme.Violet // ready
+		switch {
+		case m.search.active:
+			border = theme.Amber
+		case m.waiting:
+			border = theme.Muted // typing now queues the message
+		}
+		buf.WriteString(InputCard.WithBorder(border).Render(m.input.View(), w))
 	}
 
-	// ── status bar ─────────────────────────────────────────────────
-	elapsed := time.Since(m.startTime)
-	left = ftScope.Render(fmt.Sprintf("%d msg", m.msgCount))
+	buf.WriteString(FooterCard.Render(m.renderStatusBar(w-2), w))
+	return buf.String()
+}
+
+// renderStatusLine says what ouija is doing while a reply runs: the tool in
+// use (icon, name, target) or a shimmering "thinking", then the time spent and
+// the tokens streamed so far.
+func (m *model) renderStatusLine() string {
+	elapsed := time.Since(m.responseStart)
+	var what string
+	if m.currentTool != "" {
+		tool, arg, _ := strings.Cut(m.currentTool, ": ")
+		c := approvalToolColor(tool)
+		what = lipgloss.NewStyle().Bold(true).Foreground(c).Render(approvalToolIcon(tool)+" "+tool) +
+			" " + hdrMeta.Render(arg)
+	} else {
+		// The gradient flows with time: the spinner's ticks redraw the screen.
+		what = theme.GradientText("thinking…", int(elapsed/(80*time.Millisecond)))
+	}
+	meta := fmt.Sprintf("%ds", int(elapsed.Seconds()))
+	if m.streamingTokens > 0 {
+		meta += " · ~" + formatTokens(m.streamingTokens) + " tok"
+	}
+	line := fmt.Sprintf(" %s %s  %s", m.spinner.View(), what, ftScope.Render(meta))
+	return ansi.Truncate(line, max(m.width-2, 18), "…")
+}
+
+// renderStatusBar renders the status bar content at the given width: counters
+// and budget on the left, cost, tokens and key hints on the right. What does
+// not fit is dropped (hints first) so the bar never wraps.
+func (m *model) renderStatusBar(width int) string {
+	left := ftScope.Render(fmt.Sprintf("%d msg", m.msgCount))
 	if m.steps > 0 {
 		left += fmt.Sprintf("  %s", ftDim.Render(fmt.Sprintf("%d steps", m.steps)))
 	}
 
-	// Budget progress bar — compact visual of the most restrictive ceiling.
+	// Budget progress bar — compact visual of the most restrictive ceiling,
+	// only when one is set.
 	displayTokens := m.tokens
 	if m.waiting && m.streamingTokens > displayTokens {
 		displayTokens = m.streamingTokens
 	}
-	if displayTokens > 0 {
-		b := m.eng.Config().Budget
-		pct, lbl := budgetUsage(displayTokens, m.usd, b.MaxUSD, b.MaxTokens)
-		bar := progressBar(8, pct/100)
-		left += fmt.Sprintf("  %s  %s", bar, ftScope.Render(fmt.Sprintf("%s%.1f%%", lbl, pct)))
+	b := m.eng.Config().Budget
+	if pct, lbl, ok := budgetUsage(displayTokens, m.usd, b.MaxUSD, b.MaxTokens); ok && displayTokens > 0 {
+		what := "budget"
+		if lbl == "" {
+			what = "token budget"
+		}
+		left += fmt.Sprintf("  %s %s %s", ftScope.Render(what), contextGauge(6, pct/100), ftScope.Render(fmt.Sprintf("%.0f%%", pct)))
 	}
 
-	left += fmt.Sprintf("  %s",
-		ftDim.Render(fmt.Sprintf("%dm%ds",
-			int(elapsed.Minutes())%60, int(elapsed.Seconds())%60)))
+	left += fmt.Sprintf("  %s", ftDim.Render(formatElapsed(time.Since(m.startTime))))
 	scrollPct := m.vp.ScrollPercent()
 	if scrollPct > 0 && scrollPct < 0.99 {
 		left += fmt.Sprintf("  %s", ftScope.Render(fmt.Sprintf("%d%%", int(scrollPct*100))))
 	}
 
-	right := ftVal.Render(fmt.Sprintf("%d tok", displayTokens))
+	right := ftVal.Render(formatTokens(displayTokens) + " tok")
 	if m.usd > 0 {
 		right = fmt.Sprintf("%s  %s", ftVal.Render(fmt.Sprintf("$%.2f", m.usd)), right)
 	}
 	if len(m.pendingQueue) > 0 {
 		right = fmt.Sprintf("%s  %s", ftScope.Render(fmt.Sprintf("(%d queued)", len(m.pendingQueue))), right)
 	}
+	// Lines that arrived while scrolled up: say so, at the start of the bar.
+	if unseen := len(m.lines) - m.seenLines; unseen > 0 && !m.autoScroll && !m.vp.AtBottom() {
+		left = pillNew.Render(fmt.Sprintf(" ↓ %d new · End ", unseen)) + "  " + left
+	}
+	if m.selectMode {
+		left = pillSelect.Render(" SELECT ") + "  " + left
+	}
+
 	var shortcuts string
 	switch {
+	case m.search.active:
+		shortcuts = "  " + lipgloss.NewStyle().Foreground(theme.Amber).Render("search "+m.searchStatus())
+	case m.toastText != "":
+		shortcuts = "  " + bannerStyle(m.toastText).Render(m.toastText)
 	case m.approvalReq != nil:
-		// The approval key is scoped to the target (tool\x00path), so reduce it
-		// before matching — otherwise the delete hint would never render.
-		if baseTool(m.approvalReq.tool) == "delete_file" {
-			shortcuts = ftDim.Render("  ←/→ navigate · d delete · n no · e edit · Esc cancel")
-		} else {
-			shortcuts = ftDim.Render("  ←/→ navigate · y yes · n no · e edit · s session · Esc cancel")
-		}
+		// The approval box shows its own keys.
 	case m.waiting:
 		shortcuts = ftDim.Render("  Esc cancel")
 	case len(m.pendingQueue) > 0:
@@ -343,22 +492,36 @@ func (m *model) View() tea.View {
 	default:
 		shortcuts = ftDim.Render("  ↑ edit · Ctrl+Y copy · /help")
 	}
-	right = fmt.Sprintf("%s%s", right, shortcuts)
-
-	leftWidth := lipgloss.Width(left)
-	contentWidth := w - 2
-	gap := contentWidth - leftWidth - lipgloss.Width(right)
-	if gap < 1 {
-		gap = 1
+	if lipgloss.Width(left)+lipgloss.Width(right)+lipgloss.Width(shortcuts)+1 <= width {
+		right += shortcuts
+	} else if m.toastText != "" {
+		right = shortcuts // a notice wins over the counters
 	}
-	statusContent := left + strings.Repeat(" ", gap) + right
-	fmt.Fprintf(&buf, "%s", FooterCard.Render(statusContent, w))
 
-	v := tea.NewView(buf.String())
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeAllMotion
-	v.WindowTitle = "ouija"
-	return v
+	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right), 1)
+	return ansi.Truncate(left+strings.Repeat(" ", gap)+right, width, "…")
+}
+
+// formatElapsed renders a session duration: "4m12s", or "1h04m" past an hour.
+func formatElapsed(d time.Duration) string {
+	if d >= time.Hour {
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	}
+	return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+// formatTokens renders a token count compactly: 950, 12.3k, 200k, 1.2M.
+func formatTokens(n int) string {
+	var s string
+	switch {
+	case n >= 1_000_000:
+		s = fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		s = fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+	return strings.Replace(s, ".0", "", 1) // 200.0k reads as 200k
 }
 
 // ─── rebuildContent ───────────────────────────────────────────────────
@@ -380,8 +543,28 @@ func (m *model) rebuildContent() {
 
 	var buf strings.Builder
 
-	// Animated welcome — rendered once and cached; refreshed on tick.
-	buf.WriteString(WelcomeCard.Render(m.welcomeBanner, vpW))
+	// Animated welcome — cached; re-rendered when the gradient moves (tick),
+	// the width changes or /model and /provider change what it shows.
+	// After the first message it shrinks to one line: the header shows the
+	// session from then on.
+	cfg := m.eng.Config()
+	compact := m.msgCount > 0
+	// Alone on screen, it is centered in the viewport's height.
+	alone := len(m.lines) == 0 && !m.waiting
+	if key := fmt.Sprintf("%d|%d|%d|%s|%s|%d|%v|%v", m.hueShift, vpW, m.vp.Height(), cfg.Model, cfg.Provider, cfg.ContextWindow, compact, alone); key != m.welcomeKey {
+		switch {
+		case compact:
+			m.welcomeBanner = WelcomeCard.WithPadding(0, 1).Render(renderWelcomeLine(m.hueShift, vpW-2), vpW)
+		default:
+			banner := renderWelcomeBanner(m.hueShift, vpW-2, introReveal(m.tickCount), cfg, m.welcome)
+			if alone {
+				banner = lipgloss.PlaceVertical(max(m.vp.Height()-2, lipgloss.Height(banner)), lipgloss.Center, banner)
+			}
+			m.welcomeBanner = WelcomeCard.Render(banner, vpW)
+		}
+		m.welcomeKey = key
+	}
+	buf.WriteString(m.welcomeBanner)
 
 	for i := range m.lines {
 		l := &m.lines[i]
@@ -398,20 +581,23 @@ func (m *model) rebuildContent() {
 
 		switch l.role {
 		case "user":
-			pipePfx := "  " + pipeYou + " "
-			contentWidth := msgContentWidth(vpW, pipePfx)
-			indent := "     "
-			fmt.Fprintf(&msgBuf, "%s%s %s\n", pipePfx, l.ts, roleYou.Render("You"))
-			for _, textLine := range wrapLines(l.text, indent, contentWidth) {
-				fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, textLine)
-			}
-			lineBuf.WriteString(UserCard.Render(msgBuf.String(), vpW))
-			msgBuf.Reset()
+			lineBuf.WriteString(UserCard.Render(renderUserBubble(l.text, l.ts, vpW-2), vpW))
 
 		case "assistant":
 			pipePfx := "  " + pipeOui + " "
 			contentWidth := msgContentWidth(vpW, pipePfx)
-			fmt.Fprintf(&msgBuf, "%s%s %s\n", pipePfx, l.ts, roleOui.Render("ouija"))
+			meta := ""
+			if l.meta != "" {
+				meta = ftScope.Render(" · " + l.meta)
+			}
+			fmt.Fprintf(&msgBuf, "%s%s %s%s\n", pipePfx, l.ts, roleOui.Render("ouija"), meta)
+			// The tools the reply came from: one line, or the details.
+			if tools := m.renderTurnTools(l, contentWidth); len(tools) > 0 {
+				for _, tl := range tools {
+					fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, tl)
+				}
+				fmt.Fprintf(&msgBuf, "%s\n", pipePfx)
+			}
 			rendered := renderGlamourFull(l.text, contentWidth)
 			for _, line := range strings.Split(rendered, "\n") {
 				fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, line)
@@ -419,67 +605,67 @@ func (m *model) rebuildContent() {
 			lineBuf.WriteString(AICard.Render(msgBuf.String(), vpW))
 			msgBuf.Reset()
 
-		case "codeblock":
-			var cbBuf strings.Builder
-			if l.lang != "" {
-				label := txtDim.Render("── " + l.lang + " ──")
-				fmt.Fprintf(&cbBuf, "%s\n", label)
-			}
-			codeMD := fmt.Sprintf("```%s\n%s\n```", l.lang, l.text)
-			rendered := renderGlamour(codeMD)
-			rendered = strings.TrimPrefix(rendered, "\n")
-			for _, cl := range strings.Split(rendered, "\n") {
-				if lipgloss.Width(cl) == 0 {
-					continue
-				}
-				fmt.Fprintf(&cbBuf, "%s\n", cl)
-			}
-			lineBuf.WriteString(AICard.Render(cbBuf.String(), vpW))
+		case "help":
+			lineBuf.WriteString(AICard.Render(renderHelp(vpW-2), vpW))
+
+		case "error":
+			lineBuf.WriteString(ErrorCard.Render(renderErrorBlock(l.meta, l.text, l.hint, vpW-4), vpW))
+
+		case "diff":
+			lineBuf.WriteString(AICard.Render(renderDiffBlock(l.path, l.text, vpW-2), vpW))
 
 		case "banner":
 			if l.text != "" {
-				lineBuf.WriteString(BannerCard.Render("    "+l.text, vpW))
+				lineBuf.WriteString(BannerCard.Render("  "+bannerStyle(l.text).Render(l.text), vpW))
 			}
 
 		case "trace":
 			pipePfx := "  " + pipeTrace + " "
-			fmt.Fprintf(&msgBuf, "%s%s %s\n", pipePfx, l.ts, lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render("⚡ trace"))
-			for _, trLine := range strings.Split(l.text, "\n") {
-				if trLine != "" {
-					colored := colorDiffLine(trLine)
-					fmt.Fprintf(&msgBuf, "%s  %s\n", pipePfx, colored)
-				}
+			for _, tl := range m.renderTurnTools(l, msgContentWidth(vpW, pipePfx)) {
+				fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, tl)
 			}
 			lineBuf.WriteString(TraceCard.Render(msgBuf.String(), vpW))
 			msgBuf.Reset()
-
 		}
 
-		l.cached = lineBuf.String()
+		// One blank line between blocks (the cards themselves are slim).
+		if lineBuf.Len() > 0 {
+			l.cached = blockGap(vpW) + lineBuf.String()
+		}
 		buf.WriteString(l.cached)
 	}
 
+	// The running turn's tools: one line counting them, or (Ctrl+T) each call
+	// as it starts and finishes.
 	if m.waiting {
+		pipePfx := "  " + pipeTrace + " "
+		sum, width := m.eng.Tracer().LastTurn(), msgContentWidth(vpW, pipePfx)
+		tools := renderToolsBlock(sum, width, true)
+		if !m.showTrace && len(sum.Tools) > 0 {
+			tools = []string{renderLiveSummary(sum, m.approvalReq != nil, width)}
+		}
+		if tools != nil {
+			var tb strings.Builder
+			for _, tl := range tools {
+				fmt.Fprintf(&tb, "%s%s\n", pipePfx, tl)
+			}
+			buf.WriteString(blockGap(vpW) + TraceCard.Render(tb.String(), vpW))
+		}
+	}
+
+	// The reply streaming in. Before its first token the status line below the
+	// viewport is the only place showing what ouija is doing.
+	if m.waiting && m.partialText != "" {
 		var msgBuf strings.Builder
 		pipePfx := "  " + pipeOui + " "
 		contentWidth := msgContentWidth(vpW, pipePfx)
 		fmt.Fprintf(&msgBuf, "%s%s %s\n",
 			pipePfx, time.Now().Format("15:04"), roleOui.Render("ouija"))
-
-		if m.partialText != "" {
-			rendered := renderGlamourFull(m.partialText, contentWidth)
-			for _, line := range strings.Split(rendered, "\n") {
-				fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, line)
-			}
-		} else {
-			status := "thinking..."
-			if m.currentTool != "" {
-				status = m.currentTool
-			}
-			fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, status)
+		rendered := renderGlamourFull(m.partialText, contentWidth)
+		for _, line := range strings.Split(rendered, "\n") {
+			fmt.Fprintf(&msgBuf, "%s%s\n", pipePfx, line)
 		}
-
-		buf.WriteString(AICard.Render(msgBuf.String(), vpW))
+		buf.WriteString(blockGap(vpW) + AICard.Render(msgBuf.String(), vpW))
 	}
 
 	// ── Queue preview inside viewport (scrolls naturally) ──────────
@@ -494,94 +680,39 @@ func (m *model) rebuildContent() {
 			}
 			fmt.Fprintf(&qBuf, "%s\n", txtDim.Render(fmt.Sprintf("◇ %d: %s", i+1, preview)))
 		}
-		buf.WriteString(BannerCard.Render(qBuf.String(), vpW))
+		buf.WriteString(blockGap(vpW) + BannerCard.Render(qBuf.String(), vpW))
 	}
 
 	m.vp.SetContent(buf.String())
 
+	if m.search.query != "" {
+		m.applySearch() // the content changed under the highlights
+	}
 	if m.autoScroll {
 		m.vp.GotoBottom()
+		m.seenLines = len(m.lines)
 	}
-}
-
-// ─── Welcome banner ───────────────────────────────────────────────────
-
-var sparkleFrames = []string{"◆", "◇", "✦", "✧", "❖", "◈", "✧", "✦", "◇"}
-
-// renderWelcomeBanner builds the animated ouija logo with rainbow cycling.
-// shift is the color index offset (driven by hueShift in the model).
-func renderWelcomeBanner(shift int, projectRoot string) string {
-
-	var artLines []string
-	colorIdx := shift
-	for _, line := range ouijaArt {
-		var coloredLine strings.Builder
-		for _, r := range line {
-			if r != ' ' {
-				c := bannerColors[colorIdx%len(bannerColors)]
-				s := lipgloss.NewStyle().Bold(true).Foreground(c)
-				coloredLine.WriteString(s.Render(string(r)))
-				colorIdx++
-			} else {
-				coloredLine.WriteRune(r)
-			}
-		}
-		artLines = append(artLines, coloredLine.String())
-	}
-
-	spark := sparkleFrames[shift%len(sparkleFrames)]
-	sparkStyle := lipgloss.NewStyle().Bold(true).Foreground(bannerColors[(shift+2)%len(bannerColors)])
-	sparkled := sparkStyle.Render(spark)
-
-	content := sparkled + "\n"
-	content += strings.Join(artLines, "\n") + "\n"
-	content += sparkled + "\n"
-	content += "\n"
-	content += bannerTag.Render("AI Project Assistant") + "\n"
-	content += "\n"
-
-	if projectRoot != "" {
-		displayRoot := projectRoot
-		home, _ := os.UserHomeDir()
-		if home != "" && strings.HasPrefix(projectRoot, home) {
-			displayRoot = "~" + projectRoot[len(home):]
-		}
-		rootStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("60"))
-		content += rootStyle.Render("◈ "+displayRoot) + "\n"
-	}
-
-	content += bannerAction.Render("✦ Ask · 📁 Read · 🧠 ✦")
-
-	return lipgloss.NewStyle().Render(content)
 }
 
 // ─── Budget tracking ────────────────────────────────────────────────
 
 // budgetUsage returns the percentage of the most restrictive budget ceiling
-// consumed, and a label prefix ("$" for USD, "" for tokens). Returns 0 ""
-// when no budget ceiling is configured (or both ceilings are zero/unlimited).
-func budgetUsage(tokens int, usd float64, maxUSD *float64, maxTokens int) (pct float64, label string) {
+// consumed, and a label prefix ("$" for USD, "" for tokens). ok is false when
+// no budget ceiling is configured (or both ceilings are zero/unlimited).
+func budgetUsage(tokens int, usd float64, maxUSD *float64, maxTokens int) (pct float64, label string, ok bool) {
 	if maxUSD != nil && *maxUSD > 0 {
-		pct = usd / *maxUSD * 100
-		if pct < 0 {
-			pct = 0
-		}
-		return pct, "$"
+		return max(usd / *maxUSD * 100, 0), "$", true
 	}
 	if maxTokens > 0 {
-		pct = float64(tokens) / float64(maxTokens) * 100
-		if pct < 0 {
-			pct = 0
-		}
-		return pct, ""
+		return max(float64(tokens)/float64(maxTokens)*100, 0), "", true
 	}
-	return 0, ""
+	return 0, "", false
 }
 
 // progressBar renders a colored bar showing how much of a budget ceiling
 // has been consumed. Returns an empty string when ratio < 1% (too small
 // to render meaningfully). The bar uses █ (filled) and ░ (empty) blocks,
-// colored by severity: violet (<50%), amber (50-80%), red (>80%).
+// colored by severityColor.
 func progressBar(width int, ratio float64) string {
 	if ratio < 0 || width < 2 {
 		return ""
@@ -595,15 +726,7 @@ func progressBar(width int, ratio float64) string {
 	}
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 
-	// Colors: red (>80%), amber (50-80%), violet (<50%).
-	hex := "93"
-	switch {
-	case ratio > 0.8:
-		hex = "196"
-	case ratio > 0.5:
-		hex = "220"
-	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render(bar)
+	return lipgloss.NewStyle().Foreground(severityColor(ratio)).Render(bar)
 }
 
 // ─── Word wrapping ────────────────────────────────────────────────────
@@ -683,10 +806,55 @@ func (m *model) handleCopyMessage() (tea.Model, tea.Cmd) {
 	for i := len(m.lines) - 1; i >= 0; i-- {
 		if m.lines[i].role == "assistant" && strings.TrimSpace(m.lines[i].text) != "" {
 			if err := clipboard.WriteAll(m.lines[i].text); err != nil {
-				return m.addBanner("⚠ copy failed: " + err.Error())
+				return m.toast("⚠ copy failed: " + err.Error())
 			}
-			return m.addBanner("✓ copied the last reply")
+			return m.toast("✓ copied the last reply")
 		}
 	}
-	return m.addBanner("nothing to copy yet")
+	return m.toast("nothing to copy yet")
+}
+
+// blockGap is the blank line between transcript blocks, on the transcript's
+// background.
+func blockGap(width int) string {
+	return lipgloss.NewStyle().Background(cardBgOui).Width(width).Render("") + ansi.ResetStyle + "\n"
+}
+
+var (
+	bubbleStyle = lipgloss.NewStyle().
+			Foreground(theme.Text).
+			PaddingRight(1).
+			Border(lipgloss.Border{Right: "▐"}, false, true, false, false).
+			BorderForeground(theme.Pink)
+	bubbleHead = lipgloss.NewStyle().Foreground(theme.Muted)
+)
+
+// renderUserBubble renders a message of the developer as a bubble on the
+// right, at most three quarters of width wide, with "You · HH:MM" above it:
+// their side of the conversation reads apart from ouija's at a glance.
+func renderUserBubble(text, ts string, width int) string {
+	maxW := max(min(width*3/4, width-4), 12)
+	lines := wrapLines(text, "", maxW-2) // padding (1) + edge (1)
+	bubble := bubbleStyle.Render(strings.Join(lines, "\n"))
+	head := roleYou.Render("You") + bubbleHead.Render(" · "+ts)
+	block := lipgloss.JoinVertical(lipgloss.Right, head, bubble)
+	return lipgloss.PlaceHorizontal(width, lipgloss.Right, block)
+}
+
+// renderTurnTools renders a finished turn's tools: one summary line, or with
+// Ctrl+T each call on its own line and the span tree.
+func (m *model) renderTurnTools(l *line, width int) []string {
+	if len(l.tools.Tools) == 0 {
+		return nil
+	}
+	if !m.showTrace {
+		return []string{renderToolsSummary(l.tools, width)}
+	}
+	out := renderToolsBlock(l.tools, width, false)
+	for _, tr := range strings.Split(l.trace, "\n") {
+		if strings.TrimSpace(tr) != "" {
+			out = append(out, toolMeta.Render(ansi.Truncate(tr, width, "…")))
+		}
+	}
+	return out
 }

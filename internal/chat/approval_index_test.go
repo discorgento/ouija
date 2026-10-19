@@ -6,12 +6,16 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/discorgento/ouija/engine"
 )
 
 // newApprovalTestModel builds the smallest model that can receive an approval
-// request: the selection state plus the widgets setViewportSize touches.
+// request: the selection state plus the widgets setViewportSize touches (it
+// renders the header and status bar, which read the engine's config).
 func newApprovalTestModel() *model {
 	return &model{
+		eng:           &switchEngine{cfg: &engine.Config{}},
 		vp:            viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
 		input:         newPaddedInput(), // zero-value textarea has a nil inner viewport
 		width:         80,

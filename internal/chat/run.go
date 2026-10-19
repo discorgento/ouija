@@ -7,9 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
@@ -132,15 +132,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 	// Session summary after the alt-screen exits.
 	if m2, ok := final.(*model); ok && m2.msgCount > 0 {
 		tokens, steps, usd := eng.Spent()
-		cfg := eng.Config()
-		label := fmt.Sprintf("%d msg · %d tok · %d steps · %s",
-			m2.msgCount, tokens, steps, cfg.Model)
-		if usd > 0 {
-			label = fmt.Sprintf("%d msg · %d tok · %d steps · $%.2f · %s",
-				m2.msgCount, tokens, steps, usd, cfg.Model)
-		}
-		fmt.Fprintf(os.Stderr, "\n  %s\n", strings.Repeat("─", 47))
-		fmt.Fprintf(os.Stderr, "  %s\n", label)
-		fmt.Fprintf(os.Stderr, "  %s\n", strings.Repeat("─", 47))
+		out := colorprofile.NewWriter(os.Stderr, os.Environ())
+		fmt.Fprintln(out, "\n"+renderSessionSummary(m2, eng.Config(), tokens, steps, usd))
 	}
 }

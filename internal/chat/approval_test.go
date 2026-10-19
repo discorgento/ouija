@@ -60,7 +60,7 @@ func TestRenderApprovalBoxShowsScopedToolName(t *testing.T) {
 		tool:  "write_file\x00/abs/new.txt",
 		input: map[string]any{"path": "new.txt", "content": "x"},
 	}
-	box := RenderApprovalBox(req, 1, 0)
+	box := RenderApprovalBox(req, 1, 0, 80)
 	if !strings.Contains(box, "write_file") {
 		t.Errorf("approval box should show the tool name, got:\n%s", box)
 	}

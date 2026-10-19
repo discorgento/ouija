@@ -38,9 +38,11 @@ func (m *model) updateCmdList() bool {
 		case parts[0] == "/model" && len(parts)+boolInt(trailing) == 2:
 			names := suggestedModels(m.eng.Config(), models.IDs(m.providerModels(m.eng.Config().Provider)))
 			m.picker.Show(names, names, modelPickerLabel)
+			m.picker.Current = m.eng.Config().Model
 		case parts[0] == "/provider" && len(parts)+boolInt(trailing) == 2:
 			names, _ := models.Load().ProvidersFor(providers.Names())
 			m.picker.Show(names, names, "Providers")
+			m.picker.Current = m.eng.Config().Provider
 		case parts[0] == "/provider" && len(parts)+boolInt(trailing) == 3:
 			// Second step: this provider's models (not the provider list).
 			m.showModelPicker(parts[1])
