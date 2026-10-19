@@ -58,7 +58,12 @@ type Cleaner     interface { Cleanup() error }
 - **Cleanup** — called after Run, and after a failed Init too. Close files,
   release resources.
 
-Implement them only when you need them. (`Init` used to take a third
+Implement them only when you need them. One registered value serves every
+call, and the MCP server runs calls concurrently: a totem with `Init` or
+`Cleanup` keeps per-run state, so `Invoke` runs its calls one at a time; a
+totem without them runs concurrently and must not keep per-run state in its
+struct. A panic in `Run` is returned as an error instead of crashing the
+host. (`Init` used to take a third
 `*engine.Config` argument; a totem still on that signature is refused at
 `registry.Register` with a message saying what to change.)
 
@@ -88,10 +93,16 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 ```
 
 The schema is the MCP tool's `inputSchema`, and the CLI takes the inputs as
-`--set key=value` (a JSON value such as `3`, `true` or `["a","b"]` keeps its
-type): `ouija review "the auth flow" --set depth=2`. A missing required input is
-an error before Init or Run. Without `InputSchema`, the input is a required
-`task` string.
+`--set key=value`, typed by the schema: a `string` property keeps the text as
+typed (`--set ticket=1234` is `"1234"`), anything else is read as JSON (`3`,
+`true`, `["a","b"]`): `ouija review "the auth flow" --set depth=2`. A missing
+required input is an error before Init or Run; a `task` given as
+`--set task=…` fills `Args.Task`. Without `InputSchema`, the input is a
+required `task` string.
+
+A result is printed with its `Render()` (a `Renderer`) or as indented JSON;
+one JSON cannot encode (a `NaN`, a channel) fails the run instead of printing
+nothing — `registry.Format` returns that error for a host of your own.
 
 ### Optional: settings
 
@@ -375,14 +386,18 @@ func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
 ```sh
 my-totem                                   # list the totems
 my-totem sentinel "task" --set depth=2     # run one (--json for raw JSON, --config <file>)
-my-totem mcp                               # serve them over MCP (stdio)
+my-totem mcp [--config <file>]             # serve them over MCP (stdio)
 ```
 
 For a host of your own, `bootstrap.Setup` is the glue underneath: it
 discovers config (project layers + the global `~/.config/ouija/config.json`
 written by `ouija setup`), validates it, builds the provider and returns a
 ready engine; `app.Run(ctx, "sentinel", registry.Args{Task: "…"})` then runs a
-totem through `registry.Invoke`, and `app.ServeMCP` serves them. Options:
+totem through `registry.Invoke`, and `app.ServeMCP` serves them. `app.Engine`
+keeps one budget across every `app.Run` — a long-lived host that runs a totem
+per request should `Setup` a fresh `App` per request — while `ServeMCP` gives
+each tool call a fresh engine from the same config (its own budget; the
+setters you call on `app.Engine` do not apply there). Options:
 
 | Option | Effect |
 |---|---|
@@ -390,7 +405,9 @@ totem through `registry.Invoke`, and `app.ServeMCP` serves them. Options:
 | `bootstrap.WithName(name)` | MCP identity (`<name>_<totem>` tools in the harness); defaults to the binary's name |
 | `bootstrap.WithTrace(true)` | Console trace tree on stderr (development) |
 
-`go mod tidy` will pull `github.com/discorgento/ouija` and its engine. Build
+`go mod tidy` will pull `github.com/discorgento/ouija` and its engine (to
+build against a local clone: `go mod edit -replace
+github.com/discorgento/ouija=/path/to/ouija`). Build
 with `go build -o my-totem ./cmd/totem`, or cross-compile with the same flags
 ouija uses (`make dist` → `CGO_ENABLED=0 go build -trimpath`).
 

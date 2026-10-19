@@ -118,6 +118,11 @@ combination of built-in defaults + global config + project config.
 | `totems.task.passes` | `int` | `3` | Independent analysis passes per dimension |
 | `totems.task.dimensions` | `[]string` | `[...]` | Analysis dimensions of each pass |
 | `totems.doc.passes` | `int` | `3` | Independent fact-gathering passes per aspect |
+| `totems.doc.client` | `string` | `""` | Cover: who the document is for (`--set client=…` overrides) |
+| `totems.doc.author` | `string` | `""` | Cover "prepared by" and the signature (`--set author=…`) |
+| `totems.doc.contact` | `string` | `""` | Signature contact line (`--set contact=…`) |
+| `totems.doc.brand` | `string` | `""` | Logo text, brand tag and cover footer (`--set brand=…`) |
+| `totems.doc.locale` | `string` | `"en"` | The document's language tag (`--set locale=…`) |
 
 Configs written before `totems` keep working: a top-level `passes` /
 `dimensions` is read as `totems.task` (and `passes` as `totems.doc`), unless

@@ -145,8 +145,9 @@ project config.
 Run a registered totem. Whether the task is required comes from the totem's
 input schema: `sticker` runs without one, while `task` and `doc` reject a
 missing task before running. `--set key=value` (repeatable) passes a named input
-the totem declares; a value that parses as JSON (`3`, `true`, `["a","b"]`) keeps
-that type, anything else is a string.
+the totem declares, typed by its input schema: a `string` input keeps the text
+as typed (`--set ticket=1234`), others are read as JSON (`3`, `true`,
+`["a","b"]`) when they parse, else as a string.
 
 Registered totems: `task` (analysis → plan), `doc` (code-verified client
 document), `sticker` (laptop sticker from project metrics). `ouija help` lists

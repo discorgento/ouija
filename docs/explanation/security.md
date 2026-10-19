@@ -158,9 +158,11 @@ What the sandbox does **not** cover, by design of a project-scoped boundary:
   builds the path at run time can read them. Keep real secrets out of the
   repository, or out of the sandbox's reach.
 - **`.git` is writable**, so a command can plant a hook or a `core.fsmonitor`
-  that runs, unconfined, the next time *you* run git there. Review `.git/hooks`
-  and `.git/config` after letting untrusted code run (Landlock cannot carve a
-  read-only subtree out of a writable one).
+  that runs, unconfined, the next time *you* run git there (Landlock cannot
+  carve a read-only subtree out of a writable one). ouija fingerprints
+  `.git/hooks` and `.git/config` around every bash command — sandboxed or not
+  — and when one changes, the tool result says so and the chat shows a
+  **git guard** banner: review the change before running git in that project.
 
 ## Layer 5: Doom-loop detection
 
