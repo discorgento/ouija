@@ -54,6 +54,33 @@ jobs:
       - name: build
         run: make build
 
+  # The release ships darwin and windows binaries, and the sandbox, symlink,
+  # permission and bash code is OS-sensitive, so the tests run there too.
+  # Non-blocking until these OSes are known green (the suite was only ever run
+  # on Linux): failures show on the run without turning main red. Drop
+  # continue-on-error to make them a gate.
+  test-os:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: test
+        run: go test ./...
+
   # Separate job: a vulnerability published today should be visible on its own,
   # not hidden inside the lint/test gate.
   vuln:
