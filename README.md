@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="ouija — multi-totem AI harness" width="300">
+  <img src="assets/banner.svg" alt="ouija" width="300">
 </p>
 
 <p align="center">
@@ -12,106 +12,26 @@
 # ouija
 
 An AI harness for **agents you write in Go** — a shared engine (providers,
-sandbox, budget, tracing, MCP) under **totems** you own: real code with types,
-tests and golden files, not prompt files you hope the model follows.
+sandbox, cost budget, tracing, MCP export) under **totems** you own: real code
+with types, tests and golden files, not prompt files.
 
-> **A totem is an agent written in compiled Go code**, not YAML or Markdown. You get types, unit tests and golden files for the flow itself, while the engine enforces the cost budget, traces every step to Perfetto, sandboxes every tool call and exposes the agent over MCP. Reconciliation and retry are ordinary `for` loops — not instructions a model may or may not follow.
+> **Why not a prompt file?** "Do A, then verify B, then reconcile" written in
+> prose is a request the model may skip; in Go it is the next line — and you can
+> test it. [The full argument →](docs/explanation/totems.md)
 
-The metaphor is literal: a ouija board needs **several hands** reaching a
-consensus to spell out an answer — exactly the *self-consistency* of the N
-independent passes + reconcile in the `task` totem.
+The metaphor is literal: a ouija board needs several hands to spell an answer —
+like the N independent passes + reconcile in the `task` totem.
 
 ```mermaid
 flowchart LR
-    CLI["ouija CLI<br/>task · doc · sticker · chat"] --> APP["internal/app<br/>config → provider → engine"]
-    MCP["ouija mcp<br/>MCP over stdio"] --> APP
-    APP --> ENG["engine<br/>ReAct loop · tools · budget · trace"]
-    ENG --> PROV["providers/<br/>anthropic · openai · openrouter · opencode · ollama"]
-    APP --> TOTEMS["totems/<br/>task · doc · sticker"]
+    CLI["ouija CLI · TUI"] --> ENG["engine<br/>ReAct loop · tools · budget · trace"]
+    MCP["ouija mcp"] --> ENG
+    ENG --> PROV["providers<br/>anthropic · openai · openrouter · opencode · ollama"]
+    ENG --> TOTEMS["totems<br/>task · doc · sticker · yours"]
 ```
 
 The engine knows nothing about tasks or documents — every totem defines its own
 flow on top. See [Architecture](docs/explanation/architecture.md).
-
-### Totems you own
-
-The engine is **not locked away in `internal/`**. The `engine`, `registry`,
-`schema` and `bootstrap` packages are public Go modules, so you can write a
-totem in *your own repository*, build it into *your own binary*, and still get
-the full engine — budget, trace, sandbox and MCP — for free:
-
-```go
-// github.com/you/your-agents/totems/sentinel/sentinel.go
-package sentinel
-
-import (
-    "context"
-    "github.com/discorgento/ouija/engine"
-    "github.com/discorgento/ouija/registry"
-)
-
-type Totem struct{}
-
-func (t *Totem) Name() string    { return "sentinel" }
-func (t *Totem) Summary() string { return "Example external totem" }
-func (t *Totem) Init(context.Context, *engine.Engine, *engine.Config) error { return nil }
-func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
-    res, err := eng.Run(ctx, engine.RunRequest{Label: "sentinel", Prompt: args.Task})
-    if err != nil {
-        return nil, err
-    }
-    return map[string]string{"summary": res.Text}, nil
-}
-func (t *Totem) Cleanup() error { return nil }
-
-func init() { registry.Register(&Totem{}) }
-```
-
-Then `bootstrap.Setup` wires it to the same config the ouija CLI uses —
-`~/.config/ouija/config.json` (keys, provider, budget, rules) applies unchanged:
-
-```go
-// github.com/you/your-agents/cmd/totem/main.go
-package main
-
-import (
-    "context"
-    "fmt"
-    "os"
-
-    "github.com/discorgento/ouija/bootstrap"
-    "github.com/discorgento/ouija/registry"
-    _ "github.com/you/your-agents/totems/sentinel"
-)
-
-func main() {
-    ctx := context.Background()
-    if len(os.Args) < 2 {
-        fmt.Println(registry.Help())
-        return
-    }
-    if os.Args[1] == "mcp" { // `my-totem mcp` serves MCP for your totems
-        app, err := bootstrap.Setup(ctx, bootstrap.WithName("my-totem"))
-        if err != nil {
-            fmt.Fprintln(os.Stderr, "error:", err)
-            os.Exit(1)
-        }
-        if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
-            fmt.Fprintln(os.Stderr, "error:", err)
-            os.Exit(1)
-        }
-        return
-    }
-    // ... dispatch to registry.Get(os.Args[1]).Run(ctx, app.Engine, ...)
-}
-```
-
-`go build -o my-totem ./cmd/totem` produces a standalone binary with your
-totem and the full engine behind it — and `my-totem mcp` exposes it to Claude
-Code, Cursor or OpenCode as `my-totem_<totem>` tools. No fork, no upstream
-rebuild. Walkthrough: [Add a totem](docs/how-to/add-totem.md).
-
----
 
 ## Quick start
 
@@ -148,6 +68,86 @@ free. Diagnose anything with `ouija doctor`.
 
 Flags, slash commands, shortcuts and exit codes:
 [CLI reference](docs/reference/cli.md).
+
+## Write your own agent
+
+A totem is a Go type in **your** repository. `engine`, `registry`, `schema` and
+`bootstrap` are public Go packages — no fork, no upstream rebuild:
+
+```go
+// github.com/you/your-agents/totems/sentinel/sentinel.go — the whole agent
+package sentinel
+
+import (
+    "context"
+    "github.com/discorgento/ouija/engine"
+    "github.com/discorgento/ouija/registry"
+)
+
+type Totem struct{}
+
+func (t *Totem) Name() string    { return "sentinel" }
+func (t *Totem) Summary() string { return "Example external totem" }
+func (t *Totem) Init(context.Context, *engine.Engine, *engine.Config) error { return nil }
+func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
+    res, err := eng.Run(ctx, engine.RunRequest{Label: "sentinel", Prompt: args.Task})
+    if err != nil {
+        return nil, err
+    }
+    return map[string]string{"summary": res.Text}, nil
+}
+func (t *Totem) Cleanup() error { return nil }
+
+func init() { registry.Register(&Totem{}) }
+```
+
+`bootstrap.Setup` hands it the same config the ouija CLI uses —
+`~/.config/ouija/config.json` (keys, provider, budget, rules) applies unchanged:
+
+```go
+// github.com/you/your-agents/cmd/totem/main.go — the whole host
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+
+    "github.com/discorgento/ouija/bootstrap"
+    "github.com/discorgento/ouija/registry"
+    _ "github.com/you/your-agents/totems/sentinel"
+)
+
+func main() {
+    ctx := context.Background()
+    if len(os.Args) < 2 {
+        fmt.Println(registry.Help())
+        return
+    }
+    if os.Args[1] == "mcp" { // `my-totem mcp` serves MCP for your totems
+        app, err := bootstrap.Setup(ctx, bootstrap.WithName("my-totem"))
+        if err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
+            fmt.Fprintln(os.Stderr, "error:", err)
+            os.Exit(1)
+        }
+        return
+    }
+    // ... dispatch to registry.Get(os.Args[1]).Run(ctx, app.Engine, ...)
+}
+```
+
+```sh
+go build -o my-totem ./cmd/totem   # standalone binary, full engine behind it
+my-totem mcp                       # your totems as my-totem_<name> tools in
+                                   # Claude Code, Cursor or OpenCode
+```
+
+Walkthrough: [Add a totem](docs/how-to/add-totem.md) · Design rationale:
+[Totems](docs/explanation/totems.md).
 
 ## Install
 
@@ -201,10 +201,10 @@ Full documentation in [`docs/`](docs/index.md):
 
 | Tutorial | How-to | Reference | Explanation |
 |---|---|---|---|
-| [Getting started](docs/tutorial/getting-started.md) | [Install](docs/how-to/install.md) | [CLI](docs/reference/cli.md) | [Architecture](docs/explanation/architecture.md) |
-| | [Configure](docs/how-to/configure.md) | [Config schema](docs/reference/config-schema.md) | [Engine](docs/explanation/engine.md) |
-| | [Run a totem](docs/how-to/run-totems.md) | [Environment](docs/reference/environment.md) | [Security](docs/explanation/security.md) |
-| | [Chat TUI](docs/how-to/chat.md) | [Trace schema](docs/reference/trace-schema.md) | |
+| [Getting started](docs/tutorial/getting-started.md) | [Install](docs/how-to/install.md) | [CLI](docs/reference/cli.md) | [Totems](docs/explanation/totems.md) |
+| | [Configure](docs/how-to/configure.md) | [Config schema](docs/reference/config-schema.md) | [Architecture](docs/explanation/architecture.md) |
+| | [Run a totem](docs/how-to/run-totems.md) | [Environment](docs/reference/environment.md) | [Engine](docs/explanation/engine.md) |
+| | [Chat TUI](docs/how-to/chat.md) | [Trace schema](docs/reference/trace-schema.md) | [Security](docs/explanation/security.md) |
 | | [MCP](docs/how-to/integrate-mcp.md) | | |
 | | [Add a totem](docs/how-to/add-totem.md) | | |
 | | [Add a provider](docs/how-to/add-provider.md) | | |
