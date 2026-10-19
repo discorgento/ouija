@@ -26,9 +26,18 @@ LDFLAGS   = $(if $(VERSION_BARE),-ldflags "-X github.com/discorgento/ouija/inter
 DIST      = dist
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
+# Analysis tools run pinned, through `go run` (nothing to install), on the
+# toolchain go.mod declares — the one CI uses. Linters read the compiler's
+# export data, so a newer local Go would otherwise break them.
+STATICCHECK_VERSION ?= v0.8.1
+GOVULNCHECK_VERSION ?= v1.8.0
+ACTIONLINT_VERSION  ?= v1.7.12
+GO_MOD_VERSION      := $(shell $(GO) mod edit -json 2>/dev/null | sed -n 's/^[[:space:]]*"Go": "\(.*\)",*$$/\1/p')
+
 .DEFAULT_GOAL := help
 .PHONY: help build build-mcp dist install run chat task setup config learn \
-        test test-race vet fmt fmt-check check tidy cover clean
+        test test-race vet fmt fmt-check check tidy cover clean \
+        lint vuln tidy-check gen-check cross-vet actionlint
 
 help: ## List every target
 	@grep -E '^[a-zA-Z][a-zA-Z0-9_-]*:.*?## ' $(MAKEFILE_LIST) \
@@ -116,6 +125,28 @@ fmt-check: ## Fail on any file outside the gofmt standard (read-only)
 
 check: fmt-check vet test ## Full gate: gofmt + vet + tests (run before committing)
 	@echo "check: ok"
+
+lint: ## staticcheck (pinned; on the go.mod toolchain)
+	GOTOOLCHAIN=go$(GO_MOD_VERSION) $(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) $(PACKAGES)
+
+vuln: ## govulncheck: known vulnerabilities reachable from the code (pinned)
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) $(PACKAGES)
+
+tidy-check: ## Fail when go.mod/go.sum are out of sync with the imports (read-only)
+	$(GO) mod tidy -diff
+
+gen-check: ## Fail when go:generate output (totems/imports_gen.go) is stale
+	$(GO) generate ./...
+	@git diff --exit-code -- totems/imports_gen.go || { \
+	  echo "stale generated code: run 'go generate ./...' and commit it"; exit 1; }
+
+actionlint: ## Lint the GitHub Actions workflows (pinned)
+	$(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+cross-vet: ## go vet for every release OS (catches OS-specific build breaks)
+	@set -e; for os in linux darwin windows; do \
+	  echo "→ vet $$os"; GOOS=$$os $(GO) vet $(PACKAGES); \
+	done
 
 tidy: ## Sync go.mod/go.sum with the imports
 	$(GO) mod tidy

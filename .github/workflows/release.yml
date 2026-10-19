@@ -5,12 +5,14 @@
 #   2. release-please opens/updates a "release" PR with the version bump,
 #      the CHANGELOG.md section and the fallback in internal/version/version.go.
 #   3. Merging that PR creates the tag vX.Y.Z + the GitHub Release.
-#   4. This same workflow (same run, same token) then cross-compiles the
-#      archives with `make dist` and attaches them to the release.
+#   4. This same workflow (same run, same token) then re-runs the gate on the
+#      tag, cross-compiles the archives with `make dist`, attests their build
+#      provenance and attaches them to the release.
 #
 # Artifacts run in the SAME workflow on purpose: releases created with the
 # default GITHUB_TOKEN do not trigger other workflows (`on: release` would
-# never fire).
+# never fire). For the same reason the release PR gets no CI run of its own;
+# step 4's gate is what stops a broken tag from shipping binaries.
 #
 # Repo settings needed once: Settings → Actions → General →
 #   "Allow GitHub Actions to create and approve pull requests".
@@ -20,46 +22,71 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+# Never cancel a release half-way (tag created, binaries missing).
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Nothing by default; each job asks for exactly what it needs.
+permissions: {}
 
 jobs:
   release-please:
     name: release PR → tag + GitHub Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write # release-please labels its PR
     outputs:
       created: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
   artifacts:
-    name: cross-compile + attach binaries
+    name: gate + cross-compile + attest + attach binaries
     needs: release-please
     if: needs.release-please.outputs.created == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write     # upload release assets
+      id-token: write     # sign the provenance attestation (Sigstore)
+      attestations: write # store the attestation
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ needs.release-please.outputs.tag }}
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
-          cache: true
+          # No shared cache in a job holding write tokens: a poisoned cache
+          # entry from another workflow must not reach release binaries.
+          cache: false
+
+      - name: Gate (gofmt + vet + tests) on the tagged commit
+        run: make check
 
       - name: Build the release archives (5 targets)
-        run: make dist VERSION=${{ needs.release-please.outputs.tag }}
+        run: make dist VERSION="$TAG"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
 
       - name: Attach artifacts to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag }}
-        run: gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
+        run: gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

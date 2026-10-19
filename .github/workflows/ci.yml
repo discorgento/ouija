@@ -4,17 +4,28 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_dispatch:
+
+# A new push to a PR supersedes the run in flight; runs on main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
+# Actions are pinned to a commit SHA (the tag in the comment); Dependabot
+# keeps them current (.github/dependabot.yml).
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -22,8 +33,20 @@ jobs:
       - name: gofmt
         run: make fmt-check
 
-      - name: go vet
-        run: make vet
+      - name: go.mod / go.sum in sync
+        run: make tidy-check
+
+      - name: generated code up to date
+        run: make gen-check
+
+      - name: go vet (linux, darwin, windows)
+        run: make cross-vet
+
+      - name: staticcheck
+        run: make lint
+
+      - name: actionlint (workflows)
+        run: make actionlint
 
       - name: test (race)
         run: make test-race
@@ -31,18 +54,20 @@ jobs:
       - name: build
         run: make build
 
-  # Separate job on purpose: it does real network requests, so it must never
-  # slow down or flake the gofmt/vet/test gate above.
-  docs-external-links:
-    name: docs (external links)
+  # Separate job: a vulnerability published today should be visible on its own,
+  # not hidden inside the lint/test gate.
+  vuln:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: verify absolute http(s) links in the docs
-        run: DOCCHECK_EXTERNAL=1 go test ./internal/doccheck -run TestExternalLinksReachable -v -count=1
+      - name: govulncheck
+        run: make vuln

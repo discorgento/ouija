@@ -23,8 +23,15 @@ Without `make`:
 test -z "$(gofmt -l .)" && go vet ./... && go test ./...
 ```
 
-CI runs the same gate on every push and pull request (`.github/workflows/ci.yml`:
-gofmt, vet, `go test -race ./...`, build) — a red PR is a PR that cannot merge.
+CI runs that gate and more on every push and pull request
+(`.github/workflows/ci.yml`: gofmt, `go.mod` tidiness, stale generated code, vet
+for linux/darwin/windows, staticcheck, actionlint, `go test -race ./...`, build,
+govulncheck) — a red PR is a PR that cannot merge. Each extra check is a `make`
+target you can run locally:
+
+```sh
+make tidy-check gen-check cross-vet lint actionlint vuln
+```
 
 A single package, or a single test, while iterating:
 

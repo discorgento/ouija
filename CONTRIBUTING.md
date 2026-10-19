@@ -16,9 +16,11 @@ short version.
 make check    # gofmt -l . + go vet ./... + go test ./...
 ```
 
-CI runs the same gate on every push and pull request
-(`.github/workflows/ci.yml`: gofmt, vet, `go test -race ./...`, build), so a red
-PR cannot merge.
+CI runs that gate and more on every push and pull request
+(`.github/workflows/ci.yml`: gofmt, `go.mod` tidiness, stale generated code,
+vet for linux/darwin/windows, staticcheck, actionlint, `go test -race ./...`,
+build, govulncheck), so a red PR cannot merge. Each extra check is a `make`
+target you can run locally: `make tidy-check gen-check cross-vet lint actionlint vuln`.
 
 While iterating:
 
