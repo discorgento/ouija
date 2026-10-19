@@ -33,7 +33,9 @@ choice).
 
 Certain paths are **always blocked** regardless of the permission level:
 `/etc/*`, `/var/lib/*`, `.env*`, `.netrc`, `.gitconfig`, `.ssh/*`, `.gnupg/*`,
-`.aws/*`, `.ouija/*`, `.config/gcloud/*`, and similar sensitive locations.
+`.aws/*`, `.ouija/*`, `.ouija.json`, `ouija.json`, ouija's global config
+(`~/.config/ouija/*`, i.e. `os.UserConfigDir()/ouija`, with every API key and
+the trusted-project list), `.config/gcloud/*`, and similar sensitive locations.
 (Path matching uses exact directory match — `/etc` matches `/etc` but not
 `/etcetera`.)
 

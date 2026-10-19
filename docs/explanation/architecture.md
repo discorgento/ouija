@@ -117,9 +117,10 @@ default to `RiskWrite`, so they fail closed until classified.
 resolved absolute path) and bash commands. It always yields `Deny`:
 
 - filenames: `.env*`, `.gitconfig`, `.netrc`, `.npmrc`,
-  `.dockercfg`/`.dockerconfigjson`;
+  `.dockercfg`/`.dockerconfigjson`, `.ouija.json`, `ouija.json`;
 - directories at any path level: `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`,
-  `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`;
+  `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`, and ouija's global
+  config (`.config/ouija`, or wherever `os.UserConfigDir()` puts it);
 - system directories: `/etc/**`, `/var/lib/**`.
 
 ## Provider architecture

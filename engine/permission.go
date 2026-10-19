@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -106,6 +107,10 @@ func isProtectedPath(absPath string) bool {
 	switch base {
 	case ".gitconfig", ".netrc", ".npmrc", ".dockercfg", ".dockerconfigjson":
 		return true
+	// ouija's own project configs: they may hold an apiKey, and they grant
+	// permissions — a model that could rewrite them would grant its own.
+	case ".ouija.json", "ouija.json":
+		return true
 	}
 	// `.env*` is a prefix, not an enumeration: `.env`, `.env.local`,
 	// `.env.production`, `.env.secret`, `.env.test`, `.envrc`, … all hold
@@ -141,6 +146,18 @@ func isProtectedPath(absPath string) bool {
 	}
 	if containsComponentPair(absPath, sep, ".config", "kube") {
 		return true
+	}
+	// ouija's global config: every provider's API key and the trusted-project
+	// list. Matched both as the literal `.config/ouija` and as the real
+	// os.UserConfigDir()/ouija (XDG_CONFIG_HOME, macOS Application Support).
+	if containsComponentPair(absPath, sep, ".config", "ouija") {
+		return true
+	}
+	if dir, err := os.UserConfigDir(); err == nil {
+		g := filepath.Join(dir, "ouija")
+		if absPath == g || strings.HasPrefix(absPath, g+sep) {
+			return true
+		}
 	}
 
 	return false

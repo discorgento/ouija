@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -134,5 +135,33 @@ func TestIsProtectedPath(t *testing.T) {
 				t.Errorf("isProtectedPath(%q) = %v, want %v", tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+// ouija's own secrets and permission grants are protected: the global config
+// (every provider's API key) and the project config files the model could
+// otherwise rewrite to grant itself permissions.
+func TestOuijaConfigsAreProtected(t *testing.T) {
+	cfgHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	for _, p := range []string{
+		"/home/u/.config/ouija/config.json",
+		filepath.Join(cfgHome, "ouija", "config.json"),
+		filepath.Join(cfgHome, "ouija"),
+		"/proj/.ouija.json",
+		"/proj/ouija.json",
+		"/proj/.ouija/config.json",
+	} {
+		if !isProtectedPath(p) {
+			t.Errorf("isProtectedPath(%q) = false; want protected", p)
+		}
+	}
+	for _, p := range []string{"/proj/ouija/main.go", "/proj/docs/ouija.md", filepath.Join(cfgHome, "other", "x.json")} {
+		if isProtectedPath(p) {
+			t.Errorf("isProtectedPath(%q) = true; want allowed", p)
+		}
+	}
+	if _, found := commandRefsProtectedPath("cat ~/.config/ouija/config.json"); !found {
+		t.Error("bash `cat ~/.config/ouija/config.json` was not refused")
 	}
 }
