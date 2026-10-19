@@ -84,13 +84,15 @@ func defaultModels() *ModelsFile {
 				},
 			},
 			"opencode": {
-				Label: "OpenCode Zen (free)",
+				// Observed 2026-10-19: OpenCode's free tier answers 403 FreeTierError
+				// ("can only be used from within OpenCode") to other clients.
+				Label: "OpenCode Zen (its free tier only works inside the OpenCode app)",
 				Models: map[string]ModelDef{
-					"big-pickle":             {Label: "Big Pickle (free)", Default: true},
-					"deepseek-v4-flash-free": {Label: "DeepSeek V4 Flash (free)"},
-					"mimo-v2.5-free":         {Label: "MiMo V2.5 (free)"},
-					"north-mini-code-free":   {Label: "North Mini Code (free)"},
-					"nemotron-3-ultra-free":  {Label: "Nemotron 3 Ultra (free)"},
+					"big-pickle":             {Label: "Big Pickle", Default: true},
+					"deepseek-v4-flash-free": {Label: "DeepSeek V4 Flash"},
+					"mimo-v2.5-free":         {Label: "MiMo V2.5"},
+					"north-mini-code-free":   {Label: "North Mini Code"},
+					"nemotron-3-ultra-free":  {Label: "Nemotron 3 Ultra"},
 				},
 			},
 			"ollama": {

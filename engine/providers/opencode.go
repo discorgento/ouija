@@ -11,7 +11,8 @@ import (
 // ── OpenCode Zen ──────────────────────────────────────────────────────────
 
 // OpenCode implements engine.Provider via OpenCode Zen's /chat/completions
-// endpoint (OpenAI-compatible). Free tier available at opencode.ai.
+// endpoint (OpenAI-compatible). OpenCode's free tier answers 403
+// FreeTierError to any client but the OpenCode app.
 type OpenCode struct {
 	client  *Client
 	baseURL string

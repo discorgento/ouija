@@ -224,7 +224,7 @@ All LLM backends implement the `Provider` interface — `Name()`,
 | `anthropic` | Messages API + SSE streaming + prompt caching |
 | `openai` | `/chat/completions` + SSE + `stream_options: include_usage` |
 | `openrouter` | OpenAI-compatible shim, multi-model gateway |
-| `opencode` | OpenCode Zen gateway (`/chat/completions`), free tier at opencode.ai |
+| `opencode` | OpenCode Zen gateway (`/chat/completions`); its free tier only works inside the OpenCode app (403 `FreeTierError` elsewhere) |
 | `ollama` | OpenAI-compatible shim, local, free |
 
 All share `providers/http.go` for retry/backoff on 429/5xx and SSE parsing — with
