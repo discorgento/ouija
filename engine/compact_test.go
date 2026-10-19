@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestCompactEmpty(t *testing.T) {
@@ -272,5 +273,19 @@ func TestCompressConversationDropsReadOnlyTurn(t *testing.T) {
 	assertWellFormed(t, got)
 	if len(got) != 2 {
 		t.Fatalf("want question + answer, got %d messages: %+v", len(got), got)
+	}
+}
+
+// Trimming at a byte offset never splits a multi-byte rune: the cut content is
+// resent to the provider, and a broken rune becomes U+FFFD (or a 400).
+func TestCompactKeepsUTF8Valid(t *testing.T) {
+	msgs := make([]Message, compactKeepRecent+1)
+	for i := range msgs {
+		msgs[i] = Message{Role: RoleUser, Content: "x"}
+	}
+	msgs[0] = Message{Role: RoleTool, Content: "a" + strings.Repeat("é", compactTrimAt)} // "é" is 2 bytes; the cut lands mid-rune
+	got := compact(msgs)[0].Content
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, "…[compacted]") {
+		t.Fatalf("compacted content invalid or untrimmed: valid=%v len=%d", utf8.ValidString(got), len(got))
 	}
 }

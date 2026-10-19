@@ -88,7 +88,7 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 		if out == "" {
 			out = fmt.Sprintf("exit error: %v", err)
 		}
-		return ToolResult{Data: trim(out), Mime: "text/plain"}
+		return ToolResult{Data: trim(out)}
 	}
 
 	// Combine stdout + stderr if both present.
@@ -98,7 +98,7 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 		out = errOut
 	}
 
-	return ToolResult{Data: trim(cmp.Or(out, "(no output)")), Mime: "text/plain"}
+	return ToolResult{Data: trim(cmp.Or(out, "(no output)"))}
 }
 
 // sanitizeEnv filters the parent process environment to remove credential-like
@@ -167,7 +167,7 @@ func bashPreview(ctx context.Context, root string, in map[string]any) string {
 	// payload (base64 blobs, heredocs), not a 120-char teaser.
 	if len(cmd) > 400 {
 		b.Reset()
-		fmt.Fprintf(&b, "will run: %s…", cmd[:400])
+		fmt.Fprintf(&b, "will run: %s…", strings.ToValidUTF8(cmd[:400], ""))
 	}
 	if len(cmds) > 0 {
 		b.WriteString("  [")
@@ -251,13 +251,7 @@ func ExtractBaseCommands(cmd string) []string {
 		baseCmds = append(baseCmds, base)
 	}
 
-	syntax.Walk(ast, func(node syntax.Node) bool {
-		switch n := node.(type) {
-		case *syntax.CallExpr:
-			collect(n)
-		}
-		return true
-	})
+	forEachCall(ast, collect)
 
 	if len(baseCmds) == 0 {
 		return nil
@@ -324,18 +318,23 @@ func ExtractCommands(cmd string) []string {
 		segs = append(segs, seg)
 	}
 
-	syntax.Walk(ast, func(node syntax.Node) bool {
-		switch n := node.(type) {
-		case *syntax.CallExpr:
-			collect(n)
-		}
-		return true
-	})
+	forEachCall(ast, collect)
 
 	if len(segs) == 0 {
 		return nil
 	}
 	return segs
+}
+
+// forEachCall calls fn for every command invocation in the tree — including
+// those inside command substitutions, pipelines and chained statements.
+func forEachCall(ast syntax.Node, fn func(*syntax.CallExpr)) {
+	syntax.Walk(ast, func(node syntax.Node) bool {
+		if call, ok := node.(*syntax.CallExpr); ok {
+			fn(call)
+		}
+		return true
+	})
 }
 
 // denylistEntry is a hardcoded dangerous pattern that is always rejected.
@@ -468,7 +467,7 @@ func segmentDenied(fields []string, depth int) bool {
 
 		// Nested command strings: `bash -c '...'`, `eval '...'`.
 		if base == "eval" {
-			if segmentDenied(strings.Fields(stripShellQuotes(joinWords(rest))), depth+1) {
+			if segmentDenied(strings.Fields(stripShellQuotes(strings.Join(rest, " "))), depth+1) {
 				return true
 			}
 			continue
@@ -478,7 +477,7 @@ func segmentDenied(fields []string, depth int) bool {
 			for j, t := range rest {
 				if t == "-c" {
 					nested = true
-					if segmentDenied(strings.Fields(stripShellQuotes(joinWords(rest[j+1:]))), depth+1) {
+					if segmentDenied(strings.Fields(stripShellQuotes(strings.Join(rest[j+1:], " "))), depth+1) {
 						return true
 					}
 					break
@@ -491,8 +490,8 @@ func segmentDenied(fields []string, depth int) bool {
 		}
 
 		switch {
-		case base == "rm":
-			if rmDenied(rest) {
+		case base == "rm" || base == "chmod" || base == "chown":
+			if recursiveOnRoot(rest) {
 				return true
 			}
 		case base == "dd":
@@ -507,10 +506,6 @@ func segmentDenied(fields []string, depth int) bool {
 			if refsDev(rest) {
 				return true
 			}
-		case base == "chmod" || base == "chown":
-			if recursiveOnRoot(rest) {
-				return true
-			}
 		}
 	}
 	return false
@@ -519,20 +514,6 @@ func segmentDenied(fields []string, depth int) bool {
 // unquote strips shell quoting from a token so `"rm"`, `'/'` or
 // `of=/dev/sda` reduce to the word actually being run.
 func unquote(t string) string { return strings.Trim(t, "\"'`") }
-
-// rmDenied reports recursive deletion of the root/home itself.
-// `rm -rf /tmp` stays legal; `rm -rf /`, `rm -fr ~`, `rm -r -f $HOME` don't.
-func rmDenied(rest []string) bool {
-	if !hasRecursiveFlag(rest) {
-		return false
-	}
-	for _, t := range flagsAndTargets(rest) {
-		if isRootish(t) {
-			return true
-		}
-	}
-	return false
-}
 
 // ddDenied reports dd writing onto a raw block device (`of=/dev/sda`).
 func ddDenied(rest []string) bool {
@@ -556,7 +537,9 @@ func refsDev(rest []string) bool {
 	return false
 }
 
-// recursiveOnRoot reports recursive chmod/chown on / or $HOME.
+// recursiveOnRoot reports a recursive rm/chmod/chown of the root or home
+// itself: `rm -rf /tmp` stays legal; `rm -rf /`, `rm -fr ~`, `chmod -R 0 /`
+// don't.
 func recursiveOnRoot(rest []string) bool {
 	if !hasRecursiveFlag(rest) {
 		return false
@@ -620,10 +603,6 @@ func isRootish(t string) bool {
 		return true
 	}
 	return false
-}
-
-func joinWords(words []string) string {
-	return strings.Join(words, " ")
 }
 
 func stripShellQuotes(s string) string {

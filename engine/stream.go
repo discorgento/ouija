@@ -57,6 +57,6 @@ func withActivity(ctx context.Context, seq iter.Seq2[StreamEvent, error]) iter.S
 
 // errStreamIdle is the error of a call the watchdog stopped.
 func errStreamIdle(timeout time.Duration) error {
-	return ErrNetwork(fmt.Sprintf("the provider sent nothing for %s — raise streamTimeout if the model "+
+	return ErrStream(fmt.Sprintf("the provider sent nothing for %s — raise streamTimeout if the model "+
 		"is slow to start answering", timeout))
 }

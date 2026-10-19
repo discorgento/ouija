@@ -14,8 +14,6 @@ import (
 // run's schema.
 const SubmitTool = "submit_result"
 
-const submitTool = SubmitTool
-
 // ToolCallback is called before each tool execution (optional, for UI progress).
 type ToolCallback func(name string, input map[string]any)
 
@@ -302,13 +300,12 @@ func (e *Engine) syncAllowlistConfig() {
 // resolved cfg.APIKey: that one usually comes from the global store, and
 // copying it into a project file (often committed) would leak it.
 func (e *Engine) SaveConfigAt(path string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	origRoot, origKey := e.cfg.ProjectRoot, e.cfg.APIKey
-	e.cfg.ProjectRoot = "."
-	e.cfg.APIKey = apiKeyOnDisk(path)
-	defer func() { e.cfg.ProjectRoot, e.cfg.APIKey = origRoot, origKey }()
-	return e.cfg.Save(path)
+	e.mu.RLock()
+	c := *e.cfg // runs read the shared config without the lock: never edit it
+	e.mu.RUnlock()
+	c.ProjectRoot = "."
+	c.APIKey = apiKeyOnDisk(path)
+	return c.Save(path)
 }
 
 // apiKeyOnDisk returns the apiKey a config file declares, "" when the file is

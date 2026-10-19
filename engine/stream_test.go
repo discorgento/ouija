@@ -73,8 +73,8 @@ func TestStreamTimeoutIsIdleNotDeadline(t *testing.T) {
 	silent := newTestEngine(quiet, t.TempDir())
 	silent.Config().StreamTimeout = 1
 	_, err = silent.Run(context.Background(), RunRequest{Prompt: "hi"})
-	if code, ok := Code(err); !ok || code != ErrCodeNetwork {
-		t.Fatalf("silent provider: err = %v; want a NETWORK idle-timeout error", err)
+	if code, ok := Code(err); !ok || code != ErrCodeStream {
+		t.Fatalf("silent provider: err = %v; want a STREAM idle-timeout error", err)
 	}
 	if quiet.calls.Load() != maxStreamAttempts {
 		t.Fatalf("silent provider called %d times; want %d (retried)", quiet.calls.Load(), maxStreamAttempts)
@@ -119,7 +119,7 @@ func (f *flakyProvider) Chat(context.Context, ChatRequest) iter.Seq2[StreamEvent
 // throw away a whole run (the live task lost its reconcile this way).
 func TestDroppedStreamIsRetried(t *testing.T) {
 	fastRetries(t)
-	p := &flakyProvider{fail: 1, err: errors.New("http2: response body closed")}
+	p := &flakyProvider{fail: 1, err: ErrStream("SSE: stream broke off", errors.New("http2: response body closed"))}
 	res, err := newTestEngine(p, t.TempDir()).Run(context.Background(), RunRequest{Prompt: "hi"})
 	if err != nil || res.Text != "partial answer" || p.calls.Load() != 2 {
 		t.Fatalf("res=%v err=%v calls=%d; want the retry's answer", res, err, p.calls.Load())
@@ -137,8 +137,10 @@ func TestStreamRetryLimits(t *testing.T) {
 	}{
 		{"auth", ErrAuth("bad key"), false},
 		{"refusal", ErrProvider("anthropic: the model declined the request (cyber)"), false},
-		{"http status", errors.New("SSE: HTTP 400: bad request"), false},
-		{"text already shown", io.ErrUnexpectedEOF, true},
+		{"http status", ErrProvider("SSE: HTTP 400: bad request"), false},
+		{"connect, already retried", ErrNetwork("SSE: connect", errors.New("connection refused")), false},
+		{"untagged error", io.ErrUnexpectedEOF, false},
+		{"text already shown", ErrStream("cut", io.ErrUnexpectedEOF), true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

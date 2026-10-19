@@ -166,7 +166,7 @@ func (m *recordingMock) Chat(ctx context.Context, req ChatRequest) iter.Seq2[Str
 // run's schema as its input schema — prompts tell the model to call it.
 func TestStructuredRunExposesSubmitTool(t *testing.T) {
 	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
-		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "1", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}}
 	eng := newTestEngine(rm, t.TempDir())
 	schema := map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}}
@@ -180,7 +180,7 @@ func TestStructuredRunExposesSubmitTool(t *testing.T) {
 	}
 	var submit *ToolDef
 	for i, d := range rm.requests[0].Tools {
-		if d.Name == submitTool {
+		if d.Name == SubmitTool {
 			submit = &rm.requests[0].Tools[i]
 		}
 	}
@@ -198,7 +198,7 @@ func TestStructuredRunExposesSubmitTool(t *testing.T) {
 func TestStructuredPhaseTwoAcceptsSubmitCall(t *testing.T) {
 	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
 		{Text: "Done exploring."},
-		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"answer": "x"}}}},
+		{ToolCalls: []ToolCall{{ID: "1", Name: SubmitTool, Input: map[string]any{"answer": "x"}}}},
 	}}}
 	eng := newTestEngine(rm, t.TempDir())
 
@@ -231,7 +231,7 @@ func TestStructuredPhaseTwoProseIsNudged(t *testing.T) {
 	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
 		{Text: "Done exploring."},
 		{Text: "Here is a summary in words."},
-		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "1", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}}
 	eng := newTestEngine(rm, t.TempDir())
 
@@ -248,7 +248,7 @@ func TestStructuredPhaseTwoProseIsNudged(t *testing.T) {
 func TestStructuredWithoutNativeSupportNudges(t *testing.T) {
 	rm := &recordingMock{native: false, structuredMock: structuredMock{responses: []ChatResponse{
 		{Text: "Done exploring."},
-		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "1", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}}
 	eng := newTestEngine(rm, t.TempDir())
 
@@ -270,7 +270,7 @@ func TestStructuredWithoutNativeSupportNudges(t *testing.T) {
 // tool result, so a later Chat turn does not send an orphan tool_use.
 func TestSubmitCallIsAnsweredInHistory(t *testing.T) {
 	sm := &structuredMock{responses: []ChatResponse{
-		{ToolCalls: []ToolCall{{ID: "s1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "s1", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	eng := newTestEngine(sm, t.TempDir())
 	_, msgs, err := eng.runAgent(context.Background(),

@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -72,8 +74,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 	// When using structured output, avoid the two-phase slow path for simple
 	// requests: if no tools are needed, skip Phase 1 entirely.
 	if useStructured && len(toolDefs) == 0 {
-		span := env.Tracer.Start("chat")
-		resp, err := a.streamChat(ctx, env, ChatRequest{
+		resp, span, err := a.callModel(ctx, env, "chat", ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Schema:    req.Schema,
@@ -81,17 +82,8 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 			Model:     env.Model,
 		})
 		if err != nil {
-			span.SetError(err.Error())
-			span.End()
 			return nil, msgs, err
 		}
-		if berr := env.Budget.Add(resp.Usage); berr != nil {
-			span.SetError(berr.Error())
-			span.End()
-			return nil, msgs, berr
-		}
-		span.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
-		span.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
 		span.End()
 		if js, ok := structuredAnswer(resp); ok {
 			msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
@@ -131,8 +123,8 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		}
 		msgs = compact(msgs)
 
-		chatSpan := env.Tracer.Start("chat")
-		resp, err := a.streamChat(ctx, env, ChatRequest{
+		// The span stays open over the turn: its tool calls become children.
+		resp, chatSpan, err := a.callModel(ctx, env, "chat", ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Tools:     toolDefs,
@@ -140,20 +132,11 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 			Model:     env.Model,
 		})
 		if err != nil {
-			chatSpan.SetError(err.Error())
-			chatSpan.End()
 			return nil, msgs, err
 		}
-		if berr := env.Budget.Add(resp.Usage); berr != nil {
-			chatSpan.SetError(berr.Error())
-			chatSpan.End()
-			return nil, msgs, berr
+		if resp.StopReason == "length" || resp.StopReason == "max_tokens" { // OpenAI / Anthropic
+			env.Logger.Warn("response truncated", "label", req.Label, "stop_reason", resp.StopReason)
 		}
-		if resp.StopReason == "length" {
-			env.Logger.Warn("response truncated", "label", req.Label, "stop_reason", "length")
-		}
-		chatSpan.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
-		chatSpan.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
 
 		if len(resp.ToolCalls) > 0 {
 			// Deduplicate tool calls with identical name+input in the same batch.
@@ -189,24 +172,12 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 
 			// ── Parallel execution ──────────────────────────────────────
 			if len(parCalls) > 0 {
-				type callResult struct {
-					idx    int
-					result ToolResult
-				}
-				ch := make(chan callResult, len(parCalls))
-				for i, call := range parCalls {
-					i, call := i, call
-					go func() {
-						out := env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk)
-						ch <- callResult{i, out}
-					}()
-				}
 				results := make([]ToolResult, len(parCalls))
-				for range len(parCalls) {
-					cr := <-ch
-					results[cr.idx] = cr.result
+				var wg sync.WaitGroup
+				for i, call := range parCalls {
+					wg.Go(func() { results[i] = env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk) })
 				}
-				close(ch)
+				wg.Wait()
 				// Append results in call order so the model sees deterministic order.
 				for i, call := range parCalls {
 					msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: results[i].String()})
@@ -215,7 +186,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 
 			// ── Sequential execution ────────────────────────────────────
 			for _, call := range seqCalls {
-				if call.Name == submitTool {
+				if call.Name == SubmitTool {
 					chatSpan.SetAttr("submit_result", "true")
 					b, _ := json.Marshal(call.Input)
 					submitResult = string(b)
@@ -253,8 +224,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 				// A user turn, not an assistant prefill: newer models reject
 				// a conversation that ends on an assistant message.
 				msgs = append(msgs, Message{Role: RoleUser, Content: "Now give the final answer as the structured object."})
-				phaseSpan := env.Tracer.Start("phase2")
-				finalResp, err := a.streamChat(ctx, env, ChatRequest{
+				finalResp, phaseSpan, err := a.callModel(ctx, env, "phase2", ChatRequest{
 					System:   req.System,
 					Messages: msgs,
 					// The history holds this run's tool calls, so the tools
@@ -266,17 +236,8 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 					Model:       env.Model,
 				})
 				if err != nil {
-					phaseSpan.SetError(err.Error())
-					phaseSpan.End()
 					return nil, msgs, err
 				}
-				if berr := env.Budget.Add(finalResp.Usage); berr != nil {
-					phaseSpan.SetError(berr.Error())
-					phaseSpan.End()
-					return nil, msgs, berr
-				}
-				phaseSpan.SetAttr("input_tokens", fmt.Sprintf("%d", finalResp.Usage.InputTokens))
-				phaseSpan.SetAttr("output_tokens", fmt.Sprintf("%d", finalResp.Usage.OutputTokens))
 				phaseSpan.End()
 				if js, ok := structuredAnswer(finalResp); ok {
 					msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
@@ -293,7 +254,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 				return nil, msgs, fmt.Errorf("model did not return structured output after %d attempts", nudges)
 			}
 			nudges++
-			msgs = append(msgs, Message{Role: RoleUser, Content: "Reply by calling the " + submitTool + " tool with the final object (or a single JSON object)."})
+			msgs = append(msgs, Message{Role: RoleUser, Content: "Reply by calling the " + SubmitTool + " tool with the final object (or a single JSON object)."})
 			continue
 		}
 
@@ -301,6 +262,26 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
 		return &RunResult{Text: resp.Text, Tools: toolNames}, msgs, nil
 	}
+}
+
+// callModel makes one provider call inside a span named name and charges its
+// usage to the budget. On success the span is returned open — the caller ends
+// it, after the turn's tool calls when they should nest under it; on failure
+// it is ended with the error.
+func (a *ReAct) callModel(ctx context.Context, env RunEnv, name string, req ChatRequest) (ChatResponse, *Span, error) {
+	span := env.Tracer.Start(name)
+	resp, err := a.streamChat(ctx, env, req)
+	if err == nil {
+		err = env.Budget.Add(resp.Usage)
+	}
+	if err != nil {
+		span.SetError(err.Error())
+		span.End()
+		return resp, nil, err
+	}
+	span.SetAttr("input_tokens", strconv.Itoa(resp.Usage.InputTokens))
+	span.SetAttr("output_tokens", strconv.Itoa(resp.Usage.OutputTokens))
+	return resp, span, nil
 }
 
 // streamChat calls the provider's streaming Chat and accumulates events into
@@ -334,18 +315,11 @@ const maxStreamAttempts = 3
 var streamRetryDelay = time.Second
 
 // retryableStreamError reports whether a failed provider call is worth
-// repeating: a transport failure mid-stream (a dropped connection, the idle
-// timeout). Never a cancelled run, an error with a code other than NETWORK
-// (auth, config, budget, a refusal), or an HTTP status — the client already
-// retried those that can pass.
+// repeating: a reply that started and then broke off or went silent (STREAM).
+// Never a cancelled run, nor any other failure — auth, config, budget, a
+// refusal, an error status, a connection the client already retried.
 func retryableStreamError(ctx context.Context, err error) bool {
-	if ctx.Err() != nil {
-		return false
-	}
-	if code, ok := Code(err); ok {
-		return code == ErrCodeNetwork
-	}
-	return !strings.Contains(err.Error(), "HTTP ")
+	return ctx.Err() == nil && Is(err, ErrCodeStream)
 }
 
 // streamOnce makes one provider call. shown reports whether text already
@@ -412,7 +386,7 @@ func compact(msgs []Message) []Message {
 	// 1. Trim content of older tool-result messages.
 	for i := range len(out) - compactKeepRecent {
 		if out[i].Role == RoleTool && len(out[i].Content) > compactTrimAt {
-			out[i].Content = out[i].Content[:compactTrimAt] + "…[compacted]"
+			out[i].Content = strings.ToValidUTF8(out[i].Content[:compactTrimAt], "") + "…[compacted]"
 		}
 	}
 	// 2. Sliding window: drop oldest messages to stay within limit.
@@ -538,7 +512,7 @@ func isEditResult(m Message) bool {
 // Its input schema is the run's Schema, so the call's input is the answer.
 func submitToolDef(schema map[string]any) ToolDef {
 	return ToolDef{
-		Name:        submitTool,
+		Name:        SubmitTool,
 		Description: "Submit the final answer. Call it exactly once, when you are done, with the complete result object.",
 		Schema:      schema,
 	}
@@ -549,7 +523,7 @@ func submitToolDef(schema map[string]any) ToolDef {
 // Anthropic's forced tool), else a JSON object in the text.
 func structuredAnswer(resp ChatResponse) (string, bool) {
 	for _, tc := range resp.ToolCalls {
-		if tc.Name != submitTool {
+		if tc.Name != SubmitTool {
 			continue
 		}
 		if b, err := json.Marshal(tc.Input); err == nil {

@@ -40,7 +40,7 @@ func writeFileTool(ctx context.Context, root string, in map[string]any) ToolResu
 		return errInternal(fmt.Sprintf("write %s: %v", p, err))
 	}
 
-	return ToolResult{Data: fmt.Sprintf("✓ wrote %s (%d bytes)", p, len(content)), Mime: "text/plain"}
+	return ToolResult{Data: fmt.Sprintf("✓ wrote %s (%d bytes)", p, len(content))}
 }
 
 // editFileTool applies a search-and-replace edit to an existing file.
@@ -82,7 +82,7 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 
 	// Build a unified diff snippet with context.
 	diff := BuildDiffSnippet(orig, oldStr, newStr)
-	return ToolResult{Data: fmt.Sprintf("✓ edited %s\n%s", p, diff), Mime: "text/plain"}
+	return ToolResult{Data: fmt.Sprintf("✓ edited %s\n%s", p, diff)}
 }
 
 // deleteFileTool removes a file or empty directory.
@@ -112,7 +112,7 @@ func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolRes
 	if err := os.RemoveAll(full); err != nil {
 		return errInternal(fmt.Sprintf("delete %s: %v", p, err))
 	}
-	return ToolResult{Data: fmt.Sprintf("✓ deleted %s", p), Mime: "text/plain"}
+	return ToolResult{Data: fmt.Sprintf("✓ deleted %s", p)}
 }
 
 // BuildDiffSnippet creates a unified diff snippet with context lines,

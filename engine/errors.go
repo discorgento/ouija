@@ -1,16 +1,17 @@
 package engine
 
+import "errors"
+
 // ErrorCode categorizes failures so callers (CLI, MCP, tests) can react differently.
 type ErrorCode string
 
 const (
-	ErrCodeConfig     ErrorCode = "CONFIG"     // invalid config (missing field, bad value)
-	ErrCodeAuth       ErrorCode = "AUTH"       // API key missing/invalid
-	ErrCodeProvider   ErrorCode = "PROVIDER"   // provider not registered / init failed
-	ErrCodeBudget     ErrorCode = "BUDGET"     // token/cost budget exceeded
-	ErrCodeNetwork    ErrorCode = "NETWORK"    // transport error (timeout, DNS, 5xx)
-	ErrCodePermission ErrorCode = "PERMISSION" // tool permission denied
-	ErrCodeSystem     ErrorCode = "SYSTEM"     // bug / unexpected
+	ErrCodeConfig   ErrorCode = "CONFIG"   // invalid config (missing field, bad value)
+	ErrCodeAuth     ErrorCode = "AUTH"     // API key missing/invalid
+	ErrCodeProvider ErrorCode = "PROVIDER" // provider not registered / init failed
+	ErrCodeBudget   ErrorCode = "BUDGET"   // token/cost budget exceeded
+	ErrCodeNetwork  ErrorCode = "NETWORK"  // transport error (DNS, refused connection), already retried
+	ErrCodeStream   ErrorCode = "STREAM"   // a streamed reply broke off or went silent mid-way: retryable
 )
 
 // OError wraps an error with a stable code.
@@ -29,89 +30,55 @@ func (e *OError) Error() string {
 
 func (e *OError) Unwrap() error { return e.Err }
 
-// Is checks if the error (or its chain) has the given code.
+// Is reports whether err or any error it wraps (also through errors.Join and
+// multi-%w wrapping) carries code.
 func Is(err error, code ErrorCode) bool {
-	if err == nil {
+	switch e := err.(type) {
+	case nil:
 		return false
-	}
-	for err != nil {
-		if e, ok := err.(*OError); ok && e.Code == code {
+	case *OError:
+		if e.Code == code {
 			return true
 		}
-		err = unwrap(err)
+	}
+	switch u := err.(type) {
+	case interface{ Unwrap() error }:
+		return Is(u.Unwrap(), code)
+	case interface{ Unwrap() []error }:
+		for _, inner := range u.Unwrap() {
+			if Is(inner, code) {
+				return true
+			}
+		}
 	}
 	return false
 }
 
-// Code returns the ErrorCode carried by err (or the nearest wrapper in its
-// chain). ok is false when no code is present, so callers can fall back to a
-// generic message.
+// Code returns the ErrorCode of the nearest *OError in err's chain. ok is
+// false when none carries one, so callers can fall back to a generic message.
 func Code(err error) (code ErrorCode, ok bool) {
-	for err != nil {
-		if e, ok := err.(*OError); ok {
-			return e.Code, true
-		}
-		err = unwrap(err)
+	var e *OError
+	if errors.As(err, &e) {
+		return e.Code, true
 	}
 	return "", false
 }
 
-// Helper constructors.
-func ErrConfig(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeConfig, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrAuth(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeAuth, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrProvider(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeProvider, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrBudget(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeBudget, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrNetwork(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeNetwork, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrPermission(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodePermission, Message: msg}
-	if len(cause) > 0 {
-		e.Err = cause[0]
-	}
-	return e
-}
-func ErrSystem(msg string, cause ...error) error {
-	e := &OError{Code: ErrCodeSystem, Message: msg}
+func newOError(code ErrorCode, msg string, cause []error) error {
+	e := &OError{Code: code, Message: msg}
 	if len(cause) > 0 {
 		e.Err = cause[0]
 	}
 	return e
 }
 
-// unwrap follows error chains (errors.Unwrap / custom Unwrap).
-func unwrap(err error) error {
-	type unwrapper interface{ Unwrap() error }
-	if u, ok := err.(unwrapper); ok {
-		return u.Unwrap()
-	}
-	return nil
-}
+// Constructors, one per code; the optional cause is kept for errors.Is/As.
+func ErrConfig(msg string, cause ...error) error   { return newOError(ErrCodeConfig, msg, cause) }
+func ErrAuth(msg string, cause ...error) error     { return newOError(ErrCodeAuth, msg, cause) }
+func ErrProvider(msg string, cause ...error) error { return newOError(ErrCodeProvider, msg, cause) }
+func ErrBudget(msg string, cause ...error) error   { return newOError(ErrCodeBudget, msg, cause) }
+func ErrNetwork(msg string, cause ...error) error  { return newOError(ErrCodeNetwork, msg, cause) }
+
+// ErrStream is a streamed reply that started and then broke off or went
+// silent: the one failure worth repeating the call for.
+func ErrStream(msg string, cause ...error) error { return newOError(ErrCodeStream, msg, cause) }

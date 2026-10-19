@@ -166,3 +166,19 @@ func TestPhysicalPath(t *testing.T) {
 		}
 	}
 }
+
+func TestSkipPath(t *testing.T) {
+	sep := string(filepath.Separator)
+	for p, want := range map[string]bool{
+		"web" + sep + "app.min.js":                true, // filepath.Ext sees only ".js"
+		"web" + sep + "APP.MIN.JS":                true,
+		"web" + sep + "app.js":                    false,
+		"a" + sep + "node_modules" + sep + "x.go": true,
+		"img.PNG": true,
+		"main.go": false,
+	} {
+		if got := skipPath(p); got != want {
+			t.Errorf("skipPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}

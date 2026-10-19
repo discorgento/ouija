@@ -61,7 +61,7 @@ func TestEngineLoopToolThenSubmit(t *testing.T) {
 	}
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	eng := newTestEngine(mp, root)
 
@@ -97,7 +97,7 @@ func TestEngineParallelTools(t *testing.T) {
 				{ID: "1", Name: "read_file", Input: map[string]any{"path": "a.txt"}},
 				{ID: "2", Name: "read_file", Input: map[string]any{"path": "b.txt"}},
 				{ID: "3", Name: "read_file", Input: map[string]any{"path": "c.txt"}},
-				{ID: "4", Name: submitTool, Input: map[string]any{"done": true}},
+				{ID: "4", Name: SubmitTool, Input: map[string]any{"done": true}},
 			},
 		},
 	}}
@@ -151,7 +151,7 @@ func TestEngineParallelToolsProveConcurrency(t *testing.T) {
 				{ID: "1", Name: "p_tool_a", Input: map[string]any{"name": "A"}},
 				{ID: "2", Name: "p_tool_b", Input: map[string]any{"name": "B"}},
 				{ID: "3", Name: "p_tool_c", Input: map[string]any{"name": "C"}},
-				{ID: "4", Name: submitTool, Input: map[string]any{"ok": true}},
+				{ID: "4", Name: SubmitTool, Input: map[string]any{"ok": true}},
 			},
 		},
 	}}
@@ -238,7 +238,7 @@ func TestEngineMixedParallelSequential(t *testing.T) {
 				{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}},
 				{ID: "2", Name: "grep", Input: map[string]any{"pattern": "hello", "path": "."}},
 				{ID: "3", Name: "write_custom", Input: map[string]any{}},
-				{ID: "4", Name: submitTool, Input: map[string]any{"ok": true}},
+				{ID: "4", Name: SubmitTool, Input: map[string]any{"ok": true}},
 			},
 		},
 	}}
@@ -302,7 +302,7 @@ func TestEngineParallelToolCount(t *testing.T) {
 
 	mp := &mockProvider{responses: []ChatResponse{
 		{
-			ToolCalls: append(toolCalls, ToolCall{ID: "s", Name: submitTool, Input: map[string]any{"done": true}}),
+			ToolCalls: append(toolCalls, ToolCall{ID: "s", Name: SubmitTool, Input: map[string]any{"done": true}}),
 		},
 	}}
 	eng := newTestEngine(mp, root)
@@ -333,7 +333,7 @@ func TestEngineParallelDedupThenParallel(t *testing.T) {
 			ToolCalls: []ToolCall{
 				{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}},
 				{ID: "2", Name: "read_file", Input: map[string]any{"path": "f.txt"}}, // same input → dedup
-				{ID: "3", Name: submitTool, Input: map[string]any{"ok": true}},
+				{ID: "3", Name: SubmitTool, Input: map[string]any{"ok": true}},
 			},
 		},
 	}}

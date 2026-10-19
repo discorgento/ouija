@@ -247,7 +247,7 @@ const (
 // (fail closed), so any unregistered tool is gated until classified.
 func toolRisk(name string) RiskTier {
 	switch name {
-	case "read_file", "grep", "glob", "list_dir", submitTool:
+	case "read_file", "grep", "glob", "list_dir", SubmitTool:
 		return RiskReadOnly
 	case "write_file", "edit_file", "delete_file", "bash":
 		return RiskWrite

@@ -32,7 +32,7 @@ func (t *tracker) Add(u Usage) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if u.InputTokens < 0 || u.OutputTokens < 0 {
-		return fmt.Errorf("budget: negative token count (input=%d output=%d)", u.InputTokens, u.OutputTokens)
+		return ErrBudget(fmt.Sprintf("budget: negative token count (input=%d output=%d)", u.InputTokens, u.OutputTokens))
 	}
 	t.tokens += u.InputTokens + u.OutputTokens
 	t.steps++

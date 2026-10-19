@@ -93,13 +93,23 @@ func TestConstructor_Names(t *testing.T) {
 		{ErrProvider, ErrCodeProvider},
 		{ErrBudget, ErrCodeBudget},
 		{ErrNetwork, ErrCodeNetwork},
-		{ErrPermission, ErrCodePermission},
-		{ErrSystem, ErrCodeSystem},
+		{ErrStream, ErrCodeStream},
 	}
 	for _, tt := range tests {
 		e := tt.fn("test")
 		if !Is(e, tt.code) {
 			t.Errorf("%T: Is = false, want true", tt.fn)
 		}
+	}
+}
+
+// Codes survive errors.Join and multi-%w wrapping.
+func TestCodeThroughJoin(t *testing.T) {
+	joined := errors.Join(errors.New("other"), ErrAuth("bad key"))
+	if !Is(joined, ErrCodeAuth) {
+		t.Error("Is lost the code through errors.Join")
+	}
+	if code, ok := Code(fmt.Errorf("a: %w, b: %w", errors.New("x"), ErrStream("cut"))); !ok || code != ErrCodeStream {
+		t.Errorf("Code through multi-%%w = %v, %v", code, ok)
 	}
 }

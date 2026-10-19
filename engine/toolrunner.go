@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"strconv"
 	"sync"
 )
 
@@ -98,26 +99,17 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	// Create a child span under the active parent (chat span), if any.
 	parent := SpanFromContext(ctx)
 	span := parent.StartChild("tool." + call.Name)
-	if span != nil {
-		span.SetAttr("tool", call.Name)
-		if p, ok := call.Input["path"].(string); ok {
-			span.SetAttr("path", p)
-		}
+	span.SetAttr("tool", call.Name) // spans are nil-safe
+	if p, ok := call.Input["path"].(string); ok {
+		span.SetAttr("path", p)
 	}
-	defer func() {
-		if span != nil {
-			span.End()
-		}
-	}()
+	defer span.End()
 
 	// ── Doom-loop detection ───────────────────────────────────────
 	doom := doomFromContext(ctx, r.doom)
-	if _, blocked := doom.Check(call.Name, call.Input); blocked {
-		if span != nil {
-			span.SetError("doom loop")
-		}
-		return ToolResult{Error: &ToolError{Code: ErrCodeDoomLoop, Message: "tool '" + call.Name +
-			"' was called 3 times in a row with identical input — blocked. " +
+	if doom.Check(call.Name, call.Input) {
+		span.SetError("doom loop")
+		return ToolResult{Error: &ToolError{Code: ErrCodeDoomLoop, Message: "tool '" + call.Name + "' was called " + strconv.Itoa(doomRepeatLimit) + " times in a row with identical input — blocked. " +
 			"Try a different approach or a different argument."}}
 	}
 
@@ -139,9 +131,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	if call.Name == "bash" {
 		if cmd, ok := call.Input["command"].(string); ok && cmd != "" {
 			if IsDenied(cmd) {
-				if span != nil {
-					span.SetError("denylist")
-				}
+				span.SetError("denylist")
 				return ToolResult{Error: &ToolError{
 					Code:    ErrCodeNotAllowed,
 					Message: "command matches a dangerous pattern and is blocked by the denylist.",
@@ -152,9 +142,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 				root = r.tools.Root()
 			}
 			if ref, found := commandRefsProtectedPathIn(root, cmd); found {
-				if span != nil {
-					span.SetError("protected path")
-				}
+				span.SetError("protected path")
 				return ToolResult{Error: &ToolError{
 					Code:    ErrCodeNotAllowed,
 					Message: "command references a protected path (" + ref + ") — credentials and system files are never reachable via bash.",
@@ -168,9 +156,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 		lvl := gate.permConfig.Check(call.Name, checkPath)
 		switch lvl {
 		case Deny:
-			if span != nil {
-				span.SetError("denied by config")
-			}
+			span.SetError("denied by config")
 			return errRejected("tool '" + call.Name + "' was denied by permission config")
 		case Ask:
 			if !r.bashPreApproved(call) {
@@ -189,9 +175,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					}
 				}
 				if gate.approvalMgr == nil {
-					if span != nil {
-						span.SetError("denied (no approval UI)")
-					}
+					span.SetError("denied (no approval UI)")
 					return errRejected("tool '" + call.Name + "' requires approval (no approval UI configured)")
 				}
 				result, aerr := gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), approvalInput)
@@ -199,9 +183,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					return errRejected(aerr.Error())
 				}
 				if !result.Allowed {
-					if span != nil {
-						span.SetError("rejected by user")
-					}
+					span.SetError("rejected by user")
 					if result.Cancelled {
 						return errRejected("The user CANCELLED your call to '" + call.Name + "'. You may try a different approach or ask for clarification.")
 					}
@@ -210,7 +192,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 				// Tool was already applied externally (e.g. editor) — skip execution.
 				if result.SkipExecution {
 					doom.ResetCount()
-					return ToolResult{Data: "✓ already applied via external editor", Mime: "text/plain"}
+					return ToolResult{Data: "✓ already applied via external editor"}
 				}
 				// Fresh human consent for this exact call: the allowlist does
 				// not get a second veto after the user said yes.
@@ -222,25 +204,18 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 			if call.Name == "bash" && r.allowlist.Restricts() {
 				cmd, _ := call.Input["command"].(string)
 				if cmd != "" && !r.allowlist.IsAllowed(cmd) {
-					if span != nil {
-						span.SetError("not in allowlist")
-					}
+					span.SetError("not in allowlist")
 					return allowlistError()
 				}
 			}
 		}
 	} else if isExtra {
-		risk := extraRisk[call.Name]
-		if risk == 0 {
-			risk = RiskReadOnly
-		}
-		if risk > RiskReadOnly {
+		if extraRisk[call.Name] > RiskReadOnly { // the zero RiskTier is RiskReadOnly
+			span.SetError("denied (write tier)")
 			return errRejected("tool '" + call.Name + "' requires approval (write tier) and was denied")
 		}
-	} else if !r.allowed(call.Name) {
-		if span != nil {
-			span.SetError("denied (write tier)")
-		}
+	} else if toolRisk(call.Name) != RiskReadOnly {
+		span.SetError("denied (write tier)")
 		return errRejected("tool '" + call.Name + "' requires approval (write tier) and was denied")
 	}
 
@@ -307,10 +282,4 @@ func approvalSessionKey(tool, absPath string, input map[string]any) string {
 func allowlistError() ToolResult {
 	return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "command is not in the bash allowlist. " +
 		"Add it to .ouija/config.json (tools.bash.allowlist) or approve it interactively in the TUI."}}
-}
-
-// allowed checks the risk-tier for built-in tools when no PermissionConfig is set.
-// Read-only tools are allowed; write/exec tools are denied.
-func (r *ToolRunner) allowed(name string) bool {
-	return toolRisk(name) == RiskReadOnly
 }

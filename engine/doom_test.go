@@ -90,7 +90,7 @@ func TestDoomLoopResetsOnNewRun(t *testing.T) {
 	// First run: make 2 identical calls (below threshold), then submit.
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello"), 0o644); err != nil {
@@ -109,7 +109,7 @@ func TestDoomLoopResetsOnNewRun(t *testing.T) {
 	// Second run: same single read_file — should work because getHandler resets doom.
 	mp2 := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	eng.SetProvider(mp2)
 

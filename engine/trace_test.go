@@ -156,7 +156,7 @@ func TestTracerRenderOutput(t *testing.T) {
 		"not found",
 		"123 in",
 		"456 out",
-		"2 spans",
+		"2 tool calls",
 	}
 	for _, c := range checks {
 		if !strings.Contains(output, c) {
@@ -370,4 +370,16 @@ func TestTracerNilRender(t *testing.T) {
 	var buf bytes.Buffer
 	tr.Render(&buf) // should not panic
 	tr.Reset()      // should not panic
+}
+
+// The total is wall time — first start to last end — not the longest root.
+func TestWallTime(t *testing.T) {
+	t0 := time.Now()
+	mk := func(start, dur time.Duration) *Span {
+		return &Span{Start: t0.Add(start), end: t0.Add(start + dur), ended: true}
+	}
+	roots := []*Span{mk(0, 2*time.Second), mk(2*time.Second, 3*time.Second), {Start: t0.Add(9 * time.Second)}}
+	if got := wallTime(roots); got != 5*time.Second {
+		t.Fatalf("wallTime = %v; want 5s (two sequential roots, one never ended)", got)
+	}
 }

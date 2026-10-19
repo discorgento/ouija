@@ -105,10 +105,8 @@ Every tool returns `ToolResult` (not a raw string):
 
 ```go
 type ToolResult struct {
-    Data     string     // text content for the model
-    Mime     string     // optional MIME type hint
-    Truncated bool      // content was truncated
-    Error    *ToolError // nil = success
+    Data  string     // text content for the model
+    Error *ToolError // nil = success
 }
 ```
 

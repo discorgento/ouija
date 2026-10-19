@@ -17,10 +17,8 @@ func (e *ToolError) Error() string { return fmt.Sprintf("%s: %s", e.Code, e.Mess
 // encoded as "ERROR: ..." text — now the agent loop can inspect Error
 // and react accordingly.
 type ToolResult struct {
-	Data      string     `json:"data,omitempty"`      // primary output text
-	Mime      string     `json:"mime,omitempty"`      // content type hint ("text/plain", "application/json")
-	Truncated bool       `json:"truncated,omitempty"` // output was capped
-	Error     *ToolError `json:"error,omitempty"`     // non-nil when the tool failed
+	Data  string     `json:"data,omitempty"`  // primary output text
+	Error *ToolError `json:"error,omitempty"` // non-nil when the tool failed
 }
 
 // String formats the ToolResult as text for the model.

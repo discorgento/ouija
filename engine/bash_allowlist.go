@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
@@ -101,17 +102,7 @@ func (w *BashAllowlist) IsAllowed(cmd string) bool {
 func (w *BashAllowlist) matchesLocked(args []string) bool {
 	for _, p := range w.patterns {
 		pw := strings.Fields(p)
-		if len(pw) == 0 || len(args) < len(pw) {
-			continue
-		}
-		match := true
-		for i := range pw {
-			if args[i] != pw[i] {
-				match = false
-				break
-			}
-		}
-		if !match {
+		if len(pw) == 0 || len(args) < len(pw) || !slices.Equal(args[:len(pw)], pw) {
 			continue
 		}
 		if len(pw) == 1 {

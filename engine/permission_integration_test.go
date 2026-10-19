@@ -13,7 +13,7 @@ import (
 func TestEngineNewPermissionAllow(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello"), 0o644); err != nil {
@@ -42,7 +42,7 @@ func TestEngineNewPermissionAllow(t *testing.T) {
 func TestEngineNewPermissionDeny(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"done": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"done": true}}}},
 	}}
 	eng := newTestEngine(mp, t.TempDir())
 
@@ -66,7 +66,7 @@ func TestEngineNewPermissionDeny(t *testing.T) {
 func TestEngineNewPermissionAskWithApproval(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("hello"), 0o644); err != nil {
@@ -101,7 +101,7 @@ func TestEngineNewPermissionAskWithApproval(t *testing.T) {
 func TestEngineNewPermissionAskDenied(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	eng := newTestEngine(mp, t.TempDir())
 
@@ -131,7 +131,7 @@ func TestEngineNewPermissionAskDenied(t *testing.T) {
 func TestEngineNewPermissionExtraTool(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "custom_tool", Input: map[string]any{"x": "y"}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
 	}}
 	eng := newTestEngine(mp, t.TempDir())
 
@@ -164,7 +164,7 @@ func TestEngineNewPermissionExtraTool(t *testing.T) {
 func TestEngineDeniesWriteTool(t *testing.T) {
 	mp := &mockProvider{responses: []ChatResponse{
 		{ToolCalls: []ToolCall{{ID: "1", Name: "delete_everything", Input: map[string]any{}}}},
-		{ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"done": true}}}},
+		{ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"done": true}}}},
 	}}
 	eng := newTestEngine(mp, t.TempDir())
 

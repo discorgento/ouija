@@ -9,12 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
-
-// regexpTimeout bounds how long a single regexp compilation may take.
-// Catches ReDoS / catastrophic backtracking from model-supplied patterns.
-const regexpTimeout = 2 * time.Second
 
 // maxToolBytes is a generous cap: trimming is lossless for analysis in practice,
 // it only avoids dumping huge binary/minified files into context.
@@ -224,7 +219,7 @@ func readFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	if err != nil {
 		return errNotFound(err.Error())
 	}
-	return ToolResult{Data: trim(string(b)), Mime: "text/plain"}
+	return ToolResult{Data: trim(string(b))}
 }
 
 func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
@@ -233,7 +228,9 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	if sub == "" {
 		sub = "."
 	}
-	re, err := compileRegex(pattern)
+	// Go regexps are RE2: matching is linear in the input, with no
+	// catastrophic backtracking, so a model-supplied pattern is safe to run.
+	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return errInvalidInput(err.Error())
 	}
@@ -283,7 +280,7 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 		if walkErr != nil {
 			return errInternal("grep: " + walkErr.Error())
 		}
-		return ToolResult{Data: "no matches", Mime: "text/plain"}
+		return ToolResult{Data: "no matches"}
 	}
 	if walkErr != nil {
 		out.WriteString(fmt.Sprintf("\n[walk error during search: %v]\n", walkErr))
@@ -291,7 +288,7 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	if matches >= maxGrepMatches {
 		out.WriteString(fmt.Sprintf("\n[match limit %d reached]\n", maxGrepMatches))
 	}
-	return ToolResult{Data: trim(out.String()), Mime: "text/plain", Truncated: matches >= maxGrepMatches}
+	return ToolResult{Data: trim(out.String())}
 }
 
 func globTool(ctx context.Context, root string, in map[string]any) ToolResult {
@@ -310,9 +307,9 @@ func globTool(ctx context.Context, root string, in map[string]any) ToolResult {
 		out.WriteString(rel + "\n")
 	}
 	if out.Len() == 0 {
-		return ToolResult{Data: "no matches", Mime: "text/plain"}
+		return ToolResult{Data: "no matches"}
 	}
-	return ToolResult{Data: trim(out.String()), Mime: "text/plain"}
+	return ToolResult{Data: trim(out.String())}
 }
 
 func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult {
@@ -336,7 +333,7 @@ func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult
 		}
 		out.WriteString(name + "\n")
 	}
-	return ToolResult{Data: trim(out.String()), Mime: "text/plain"}
+	return ToolResult{Data: trim(out.String())}
 }
 
 func skipPath(p string) bool {
@@ -346,40 +343,15 @@ func skipPath(p string) bool {
 	}
 	switch strings.ToLower(filepath.Ext(p)) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf", ".zip", ".gz", ".tar",
-		".woff", ".woff2", ".ttf", ".ico", ".mp4", ".lock", ".min.js", ".map":
+		".woff", ".woff2", ".ttf", ".ico", ".mp4", ".lock", ".map":
 		return true
 	}
-	return false
-}
-
-// compileRegex compiles a regexp with a timeout to guard against ReDoS
-// (catastrophic backtracking) from model-supplied patterns.
-func compileRegex(pattern string) (*regexp.Regexp, error) {
-	type result struct {
-		re  *regexp.Regexp
-		err error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				ch <- result{nil, fmt.Errorf("regexp compilation panicked: %v", r)}
-			}
-		}()
-		re, err := regexp.Compile(pattern)
-		ch <- result{re, err}
-	}()
-	select {
-	case r := <-ch:
-		return r.re, r.err
-	case <-time.After(regexpTimeout):
-		return nil, fmt.Errorf("regexp compilation timed out after %v (pattern too complex)", regexpTimeout)
-	}
+	return strings.HasSuffix(strings.ToLower(p), ".min.js") // Ext sees only ".js"
 }
 
 func trim(s string) string {
 	if len(s) <= maxToolBytes {
 		return s
 	}
-	return s[:maxToolBytes] + fmt.Sprintf("\n\n…[trimmed: %d more bytes]", len(s)-maxToolBytes)
+	return strings.ToValidUTF8(s[:maxToolBytes], "") + fmt.Sprintf("\n\n…[trimmed: %d more bytes]", len(s)-maxToolBytes)
 }

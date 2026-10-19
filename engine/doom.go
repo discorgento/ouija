@@ -20,11 +20,13 @@ type DoomDetector struct {
 	repeat int
 }
 
-// Check records a tool call and returns (repeat, blocked).
-// repeat is how many times this identical call has been seen in a row.
-// blocked is true when repeat >= 3 (the call should be rejected).
-// Blocked calls are still counted so the model doesn't reset by calling again.
-func (d *DoomDetector) Check(name string, input map[string]any) (repeat int, blocked bool) {
+// doomRepeatLimit is how many identical calls in a row count as a loop.
+const doomRepeatLimit = 3
+
+// Check records a tool call and reports whether it must be blocked: the same
+// tool with the same input doomRepeatLimit times in a row. Blocked calls are
+// still counted, so calling again does not reset the streak.
+func (d *DoomDetector) Check(name string, input map[string]any) (blocked bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -37,15 +39,7 @@ func (d *DoomDetector) Check(name string, input map[string]any) (repeat int, blo
 		d.repeat = 1
 	}
 
-	return d.repeat, d.repeat >= 3
-}
-
-// Reset zeroes all state. Called before each new agent run.
-func (d *DoomDetector) Reset() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.last = doomCall{}
-	d.repeat = 0
+	return d.repeat >= doomRepeatLimit
 }
 
 // ResetCount zeroes the repeat counter without clearing the last call.

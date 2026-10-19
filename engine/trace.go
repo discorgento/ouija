@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -155,109 +156,97 @@ func (t *Tracer) Reset() {
 //	├─ read_file   src/User.php                0.8s  ✓
 //	├─ grep        getUsers()                  1.2s  ✓
 //	└─ edit_file   src/User.php                0.3s  ✗
-//
-// Render prints the span tree to w as a formatted tree with durations.
 func (t *Tracer) Render(w io.Writer) {
 	if s := t.RenderString(); s != "" {
 		fmt.Fprintln(w, s)
 	}
 }
 
-// RenderLastRootString renders the latest turn (all root spans from one
-// Chat() call) into a compact tree. The ReAct loop creates one root per
-// iteration — tool-calling iterations first, then a final text-only response.
-// Useful for showing per-turn trace in a TUI.
-func (t *Tracer) RenderLastRootString() string {
+// snapshot copies the recorded roots; nil when inactive or empty.
+func (t *Tracer) snapshot() []*Span {
 	if t == nil || !t.active {
-		return ""
+		return nil
 	}
 	t.mu.Lock()
-	n := len(t.roots)
-	if n == 0 {
-		t.mu.Unlock()
-		return ""
-	}
-	// Copy all roots that belong to the current turn. The tracer is never
-	// reset between Chat() calls (only Close()), so the full accumulated
-	// list is the current turn's span tree.
-	roots := append([]*Span(nil), t.roots...)
-	t.mu.Unlock()
-
-	// Calculate total duration from the last root (final response).
-	last := roots[n-1]
-	totalDur := last.Duration()
-
-	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("\n  ⭑  last turn  (%s)\n", totalDur.Round(time.Millisecond)))
-
-	for i, s := range roots {
-		isLast := i == len(roots)-1
-		buf.WriteString(renderSpanString(s, "", isLast))
-	}
-
-	// Summarize tools used across ALL root spans (the last root is just
-	// the final text-only response — tools live in earlier roots).
-	tools := make(map[string]int)
-	for _, r := range roots {
-		gatherToolNames([]*Span{r}, tools)
-	}
-	if len(tools) > 0 {
-		names := make([]string, 0, len(tools))
-		for n := range tools {
-			names = append(names, n)
-		}
-		slices.Sort(names)
-		var parts []string
-		for _, n := range names {
-			c := tools[n]
-			if c == 1 {
-				parts = append(parts, n)
-			} else {
-				parts = append(parts, fmt.Sprintf("%s(%d)", n, c))
-			}
-		}
-		buf.WriteString(fmt.Sprintf("  🛠️ %s\n", strings.Join(parts, ", ")))
-	} else {
-		buf.WriteString("  💬 response\n")
-	}
-	return buf.String()
+	defer t.mu.Unlock()
+	return slices.Clone(t.roots)
 }
 
-// RenderString returns the span tree as a string (no trailing newline).
-// Returns empty string when there is nothing to render.
-// The output has no ANSI codes — suitable for embedding in GUIs/TUIs.
-func (t *Tracer) RenderString() string {
-	if t == nil || !t.active {
-		return ""
+// wallTime is the time from the first root's start to the last root's end.
+// The roots of a run are sequential ReAct iterations (or parallel passes), so
+// neither the longest root nor the sum of their durations is the elapsed time.
+func wallTime(roots []*Span) time.Duration {
+	var first, last time.Time
+	for _, r := range roots {
+		d := r.Duration()
+		if d == 0 {
+			continue // never ended
+		}
+		if first.IsZero() || r.Start.Before(first) {
+			first = r.Start
+		}
+		if end := r.Start.Add(d); end.After(last) {
+			last = end
+		}
 	}
-	t.mu.Lock()
-	roots := append([]*Span(nil), t.roots...)
-	t.mu.Unlock()
+	return last.Sub(first)
+}
 
+// renderTree writes the header and every root's tree.
+func renderTree(buf *strings.Builder, title string, roots []*Span, total time.Duration) {
+	fmt.Fprintf(buf, "\n  ⭑  %s  (%s)\n", title, total.Round(time.Millisecond))
+	for i, s := range roots {
+		buf.WriteString(renderSpanString(s, "", i == len(roots)-1))
+	}
+}
+
+// RenderLastRootString renders the spans recorded since the last Reset — the
+// chat resets after each response, so that is the latest turn (one root per
+// ReAct iteration) — into a compact tree. Useful for a per-turn trace in a TUI.
+func (t *Tracer) RenderLastRootString() string {
+	roots := t.snapshot()
 	if len(roots) == 0 {
 		return ""
 	}
+	var buf strings.Builder
+	renderTree(&buf, "last turn", roots, wallTime(roots))
 
-	// Calculate total duration.
-	var total time.Duration
-	for _, r := range roots {
-		d := r.Duration()
-		if d > total {
-			total = d
+	tools := make(map[string]int)
+	gatherToolNames(roots, tools)
+	if len(tools) == 0 {
+		buf.WriteString("  💬 response\n")
+		return buf.String()
+	}
+	var parts []string
+	for _, n := range slices.Sorted(maps.Keys(tools)) {
+		if c := tools[n]; c > 1 {
+			parts = append(parts, fmt.Sprintf("%s(%d)", n, c))
+		} else {
+			parts = append(parts, n)
 		}
 	}
+	fmt.Fprintf(&buf, "  🛠️ %s\n", strings.Join(parts, ", "))
+	return buf.String()
+}
 
-	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("\n  ⭑  trace  (%s)\n", total.Round(time.Millisecond)))
-
-	for i, s := range roots {
-		isLast := i == len(roots)-1
-		buf.WriteString(renderSpanString(s, "", isLast))
+// RenderString returns the span tree as a string, or "" when there is nothing
+// to render. The output has no ANSI codes — suitable for embedding in TUIs.
+func (t *Tracer) RenderString() string {
+	roots := t.snapshot()
+	if len(roots) == 0 {
+		return ""
 	}
+	total := wallTime(roots)
+	var buf strings.Builder
+	renderTree(&buf, "trace", roots, total)
 
-	toolCount := countTools(roots)
-	buf.WriteString(fmt.Sprintf("  %d spans · %s total\n", toolCount, total.Round(time.Millisecond)))
-
+	tools := make(map[string]int)
+	gatherToolNames(roots, tools)
+	calls := 0
+	for _, c := range tools {
+		calls += c
+	}
+	fmt.Fprintf(&buf, "  %d tool calls · %s total\n", calls, total.Round(time.Millisecond))
 	return buf.String()
 }
 
@@ -344,17 +333,6 @@ func durStr(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
-func countTools(spans []*Span) int {
-	n := 0
-	for _, s := range spans {
-		if strings.HasPrefix(s.Name, "tool.") {
-			n++
-		}
-		n += countTools(s.Children)
-	}
-	return n
-}
-
 // gatherToolNames collects tool names and their counts from all spans.
 func gatherToolNames(spans []*Span, out map[string]int) {
 	for _, s := range spans {
@@ -402,13 +380,9 @@ func (t *Tracer) WritePerfetto(w io.Writer) error {
 	if t == nil || !t.active {
 		return nil
 	}
-	t.mu.Lock()
-	roots := append([]*Span(nil), t.roots...)
-	t.mu.Unlock()
-
 	var events []perfettoEvent
 	pid := 1
-	for _, r := range roots {
+	for _, r := range t.snapshot() {
 		flattenPerfetto(r, pid, 0, &events)
 	}
 
