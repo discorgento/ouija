@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -117,32 +118,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// Task is optional — if the next argument looks like a flag, there's no task.
-	task := ""
-	flagStart := 2
-	if len(args) >= 3 && !strings.HasPrefix(args[2], "-") {
-		task = args[2]
-		flagStart = 3
-	}
-
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "path to a JSON config")
-	traceFile := fs.String("trace-file", "", "path to write Perfetto JSON trace")
-	jsonOut := fs.Bool("json", false, "print the raw JSON result")
-	params := registry.ParamsFlag{}
-	fs.Var(params, "set", "named input key=value (repeatable; JSON values allowed)")
-	if err := fs.Parse(args[flagStart:]); err != nil {
+	totemArgs, flags, err := app.ParseTotemArgs(name, args[2:], stderr)
+	if err != nil {
 		return 2
-	}
-	if task != "" {
-		params["task"] = task
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	out, runErr := app.Run(ctx, name, registry.Args{Task: task, Params: params}, *configPath, true, *traceFile)
+	out, runErr := app.Run(ctx, name, totemArgs, flags.ConfigPath, true, flags.TraceFile)
 	if out != nil && out.ConfigPath != "" {
 		fmt.Fprintf(stderr, "[ouija] config: %s\n", out.ConfigPath)
 	}
@@ -158,7 +142,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *jsonOut {
+	if flags.JSON {
 		b, _ := json.MarshalIndent(out.Result, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 	} else {
@@ -228,22 +212,7 @@ func cmdChat(args []string, stderr io.Writer) int {
 	}
 
 	eng := out.Engine
-	cfg := out.Config
-
-	system := "You are ouija, a project-aware AI assistant. " +
-		"Use the available tools to read files, search the codebase, and answer questions. " +
-		"Be concise and direct. Project rules:\n- " + strings.Join(cfg.Rules, "\n- ")
-
-	if cfg.ProjectRoot != "" {
-		system += "\n\nProject root: " + cfg.ProjectRoot
-	}
-
-	// Load project knowledge.
-	if known := knowledge.Load("."); known != "" {
-		system += "\n\n## Known project facts\n" + known
-	}
-
-	chat.Run(eng, app.BuildProviderByName, system, out.ConfigPath)
+	chat.Run(eng, app.BuildProviderByName, chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath)
 
 	// Chat's default trace: the whole session's span tree.
 	eng.Tracer().Render(stderr)
@@ -270,7 +239,7 @@ func cmdMcp(args []string, stdout, stderr io.Writer) int {
 	case "serve":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := mcp.Serve(ctx, os.Stdin, os.Stdout); err != nil {
+		if err := mcp.Serve(ctx, os.Stdin, stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
@@ -291,4 +260,22 @@ func cmdMcp(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown mcp subcommand: %s\n\n  ouija mcp [serve|install|status]\n", sub)
 		return 2
 	}
+}
+
+// chatSystemPrompt is the chat's system message: the configured systemPrompt,
+// then the project rules, root and the facts `ouija learn` recorded.
+func chatSystemPrompt(cfg *engine.Config, known string) string {
+	var b strings.Builder
+	b.WriteString(cmp.Or(cfg.SystemPrompt, "You are ouija, a project-aware AI assistant. "+
+		"Use the available tools to read files, search the codebase, and answer questions."))
+	if len(cfg.Rules) > 0 {
+		b.WriteString("\n\nProject rules:\n- " + strings.Join(cfg.Rules, "\n- "))
+	}
+	if cfg.ProjectRoot != "" {
+		b.WriteString("\n\nProject root: " + cfg.ProjectRoot)
+	}
+	if known != "" {
+		b.WriteString("\n\n## Known project facts\n" + known)
+	}
+	return b.String()
 }

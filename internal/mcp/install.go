@@ -115,12 +115,17 @@ type HarnessState struct {
 	Err       error
 }
 
-// Check reports the state of every supported harness, in a stable order.
+// Check reports the state of every supported harness, in a stable order; nil
+// when the home directory (where every harness keeps its config) is unknown.
 func Check() []HarnessState {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
+	return checkIn(home)
+}
+
+func checkIn(home string) []HarnessState {
 	hs := harnesses(home)
 	states := make([]HarnessState, 0, len(hs))
 	for _, h := range hs {
@@ -144,19 +149,16 @@ func Status(w io.Writer) error {
 	fmt.Fprintln(w, "🔌  ouija mcp — harness status")
 	fmt.Fprintln(w)
 
-	for _, h := range harnesses(home) {
-		if !h.detect() {
-			fmt.Fprintf(w, "  %-12s – not installed\n", h.name)
-			continue
-		}
-		registered, err := h.check()
+	for _, st := range checkIn(home) {
 		switch {
-		case err != nil:
-			fmt.Fprintf(w, "  %-12s ✗ %v\n", h.name, err)
-		case registered:
-			fmt.Fprintf(w, "  %-12s ✓ connected\n", h.name)
+		case !st.Installed:
+			fmt.Fprintf(w, "  %-12s – not installed\n", st.Name)
+		case st.Err != nil:
+			fmt.Fprintf(w, "  %-12s ✗ %v\n", st.Name, st.Err)
+		case st.Connected:
+			fmt.Fprintf(w, "  %-12s ✓ connected\n", st.Name)
 		default:
-			fmt.Fprintf(w, "  %-12s – not connected  (run: ouija mcp install)\n", h.name)
+			fmt.Fprintf(w, "  %-12s – not connected  (run: ouija mcp install)\n", st.Name)
 		}
 	}
 	return nil

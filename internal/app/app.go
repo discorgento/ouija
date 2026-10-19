@@ -74,9 +74,13 @@ func findConfigFile(explicit string) (*engine.Config, string, error) {
 		for _, rel := range []string{".ouija/config.json", ".ouija.json", "ouija.json"} {
 			p := filepath.Join(dir, rel)
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
-				if c, err := LoadProjectConfig(p); err == nil {
-					return c, p, nil
+				// A broken file is an error: silently skipping it would run
+				// with the parent's or the global config instead.
+				c, err := LoadProjectConfig(p)
+				if err != nil {
+					return nil, "", fmt.Errorf("%s: %w", p, err)
 				}
+				return c, p, nil
 			}
 		}
 		parent := filepath.Dir(dir)
@@ -160,13 +164,14 @@ func applyProjectConfig(cfg *engine.Config, projectCfg *engine.Config, cfgPath s
 	if projectCfg.ModelSuggestions != nil {
 		cfg.ModelSuggestions = projectCfg.ModelSuggestions
 	}
-	if def := engine.DefaultConfig(); projectCfg.MaxNudges != def.MaxNudges {
+	def := engine.DefaultConfig()
+	if projectCfg.MaxNudges != def.MaxNudges {
 		cfg.MaxNudges = projectCfg.MaxNudges
 	}
-	if def := engine.DefaultConfig(); projectCfg.StreamTimeout != def.StreamTimeout {
+	if projectCfg.StreamTimeout != def.StreamTimeout {
 		cfg.StreamTimeout = projectCfg.StreamTimeout
 	}
-	if def := engine.DefaultConfig(); projectCfg.SystemPrompt != def.SystemPrompt {
+	if projectCfg.SystemPrompt != def.SystemPrompt {
 		cfg.SystemPrompt = projectCfg.SystemPrompt
 	}
 
@@ -248,15 +253,8 @@ func BuildProvider(name, apiKey string) (engine.Provider, error) {
 // builds the provider. It is the name-only variant used by the interactive
 // chat's `/provider` switch, which has no project config key at hand.
 func BuildProviderByName(name string) (engine.Provider, error) {
-	if err := validateProviderName(name); err != nil {
-		return nil, err
-	}
-	key := ""
-	if globalCfg, _ := ouijaconfig.Load(); globalCfg != nil {
-		key = globalCfg.APIKeys[name]
-	}
-	p, _ := providers.Build(name, key)
-	return p, nil
+	globalCfg, _ := ouijaconfig.Load()
+	return BuildProvider(name, resolveAPIKey(name, globalCfg, nil))
 }
 
 // Run discovers config, builds the engine, initialises the totem, runs it,

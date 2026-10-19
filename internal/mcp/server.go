@@ -105,18 +105,15 @@ func (s *Server) SetConfigPath(path string) error {
 	return nil
 }
 
-// Logf lets callers (like cmd/ouija-mcp) emit diagnostics through the same
-// stderr logger the server uses internally.
-func (s *Server) Logf(f string, a ...any) {
-	s.logf(f, a...)
-}
-
 // resolveProjectRoot resolves the sandbox root. Doing this here rather than in
 // init() keeps file I/O out of process startup, so a usage error can still be
 // reported before any config lookup.
 func resolveProjectRoot(configPath string) (string, error) {
 	root := ""
 	cfg, _, err := app.DiscoverConfig(configPath)
+	if err != nil && configPath != "" {
+		return "", err // the path was asked for: don't fall back to the cwd
+	}
 	if err == nil && cfg.ProjectRoot != "." {
 		root = cfg.ProjectRoot
 	} else {
@@ -129,15 +126,8 @@ func resolveProjectRoot(configPath string) (string, error) {
 	return filepath.Abs(root)
 }
 
-// Serve reads newline-delimited JSON-RPC requests from in and writes responses
-// to out until in reaches EOF.
-func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
-	return s.Run(ctx, in, out)
-}
-
-// Run is the in-process entry point used by tests and cmd/ouija-mcp.
-// It reads from in, writes to out, and logs via s.logf.
-// Returns when in reaches EOF or an error occurs. Tool calls still running
+// Run reads newline-delimited JSON-RPC requests from in and writes responses
+// to out, logging via s.logf, until in reaches EOF or a read fails. Tool calls still running
 // then are cancelled (the client is gone; stop spending budget), and Run waits
 // for them, so nothing writes to out after it returns.
 func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -162,17 +152,18 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	}
 }
 
-// Serve runs the stdio server on in/out, logging to stderr, until in reaches
-// EOF. This is what a harness launches for `ouija mcp`.
-func Serve(ctx context.Context, in io.Reader, out io.Writer) error {
+// Serve runs the stdio server on in/out until in reaches EOF, writing
+// diagnostics to logw (stdout belongs to the protocol). This is what a harness
+// launches for `ouija mcp` and `ouija-mcp`.
+func Serve(ctx context.Context, in io.Reader, out, logw io.Writer) error {
 	srv, err := New(func(f string, a ...any) {
-		fmt.Fprintf(os.Stderr, "[ouija-mcp] "+f+"\n", a...)
+		fmt.Fprintf(logw, "[ouija-mcp] "+f+"\n", a...)
 	})
 	if err != nil {
 		return err
 	}
-	srv.logf("%s started (%d modules)", srv.name, len(registry.List()))
-	return srv.Serve(ctx, in, out)
+	srv.logf("%s started (%d totems)", srv.name, len(registry.List()))
+	return srv.Run(ctx, in, out)
 }
 
 type rpcRequest struct {
@@ -496,14 +487,4 @@ func rawID(id json.RawMessage) any {
 		return nil
 	}
 	return id
-}
-
-// ServerName returns the default MCP server name (the ouija CLI identity).
-func ServerName() string {
-	return defaultName
-}
-
-// ListTotems returns the registered totems.
-func ListTotems() []registry.Totem {
-	return registry.List()
 }

@@ -337,25 +337,3 @@ func TestWrite_FramingIsOneLinePerMessage(t *testing.T) {
 		t.Error("newline inside the value was not escaped")
 	}
 }
-
-func TestServerName(t *testing.T) {
-	if ServerName() != "ouija" {
-		t.Errorf("ServerName() = %q, want \"ouija\"", ServerName())
-	}
-}
-
-func TestListTotems(t *testing.T) {
-	totems := ListTotems()
-	if len(totems) == 0 {
-		t.Fatal("ListTotems() = 0, want at least the built-in totems")
-	}
-	names := make(map[string]bool)
-	for _, t := range totems {
-		names[t.Name()] = true
-	}
-	for _, want := range []string{"doc", "sticker", "task"} {
-		if !names[want] {
-			t.Errorf("ListTotems() missing %q: %v", want, totems)
-		}
-	}
-}

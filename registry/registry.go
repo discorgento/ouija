@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -180,10 +181,7 @@ func Render(v any) string {
 	return string(b)
 }
 
-var (
-	totems = map[string]Totem{}
-	order  []string
-)
+var totems = map[string]Totem{}
 
 // legacyInitializer is the Init signature from before Initializer: a totem
 // that still has it would compile and then silently skip its setup.
@@ -199,9 +197,6 @@ func Register(t Totem) {
 		panic(fmt.Sprintf("registry: totem %q: Init(ctx, eng, cfg) is the old signature — "+
 			"use Init(ctx context.Context, eng *engine.Engine) error (the config is eng.Config())", t.Name()))
 	}
-	if _, dup := totems[t.Name()]; !dup {
-		order = append(order, t.Name())
-	}
 	totems[t.Name()] = t
 }
 
@@ -213,8 +208,7 @@ func Get(name string) (Totem, bool) {
 
 // List returns all registered totems, sorted by name.
 func List() []Totem {
-	names := append([]string(nil), order...)
-	slices.Sort(names)
+	names := slices.Sorted(maps.Keys(totems))
 	out := make([]Totem, 0, len(names))
 	for _, n := range names {
 		out = append(out, totems[n])
@@ -227,11 +221,9 @@ func List() []Totem {
 // a host that embeds its own totems gets its own list, with no ouija CLI
 // assumptions baked in.
 func Help() string {
-	names := append([]string(nil), order...)
-	slices.Sort(names)
 	var b strings.Builder
 	b.WriteString("◆ Totems\n")
-	for _, n := range names {
+	for _, n := range slices.Sorted(maps.Keys(totems)) {
 		fmt.Fprintf(&b, "      %-8s %s\n", n, totems[n].Summary())
 	}
 	return b.String()

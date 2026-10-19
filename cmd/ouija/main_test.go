@@ -260,3 +260,16 @@ func TestRun_Doctor(t *testing.T) {
 		t.Errorf("stdout = %q, want it to point at `ouija setup`", stdout)
 	}
 }
+
+func TestChatSystemPrompt(t *testing.T) {
+	cfg := &engine.Config{SystemPrompt: "Base.", Rules: []string{"r1", "r2"}, ProjectRoot: "/p"}
+	got := chatSystemPrompt(cfg, "fact A")
+	for _, want := range []string{"Base.", "- r1\n- r2", "Project root: /p", "## Known project facts\nfact A"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, got)
+		}
+	}
+	if got := chatSystemPrompt(&engine.Config{}, ""); !strings.HasPrefix(got, "You are ouija") || strings.Contains(got, "rules") {
+		t.Errorf("empty config prompt = %q", got)
+	}
+}

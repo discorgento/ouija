@@ -3,15 +3,14 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 
+	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/registry"
 )
 
@@ -69,50 +68,41 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 		return 1
 	}
 
-	// The task is the first argument when it is not a flag.
-	task, rest := "", argv[2:]
-	if len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
-		task, rest = rest[0], rest[1:]
-	}
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	jsonOut := fs.Bool("json", false, "print the raw JSON result")
-	configPath := fs.String("config", "", "path to a JSON config")
-	params := registry.ParamsFlag{}
-	fs.Var(params, "set", "named input key=value (repeatable; JSON values allowed)")
-	if err := fs.Parse(rest); err != nil {
+	totemArgs, flags, err := app.ParseTotemArgs(name, argv[2:], stderr)
+	if err != nil {
 		return 2
 	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "unexpected argument %q (quote the task, pass inputs as --set key=value)\n", fs.Arg(0))
-		return 2
+	if flags.ConfigPath != "" {
+		opts = append(opts, WithConfigPath(flags.ConfigPath))
 	}
-	if task != "" {
-		params["task"] = task
-	}
-	if *configPath != "" {
-		opts = append(opts, WithConfigPath(*configPath))
+	if flags.TraceFile != "" {
+		opts = append(opts, WithTrace(true))
 	}
 
-	app, err := Setup(ctx, opts...)
+	a, err := Setup(ctx, opts...)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	defer app.Engine.Close()
+	defer a.Engine.Close()
 
-	out, err := app.Run(ctx, name, registry.Args{Task: task, Params: params})
+	out, err := a.Run(ctx, name, totemArgs)
+	if flags.TraceFile != "" {
+		if terr := a.Engine.Tracer().WritePerfettoFile(flags.TraceFile); terr != nil {
+			fmt.Fprintf(stderr, "trace file: %v\n", terr)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if *jsonOut {
+	if flags.JSON {
 		b, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 	} else {
 		fmt.Fprintln(stdout, registry.Render(out))
 	}
-	tokens, steps, usd := app.Engine.Spent()
-	fmt.Fprintf(stderr, "\n%s · %d tokens · %d steps · $%.2f\n", app.Config.Model, tokens, steps, usd)
+	tokens, steps, usd := a.Engine.Spent()
+	fmt.Fprintf(stderr, "\n%s · %d tokens · %d steps · $%.2f\n", a.Config.Model, tokens, steps, usd)
 	return 0
 }

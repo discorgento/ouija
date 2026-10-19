@@ -106,5 +106,5 @@ func (a *App) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
 			return fmt.Errorf("mcp: %w", err)
 		}
 	}
-	return srv.Serve(ctx, in, out)
+	return srv.Run(ctx, in, out)
 }

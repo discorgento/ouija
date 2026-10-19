@@ -206,3 +206,12 @@ func TestToolCallPassesParams(t *testing.T) {
 		t.Fatalf("args = %+v", got)
 	}
 }
+
+// An explicit config path that cannot be loaded is an error, not a silent
+// fallback to the working directory.
+func TestSetConfigPathMissingFile(t *testing.T) {
+	s := testServer(t.TempDir())
+	if err := s.SetConfigPath(t.TempDir() + "/missing.json"); err == nil {
+		t.Fatal("SetConfigPath(missing) = nil; want an error")
+	}
+}

@@ -26,17 +26,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	srv, err := mcp.New(func(f string, a ...any) {
-		fmt.Fprintf(os.Stderr, "[ouija-mcp] "+f+"\n", a...)
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ouija-mcp] %v\n", err)
-		os.Exit(1)
-	}
-	srv.Logf("%s started (%d modules)", mcp.ServerName(), len(mcp.ListTotems()))
-
-	if err := srv.Run(ctx, os.Stdin, os.Stdout); err != nil {
+	if err := mcp.Serve(ctx, os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "[ouija-mcp] %v\n", err)
 		os.Exit(1)
 	}
