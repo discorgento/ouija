@@ -55,10 +55,8 @@ jobs:
         run: make build
 
   # The release ships darwin and windows binaries, and the sandbox, symlink,
-  # permission and bash code is OS-sensitive, so the tests run there too.
-  # Non-blocking until these OSes are known green (the suite was only ever run
-  # on Linux): failures show on the run without turning main red. Drop
-  # continue-on-error to make them a gate.
+  # permission and bash code is OS-sensitive, so the tests run there too — as
+  # a gate: a failure there turns the run red like one on Linux.
   test-os:
     name: test (${{ matrix.os }})
     strategy:
@@ -66,7 +64,6 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
