@@ -75,6 +75,22 @@ ouija learn                     # show current knowledge
 Saves to `docs/knowledge.md` relative to the current directory. Facts are
 injected into the `task` scout and the chat system prompt.
 
+## Live progress
+
+On a terminal, a totem's run is drawn live on stderr: one line per model run
+(the scout, each pass, the reconcile) with a spinner while it runs, then `✓` or
+`✗` with its time and why it failed, under a header with the elapsed time,
+tokens and cost so far. Logs print above it. Piped or redirected, stderr gets
+no board — only the logs and the stats below.
+
+```
+  ouija task  ·  1m12s  ·  48.2k tok  ·  $0.21
+  ✓ scout             8.1s
+  ✓ p1:correctness   21.4s
+  ⣾ p1:risks         18.0s
+  ✗ p2:risks          3.1s  budget exceeded
+```
+
 ## Per-run stats
 
 Stats printed to stderr after completion:

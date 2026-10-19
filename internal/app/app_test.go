@@ -428,7 +428,7 @@ func TestRun_LifecycleInitRunCleanup(t *testing.T) {
 	f := &fakeTotem{name: "app-test-lifecycle"}
 	registry.Register(f)
 
-	out, err := Run(context.Background(), f.Name(), registry.Args{Task: "do the thing"}, cfgPath, false, "")
+	out, err := Run(context.Background(), f.Name(), registry.Args{Task: "do the thing"}, cfgPath, false, "", nil)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
@@ -446,7 +446,7 @@ func TestRun_LifecycleInitRunCleanup(t *testing.T) {
 func TestRun_UnknownTotem(t *testing.T) {
 	isolateGlobalConfig(t)
 
-	if _, err := Run(context.Background(), "totem-that-does-not-exist", registry.Args{}, "", false, ""); err == nil {
+	if _, err := Run(context.Background(), "totem-that-does-not-exist", registry.Args{}, "", false, "", nil); err == nil {
 		t.Fatal("Run() error = nil for an unknown totem, want an error")
 	}
 }
@@ -462,7 +462,7 @@ func TestRun_InitErrorStillCleansUp(t *testing.T) {
 	f := &fakeTotem{name: "app-test-init-error", initErr: errors.New("boom")}
 	registry.Register(f)
 
-	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "")
+	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "", nil)
 	if err == nil {
 		t.Fatal("Run() error = nil after an Init failure, want an error")
 	}
@@ -487,7 +487,7 @@ func TestRun_CleanupErrorIsReported(t *testing.T) {
 	f := &fakeTotem{name: "app-test-cleanup-error", cleanupErr: errors.New("cleanup boom")}
 	registry.Register(f)
 
-	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "")
+	_, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "", nil)
 	if err == nil {
 		t.Fatal("Run() error = nil after a Cleanup failure, want an error")
 	}
@@ -614,5 +614,29 @@ func TestSetupEngineContextWindow(t *testing.T) {
 			t.Errorf("%s: window %d, want %d", body, got, want)
 		}
 		out.Engine.Close()
+	}
+}
+
+// recordingProgress records the order of its calls against the totem's run.
+type recordingProgress struct{ calls []string }
+
+func (p *recordingProgress) Start(*engine.Engine) { p.calls = append(p.calls, "start") }
+func (p *recordingProgress) Stop()                { p.calls = append(p.calls, "stop") }
+
+// The progress watcher brackets the totem's run.
+func TestRun_ProgressBracketsTheRun(t *testing.T) {
+	isolateGlobalConfig(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, cfgPath, minimalConfig)
+	f := &fakeTotem{name: "app-test-progress"}
+	registry.Register(f)
+
+	p := &recordingProgress{}
+	if _, err := Run(context.Background(), f.Name(), registry.Args{Task: "x"}, cfgPath, false, "", p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(p.calls, ",") != "start,stop" || !f.ran {
+		t.Fatalf("calls = %v, ran = %v", p.calls, f.ran)
 	}
 }

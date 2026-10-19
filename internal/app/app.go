@@ -309,7 +309,10 @@ func (o *Outcome) ProviderFactory() func(name string) (engine.Provider, error) {
 // callers can still report token/cost stats); only setup errors return nil.
 // The span tree is always rendered to stderr (tracer no-op when inactive).
 // trace enables the tracer; traceFile writes a Perfetto-compatible JSON export.
-func Run(ctx context.Context, name string, args registry.Args, configPath string, trace bool, traceFile string) (*Outcome, error) {
+//
+// progress, when not nil, watches the run (the CLI's live board); it is
+// stopped before the span tree is printed.
+func Run(ctx context.Context, name string, args registry.Args, configPath string, trace bool, traceFile string, progress Progress) (*Outcome, error) {
 	mod, ok := registry.Get(name)
 	if !ok {
 		return nil, fmt.Errorf("unknown totem: %s", name)
@@ -321,12 +324,25 @@ func Run(ctx context.Context, name string, args registry.Args, configPath string
 
 	// Lifecycle (required inputs → Init → Run → Cleanup) lives in Invoke, so
 	// every host runs totems the same way.
+	if progress != nil {
+		progress.Start(out.Engine)
+	}
 	res, runErr := registry.Invoke(ctx, out.Engine, mod, args)
+	if progress != nil {
+		progress.Stop()
+	}
 	out.Result = res
 
 	FinishTrace(out.Engine.Tracer(), os.Stderr, traceFile)
 	out.Engine.Close()
 	return out, runErr
+}
+
+// Progress watches a totem run: Start is called with its engine before the
+// totem runs, Stop once it returned.
+type Progress interface {
+	Start(eng *engine.Engine)
+	Stop()
 }
 
 // FinishTrace renders the span tree to w and, when file is set, writes the

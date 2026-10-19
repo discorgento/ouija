@@ -22,6 +22,7 @@ import (
 	"github.com/discorgento/ouija/internal/commands"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/mcp"
+	"github.com/discorgento/ouija/internal/progress"
 	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/internal/version"
 	"github.com/discorgento/ouija/registry"
@@ -153,7 +154,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	out, runErr := app.Run(ctx, name, totemArgs, flags.ConfigPath, true, flags.TraceFile)
+	// On a terminal the run is drawn live (a nil interface, not a nil *Board,
+	// when it is not).
+	var board app.Progress
+	if progress.Enabled(stderr) {
+		board = progress.New(stderr, name)
+	}
+	out, runErr := app.Run(ctx, name, totemArgs, flags.ConfigPath, true, flags.TraceFile, board)
 	if out != nil && out.ConfigPath != "" {
 		fmt.Fprintf(stderr, "[ouija] config: %s\n", out.ConfigPath)
 	}

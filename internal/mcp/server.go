@@ -330,7 +330,7 @@ func (s *Server) runTotem(ctx context.Context, totem string, args registry.Args)
 	if s.run != nil {
 		return s.run(ctx, totem, args)
 	}
-	outcome, err := app.Run(ctx, totem, args, s.configPath, false, "")
+	outcome, err := app.Run(ctx, totem, args, s.configPath, false, "", nil)
 	if err != nil {
 		return nil, err
 	}
