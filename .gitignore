@@ -1,0 +1,87 @@
+# --- Go binaries (this project) ---
+# Anchored to their real build locations. NEVER use a bare `ouija` pattern:
+# `cmd/ouija/` is a source directory and a bare pattern would ignore it.
+/ouija
+/ouija-mcp
+/cmd/ouija/ouija
+/cmd/ouija-mcp/ouija-mcp
+
+# --- release artifacts (make dist) ---
+/dist/
+
+# Compiled objects / shared libs (cross-platform safety)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# --- Go test / coverage / profiling ---
+*.test
+*.out
+*.prof
+coverage.*
+
+# --- Go workspace (local multi-module dev) ---
+go.work
+go.work.sum
+
+# --- ouija runtime output ---
+# (comments MUST be on their own line — a trailing "# ..." becomes part of the pattern)
+*.jsonl
+.ouija/
+.ouija.json
+# Project config discovered at the repo root when it walks up; may carry an
+# apiKey override, so it is ignored for the same reason as .ouija/.
+ouija.json
+
+# --- generated docs (written by totems/commands, not hand-written) ---
+# `ouija doc` writes <slug>.html/.pdf/.md and `ouija learn` writes docs/knowledge.md.
+# Here we only ignore the machine-rendered binaries; see the note at the bottom
+# about what is intentionally kept.
+docs/*.html
+docs/*.pdf
+
+# --- secrets / local env ---
+.env
+.env.*
+.envrc
+*.pem
+*.key
+
+# --- Claude Code (never commit local assistant state) ---
+.claude/
+
+# --- dumps, archives, backups, logs ---
+*.sql
+*.sql.gz
+*.dump
+*.bak
+*.orig
+*.rej
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.log
+
+# --- editor / IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- intentionally NOT ignored ---
+# Hand-written documentation (README, docs/**/*.md — including the style guide
+# and docs/explanation/architecture.md), LICENSE, CONTRIBUTING.md, SECURITY.md,
+# CHANGELOG.md, go.mod/go.sum, Makefile, release-please config, assets/*.svg,
+# totems/**/template.* and testdata.
+# docs/knowledge.md (ouija learn) and docs/sticker/*.sticker.svg (sticker totem)
+# are generated but kept on purpose: they are shareable project knowledge/art.
+# Trace files are named by you (`--trace-file <path>`), so if you keep one in the
+# repo add its exact name or pattern here.
