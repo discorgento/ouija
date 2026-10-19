@@ -19,7 +19,8 @@ answer is no. Every layer below is a hard rule *before* it is a preference.
 Every file tool is confined to the project root via `SafeJoin()` — a lexical
 check that rejects `../` traversal. Symlinks are resolved component by component
 (not via `EvalSymlinks` on the full path) to detect escapes even when the final
-target doesn't exist yet (closing the TOCTOU window). The `delete_file` tool
+target doesn't exist yet (closing the TOCTOU window) — including a dangling
+symlink, which is followed to the missing target a write would create. The `delete_file` tool
 resolves symlinks before `os.RemoveAll`. The `doc` output dir and MCP resources
 use the same mechanism — the MCP server calls `engine.SafeResolve()` rather than
 re-implementing the join, so it inherits both the symlink and protected-path

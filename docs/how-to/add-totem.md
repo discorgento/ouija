@@ -288,12 +288,14 @@ var writePlanDef = engine.ToolDef{
     Risk: engine.RiskReadOnly,
 }
 
-var writePlanFn engine.ToolFn = func(_ context.Context, root string, input map[string]any) engine.ToolResult {
+var writePlanFn engine.ToolFn = func(ctx context.Context, root string, input map[string]any) engine.ToolResult {
     content, _ := input["content"].(string)
     if content == "" {
         return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: "write_plan: content is required"}}
     }
-    dst, err := engine.SafeJoin(root, "docs/task-plan.md")
+    // SafeResolve, not SafeJoin: a planted docs/ symlink must not redirect
+    // this unattended write outside the project.
+    dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
     if err != nil {
         return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: err.Error()}}
     }
@@ -320,11 +322,34 @@ eng.Run(ctx, engine.RunRequest{
 **Key behaviors:**
 - Extra tools are **scoped to one call** — each `Run` starts fresh.
 - `submit_result` is always deferred: extra tools run first, then `submit_result` is processed last. This lets the model call a side-effect tool and signal completion in the same turn.
-- Use `engine.SafeJoin(root, ...)` to constrain file writes within the project root (it is lexical and does not require the path to exist, so it suits output paths).
-- Use `engine.SafeResolve(ctx, root, ...)` when **reading** a model-supplied path: it also rejects symlinks that point out of the root and protected paths (`.env`, `.ssh/*`, `/etc/*`).
+- Resolve every path you read **or write** with `engine.SafeResolve(ctx, root, ...)`: it keeps the path in the project root, rejects symlinks that point out of it (dangling ones included, so a planted `docs -> ~/.ssh` cannot redirect a write) and protected paths (`.env`, `.ssh/*`, `/etc/*`). The path need not exist yet. `engine.SafeJoin` is only the lexical check — not enough for a write into a repository you did not write.
 - The `root` parameter is the engine's sandbox root — don't use `os.Getwd()` or hardcoded paths.
 - A custom tool is gated by the host: the `ToolRunner` applies the permission level and, for `Ask`, the approval prompt, before your `Fn` runs. A write-tier custom tool is denied by default when no `PermissionConfig` is set.
 - After `Run`, check `res.Tools` to see which tools the model called. The `task` totem uses `slices.Contains(res.Tools, "write_plan")` to decide whether to run its Go fallback.
+
+## Testing a totem
+
+`engine/enginetest` runs a totem against a scripted model — no network, no
+key. Its `Provider` answers each model call with whatever your `Respond`
+function returns for that request; `Submit` hands in a run's structured
+result.
+
+```go
+func TestRun(t *testing.T) {
+	p := &enginetest.Provider{Respond: func(req engine.ChatRequest) enginetest.Reply {
+		if strings.HasPrefix(req.System, "You scout") {
+			return enginetest.Submit(map[string]any{"summary": "a calc package"})
+		}
+		return enginetest.Reply{Text: "# Report"}
+	}}
+	eng := enginetest.NewEngine(p, t.TempDir())
+	out, err := registry.Invoke(context.Background(), eng, &Totem{}, registry.Args{Task: "x"})
+	// assert on out, on the files written under the root, on p.Requests()
+}
+```
+
+A `Reply{Err: ...}` fails that call, to test how the totem handles a pass that
+errors. The provider is safe for concurrent use, so parallel passes work.
 
 ---
 
