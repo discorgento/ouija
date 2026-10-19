@@ -44,6 +44,7 @@ func help() string {
 	b.WriteString("\n  ◆ Development\n")
 	b.WriteString("      generate   Scaffold a new totem (interactive)\n")
 	b.WriteString("                   ouija generate totem\n")
+	b.WriteString("                   ouija generate totem --external [dir]  # standalone module\n")
 
 	b.WriteString("\n  ◆ Workflow\n")
 	b.WriteString("      chat       Interactive chat with project-aware AI\n")

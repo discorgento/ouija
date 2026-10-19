@@ -2,84 +2,77 @@ package commands
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestValidName(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want bool
-	}{
-		{"simple word", "report", true},
-		{"kebab-case", "my-totem", true},
-		{"snake_case", "my_totem", true},
-		{"digit after the first char", "totem2", true},
-		{"max length (32)", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true},
-		{"single char rejected", "a", false},
-		{"33 chars rejected", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false},
-		{"uppercase rejected", "Report", false},
-		{"leading digit rejected", "2totem", false},
-		{"space rejected", "my totem", false},
-		{"dot rejected", "my.totem", false},
-		{"empty rejected", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := validName.MatchString(tt.in); got != tt.want {
-				t.Errorf("validName.MatchString(%q) = %v, want %v", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestToCamel(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"report", "Report"},
-		{"my-totem", "MyTotem"},
-		{"my_totem", "MyTotem"},
-		{"my-mixed_case", "MyMixedCase"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		if got := toCamel(tt.in); got != tt.want {
-			t.Errorf("toCamel(%q) = %q, want %q", tt.in, got, tt.want)
-		}
-	}
-}
-
-func TestGenerate_RequiresTotemSubcommand(t *testing.T) {
-	for _, args := range [][]string{nil, {}, {"two"}, {"generate"}, {"TOTEM"}} {
-		if err := Generate(args); err == nil {
-			t.Errorf("Generate(%v) error = nil, want a usage error", args)
-		}
-	}
-}
-
-// The scaffold template is a string literal, so the compiler cannot see the
-// module path inside it. This guards it against a module rename: a stale path
-// here would generate a brand-new totem that does not build.
-func TestScaffoldTemplateUsesCurrentModulePath(t *testing.T) {
-	src, err := os.ReadFile("generate.go")
+func TestWriteExternalModule(t *testing.T) {
+	dir := t.TempDir()
+	base, err := writeExternalModule(dir, "", "my-agent", "Example external agent")
 	if err != nil {
-		t.Fatalf("read generate.go: %v", err)
+		t.Fatal(err)
 	}
-	text := string(src)
+	if base != dir {
+		t.Fatalf("base = %q, want %q", base, dir)
+	}
 
-	for _, want := range []string{
-		`"github.com/discorgento/ouija/engine"`,
-		`"github.com/discorgento/ouija/registry"`,
+	for _, rel := range []string{
+		"go.mod",
+		filepath.Join("totems", "my-agent", "my-agent.go"),
+		filepath.Join("cmd", "my-agent", "main.go"),
+		"README.md",
+		".gitignore",
 	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("scaffold template does not import %s", want)
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("missing %s: %v", rel, err)
 		}
 	}
-	if strings.Contains(text, `"ouija/`) {
-		t.Error(`scaffold template still references the old module path "ouija/..."`)
+
+	gomod, _ := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if !strings.Contains(string(gomod), "module github.com/you/my-agent") {
+		t.Errorf("go.mod lacks module line:\n%s", gomod)
+	}
+	if !strings.Contains(string(gomod), "github.com/discorgento/ouija") {
+		t.Errorf("go.mod lacks ouija require:\n%s", gomod)
+	}
+
+	totem, _ := os.ReadFile(filepath.Join(dir, "totems", "my-agent", "my-agent.go"))
+	if !strings.Contains(string(totem), "registry.Register(&MyAgent{})") {
+		t.Errorf("totem lacks register call:\n%s", totem)
+	}
+	if strings.Contains(string(totem), "TODO") {
+		t.Errorf("external totem should not be a TODO stub:\n%s", totem)
+	}
+
+	host, _ := os.ReadFile(filepath.Join(dir, "cmd", "my-agent", "main.go"))
+	for _, want := range []string{
+		"bootstrap.Setup",
+		"ServeMCP",
+		`_ "github.com/you/my-agent/totems/my-agent"`,
+	} {
+		if !strings.Contains(string(host), want) {
+			t.Errorf("host lacks %q", want)
+		}
+	}
+}
+
+func TestWriteExternalModuleRefusesExistingGoMod(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeExternalModule(dir, "", "my-agent", "s"); err == nil {
+		t.Fatal("want error on existing go.mod")
+	}
+}
+
+func TestWriteExternalModuleCustomDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "agents")
+	if _, err := writeExternalModule("", dir, "guard", "Guard agent"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cmd", "guard", "main.go")); err != nil {
+		t.Fatalf("custom dir not used: %v", err)
 	}
 }

@@ -48,6 +48,15 @@ Interactive scaffold for a new totem. Prompts for name and description, writes
 `totems/<name>/<name>.go`, then runs `go generate ./totems/...` and
 `go install ./cmd/ouija`.
 
+With `--external [dir]` it scaffolds a standalone Go module instead — `go.mod`,
+the totem, a `cmd/<name>/main.go` host on `bootstrap.Setup`, `README.md` and
+`.gitignore` — then runs `go mod tidy` and builds the binary. For agents that
+live in your own repo, not in ouija's.
+
+```sh
+ouija generate totem --external [dir]
+```
+
 ### `ouija learn [<fact>]`
 
 With a fact, saves it to `docs/knowledge.md`; without arguments, prints the

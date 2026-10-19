@@ -79,6 +79,13 @@ Your new command is ready to use immediately:
 ouija review "review the last commit"
 ```
 
+To scaffold a **standalone module** in your own repo instead (go.mod + totem +
+`cmd/` host on `bootstrap`), add `--external`:
+
+```sh
+ouija generate totem --external [dir]
+```
+
 ### 2. Implement the logic
 
 Replace the placeholder `Run()` body with your totem's logic. Use the
