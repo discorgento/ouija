@@ -2,11 +2,14 @@ package task
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/discorgento/ouija/engine"
 )
 
 func TestTaskResultRender(t *testing.T) {
@@ -127,5 +130,24 @@ func TestWritePlanRefusesSymlinkEscape(t *testing.T) {
 	root2 := t.TempDir()
 	if res := writePlanFn(context.Background(), root2, map[string]any{"content": "plan"}); res.Error != nil {
 		t.Fatalf("write_plan in a plain project: %v", res.Error.Message)
+	}
+}
+
+// `totems.task` overrides only what it sets; the rest keeps the defaults.
+func TestLoadConfig(t *testing.T) {
+	cfg := engine.DefaultConfig()
+	c, err := loadConfig(cfg)
+	if err != nil || c.Passes != 3 || len(c.Dimensions) != 4 {
+		t.Fatalf("defaults = %+v, %v", c, err)
+	}
+	cfg.Totems = map[string]json.RawMessage{"task": json.RawMessage(`{"passes":1}`)}
+	c, err = loadConfig(cfg)
+	if err != nil || c.Passes != 1 || len(c.Dimensions) != 4 {
+		t.Fatalf("partial override = %+v, %v", c, err)
+	}
+	cfg.Totems["task"] = json.RawMessage(`{"passes":0,"dimensions":["security"]}`)
+	c, _ = loadConfig(cfg)
+	if c.Passes != 3 || len(c.Dimensions) != 1 {
+		t.Fatalf("non-positive passes must fall back: %+v", c)
 	}
 }

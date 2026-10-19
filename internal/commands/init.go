@@ -125,7 +125,7 @@ func Init(args []string) error {
 // existed: the file at path when it loads, else engine defaults seeded with the
 // global provider/model so the wizard opens on the user's usual choice.
 func seedProjectConfig(path string, global *ouijaconfig.Config) (*engine.Config, bool) {
-	if cfg, err := engine.LoadConfig(path); err == nil {
+	if cfg, err := app.LoadProjectConfig(path); err == nil {
 		return cfg, true
 	}
 	cfg := engine.DefaultConfig()

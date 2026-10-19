@@ -20,6 +20,33 @@ func init() { registry.Register(&Totem{}) }
 // Totem is the "task" séance: scout → N passes × dimensions → reconcile.
 type Totem struct{}
 
+// Config is the task totem's section of the project config, `totems.task`.
+type Config struct {
+	Passes     int      `json:"passes"`     // independent passes per dimension
+	Dimensions []string `json:"dimensions"` // analysis axes of each pass
+}
+
+// defaultConfig is what an absent or partial `totems.task` falls back to.
+func defaultConfig() Config {
+	return Config{Passes: 3, Dimensions: []string{"correctness", "best-practices", "security", "performance"}}
+}
+
+// loadConfig reads `totems.task`, filling what it leaves out with the defaults.
+func loadConfig(cfg *engine.Config) (Config, error) {
+	def := defaultConfig()
+	c := def
+	if err := cfg.TotemConfig("task", &c); err != nil {
+		return Config{}, err
+	}
+	if c.Passes <= 0 {
+		c.Passes = def.Passes
+	}
+	if len(c.Dimensions) == 0 {
+		c.Dimensions = def.Dimensions
+	}
+	return c, nil
+}
+
 func (t *Totem) Name() string { return "task" }
 func (t *Totem) Summary() string {
 	return "Analyze a task: scout -> N passes x dimensions -> reconcile -> plan"
@@ -38,11 +65,12 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 		return nil, fmt.Errorf("empty task: pass the description as the first argument")
 	}
 	cfg := eng.Config()
-	rules := "- " + strings.Join(cfg.Rules, "\n- ")
-	dims := cfg.Dimensions
-	if len(dims) == 0 {
-		dims = []string{"correctness", "best-practices", "security", "performance"}
+	tc, err := loadConfig(cfg)
+	if err != nil {
+		return nil, err
 	}
+	rules := "- " + strings.Join(cfg.Rules, "\n- ")
+	dims := tc.Dimensions
 
 	// 1) Scout — map the current reality with read-only tools.
 	scoutSystem := "You are doing code reconnaissance (scout). Project rules:\n" + rules
@@ -67,7 +95,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// 2) N passes × dimensions, all independent (self-consistency).
 	var jobs []func() (passResult, error)
-	for p := 1; p <= cfg.Passes; p++ {
+	for p := 1; p <= tc.Passes; p++ {
 		for _, d := range dims {
 			p, d := p, d
 			jobs = append(jobs, func() (passResult, error) {
@@ -120,7 +148,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 			"Deliver taskDescription + checklist + a step-by-step plan with files and a validation check per step.\n\n"+
 			"First, call the write_plan tool with the rendered plan markdown to save it to docs/task-plan.md. "+
 			"Then call submit_result with the structured JSON result.",
-		args.Task, scoutJSON, cfg.Passes, sb.String())
+		args.Task, scoutJSON, tc.Passes, sb.String())
 	recResult, err := eng.Run(ctx, engine.RunRequest{
 		Label: "reconcile", System: recSystem, Prompt: recPrompt,
 		ExtraTools: []engine.CustomTool{{Def: writePlanDef, Fn: writePlanFn}},

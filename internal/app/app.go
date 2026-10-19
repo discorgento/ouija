@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -61,7 +62,7 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 // no project config is found.
 func findConfigFile(explicit string) (*engine.Config, string, error) {
 	if explicit != "" {
-		c, err := engine.LoadConfig(explicit)
+		c, err := LoadProjectConfig(explicit)
 		if err != nil {
 			return nil, "", err
 		}
@@ -73,7 +74,7 @@ func findConfigFile(explicit string) (*engine.Config, string, error) {
 		for _, rel := range []string{".ouija/config.json", ".ouija.json", "ouija.json"} {
 			p := filepath.Join(dir, rel)
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
-				if c, err := engine.LoadConfig(p); err == nil {
+				if c, err := LoadProjectConfig(p); err == nil {
 					return c, p, nil
 				}
 			}
@@ -125,11 +126,11 @@ func applyProjectConfig(cfg *engine.Config, projectCfg *engine.Config, cfgPath s
 	if projectCfg.Model != "" {
 		cfg.Model = projectCfg.Model
 	}
-	if projectCfg.Passes > 0 {
-		cfg.Passes = projectCfg.Passes
-	}
-	if len(projectCfg.Dimensions) > 0 {
-		cfg.Dimensions = projectCfg.Dimensions
+	for name, raw := range projectCfg.Totems {
+		if cfg.Totems == nil {
+			cfg.Totems = make(map[string]json.RawMessage)
+		}
+		cfg.Totems[name] = raw
 	}
 	if len(projectCfg.Rules) > 0 {
 		cfg.Rules = projectCfg.Rules

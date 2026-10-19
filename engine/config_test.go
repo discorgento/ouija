@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,14 +16,11 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Model != "claude-opus-4-8" {
 		t.Errorf("DefaultConfig().Model = %q, want claude-opus-4-8", cfg.Model)
 	}
-	if cfg.Passes != 3 {
-		t.Errorf("DefaultConfig().Passes = %d, want 3", cfg.Passes)
-	}
 	if cfg.MaxNudges != 3 {
 		t.Errorf("DefaultConfig().MaxNudges = %d, want 3", cfg.MaxNudges)
 	}
-	if len(cfg.Dimensions) != 4 {
-		t.Errorf("DefaultConfig() has %d dimensions, want 4", len(cfg.Dimensions))
+	if len(cfg.Totems) != 0 {
+		t.Errorf("DefaultConfig() has totem settings %v; totems own their defaults", cfg.Totems)
 	}
 	if cfg.ProjectRoot != "." {
 		t.Errorf("DefaultConfig().ProjectRoot = %q, want .", cfg.ProjectRoot)
@@ -46,9 +44,6 @@ func TestConfigValidate(t *testing.T) {
 	if !strings.Contains(err.Error(), "model is required") {
 		t.Errorf("missing model error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "passes must be > 0") {
-		t.Errorf("passes error: %v", err)
-	}
 }
 
 func TestConfigMaxUSD(t *testing.T) {
@@ -71,7 +66,7 @@ func TestConfigSaveLoadRoundTrip(t *testing.T) {
 	original := DefaultConfig()
 	original.Provider = "openai"
 	original.Model = "gpt-4o"
-	original.Dimensions = []string{"correctness", "performance"}
+	original.Totems = map[string]json.RawMessage{"task": json.RawMessage(`{"passes":2}`)}
 
 	if err := original.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -88,8 +83,11 @@ func TestConfigSaveLoadRoundTrip(t *testing.T) {
 	if loaded.Model != "gpt-4o" {
 		t.Errorf("Model = %q, want gpt-4o", loaded.Model)
 	}
-	if len(loaded.Dimensions) != 2 {
-		t.Errorf("got %d dimensions, want 2", len(loaded.Dimensions))
+	var task struct {
+		Passes int `json:"passes"`
+	}
+	if err := loaded.TotemConfig("task", &task); err != nil || task.Passes != 2 {
+		t.Errorf("totems.task round trip: passes=%d err=%v, want 2", task.Passes, err)
 	}
 	// ProjectRoot should default to "." since it was empty in saved JSON
 	if loaded.ProjectRoot != "." {
@@ -115,5 +113,25 @@ func TestSaveCreatesParentDir(t *testing.T) {
 
 	if _, err := os.Stat(deep); err != nil {
 		t.Fatalf("file not created: %v", err)
+	}
+}
+
+// TotemConfig decodes a totem's entry and leaves v untouched when there is none.
+func TestTotemConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Totems = map[string]json.RawMessage{"task": json.RawMessage(`{"passes":5}`), "bad": json.RawMessage(`[1]`)}
+	v := struct {
+		Passes int    `json:"passes"`
+		Other  string `json:"other"`
+	}{Passes: 3, Other: "default"}
+	if err := cfg.TotemConfig("task", &v); err != nil || v.Passes != 5 || v.Other != "default" {
+		t.Fatalf("TotemConfig(task) = %+v, %v", v, err)
+	}
+	w := struct{ Passes int }{Passes: 3}
+	if err := cfg.TotemConfig("absent", &w); err != nil || w.Passes != 3 {
+		t.Fatalf("TotemConfig(absent) = %+v, %v; want defaults untouched", w, err)
+	}
+	if err := cfg.TotemConfig("bad", &w); err == nil || !strings.Contains(err.Error(), "totems.bad") {
+		t.Fatalf("TotemConfig(bad) error = %v; want it to name the section", err)
 	}
 }

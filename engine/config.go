@@ -34,18 +34,21 @@ func (r *PermissionRule) ToEngine() *PermissionConfig {
 }
 
 // Config is the per-project configuration (loaded from --config JSON or
-// .ouija/config.json). Nothing here is project-specific in code:
-// rules/dimensions come from the file.
+// .ouija/config.json). Nothing here is project-specific in code: rules come
+// from the file, and each totem's own settings live in Totems.
 type Config struct {
 	Provider    string   `json:"provider"`
 	Model       string   `json:"model"`
 	APIKey      string   `json:"apiKey,omitempty"` // optional project-level override
 	MaxNudges   int      `json:"maxNudges,omitempty"`
-	Passes      int      `json:"passes"`
 	Budget      Budget   `json:"budget"`
-	Dimensions  []string `json:"dimensions"`
 	Rules       []string `json:"rules"`
 	ProjectRoot string   `json:"projectRoot"`
+
+	// Totems holds each totem's own settings, keyed by totem name — e.g.
+	// "task": {"passes": 3, "dimensions": [...]}. The engine never reads them;
+	// a totem decodes its entry with TotemConfig.
+	Totems map[string]json.RawMessage `json:"totems,omitempty"`
 
 	// SystemPrompt is sent as the system message in chat. When empty, a
 	// default prompt is used that tells the model it has file tools.
@@ -82,6 +85,20 @@ type BashConfig struct {
 	Allowlist []string `json:"allowlist,omitempty"`
 }
 
+// TotemConfig decodes the settings of totem name (Totems[name]) into v. When
+// the config has no entry for name, v is left untouched, so callers fill it
+// with their defaults first.
+func (c *Config) TotemConfig(name string, v any) error {
+	raw, ok := c.Totems[name]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("totems.%s: %w", name, err)
+	}
+	return nil
+}
+
 // MaxUSD returns the dollar ceiling (0 = unlimited).
 func (c *Config) MaxUSD() float64 {
 	if c.Budget.MaxUSD == nil {
@@ -109,9 +126,6 @@ func (c *Config) Validate() error {
 	if c.Model == "" {
 		errs = append(errs, errors.New("model is required"))
 	}
-	if c.Passes <= 0 {
-		errs = append(errs, errors.New("passes must be > 0"))
-	}
 	if c.MaxNudges < 0 {
 		errs = append(errs, errors.New("maxNudges must be >= 0"))
 	}
@@ -131,12 +145,10 @@ func DefaultConfig() *Config {
 		Provider:  "anthropic",
 		Model:     "claude-opus-4-8",
 		MaxNudges: 3,
-		Passes:    3,
 		// MaxSteps is a runaway backstop counting EVERY chat call across all agents
 		// in a run (scout + N×dims passes + reconcile, each with tool round-trips),
 		// so it must be generous — token/USD ceilings are the real cost bound.
 		Budget:      Budget{MaxTokens: 2_000_000, MaxSteps: 500},
-		Dimensions:  []string{"correctness", "best-practices", "security", "performance"},
 		Rules:       []string{"Prefer clarity and correctness", "Cite file/line when asserting something"},
 		ProjectRoot: ".",
 		SystemPrompt: "You are an AI coding assistant with access to the project files. " +
@@ -157,9 +169,6 @@ func LoadConfig(path string) (*Config, error) {
 	c := DefaultConfig()
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, err
-	}
-	if c.Passes <= 0 {
-		c.Passes = 3
 	}
 	if c.ProjectRoot == "" {
 		c.ProjectRoot = "."

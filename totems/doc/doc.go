@@ -37,11 +37,32 @@ func (t *Totem) Cleanup() error                                                 
 // docAspects are the fact-gathering angles for a document (vs. task's analysis dimensions).
 var docAspects = []string{"configuration", "behavior", "integration"}
 
+// Config is the doc totem's section of the project config, `totems.doc`.
+type Config struct {
+	Passes int `json:"passes"` // independent fact-gathering passes per aspect
+}
+
+// loadConfig reads `totems.doc`; an absent or non-positive passes means 3.
+func loadConfig(cfg *engine.Config) (Config, error) {
+	c := Config{Passes: 3}
+	if err := cfg.TotemConfig("doc", &c); err != nil {
+		return Config{}, err
+	}
+	if c.Passes <= 0 {
+		c.Passes = 3
+	}
+	return c, nil
+}
+
 func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
 	if strings.TrimSpace(args.Task) == "" {
 		return nil, fmt.Errorf("empty request: pass what to document as the first argument")
 	}
 	cfg := eng.Config()
+	dc, err := loadConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	rules := "- " + strings.Join(cfg.Rules, "\n- ")
 
 	// 1) Scout — read the scope and map what exists (read-only tools).
@@ -61,7 +82,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// 2) Verify facts: passes × aspects, independent (self-consistency on facts).
 	var jobs []func() (factResult, error)
-	for p := 1; p <= cfg.Passes; p++ {
+	for p := 1; p <= dc.Passes; p++ {
 		for _, a := range docAspects {
 			p, a := p, a
 			jobs = append(jobs, func() (factResult, error) {

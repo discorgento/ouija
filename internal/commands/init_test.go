@@ -41,8 +41,8 @@ func TestSeedProjectConfig_FallsBackToGlobal(t *testing.T) {
 	if cfg.Provider != "openai" || cfg.Model != "gpt-4o" {
 		t.Errorf("provider/model = %q/%q, want the global defaults", cfg.Provider, cfg.Model)
 	}
-	if cfg.Passes != engine.DefaultConfig().Passes {
-		t.Errorf("passes = %d, want the engine defaults preserved", cfg.Passes)
+	if cfg.MaxNudges != engine.DefaultConfig().MaxNudges {
+		t.Errorf("maxNudges = %d, want the engine defaults preserved", cfg.MaxNudges)
 	}
 }
 

@@ -75,8 +75,10 @@ combination of built-in defaults + global config + project config.
   "provider": "anthropic",
   "model": "claude-opus-4-8",
   "maxNudges": 3,
-  "passes": 3,
-  "dimensions": ["correctness", "best-practices", "security", "performance"],
+  "totems": {
+    "task": { "passes": 3, "dimensions": ["correctness", "best-practices", "security", "performance"] },
+    "doc": { "passes": 3 }
+  },
   "rules": ["Prefer clarity and correctness", "Cite file/line when asserting something"],
   "projectRoot": ".",
   "budget": {
@@ -112,8 +114,14 @@ combination of built-in defaults + global config + project config.
 | `apiKey` | `string` | `""` | Project-level API key override |
 | `systemPrompt` | `string` | built-in prompt ("You are an AI coding assistant with access to the project files…") | Overrides the default chat system prompt |
 | `maxNudges` | `int` | `3` | Max retries when model fails to return structured output |
-| `passes` | `int` | `3` | Number of parallel analysis passes (task totem) |
-| `dimensions` | `[]string` | `[...]` | Analysis dimensions (task totem) |
+| `totems.<name>` | `object` | — | A totem's own settings, read with `Config.TotemConfig`; the engine never interprets them |
+| `totems.task.passes` | `int` | `3` | Independent analysis passes per dimension |
+| `totems.task.dimensions` | `[]string` | `[...]` | Analysis dimensions of each pass |
+| `totems.doc.passes` | `int` | `3` | Independent fact-gathering passes per aspect |
+
+Configs written before `totems` keep working: a top-level `passes` /
+`dimensions` is read as `totems.task` (and `passes` as `totems.doc`), unless
+those sections exist, and the next save writes the new layout.
 | `rules` | `[]string` | `[...]` | Project rules injected into prompts |
 | `projectRoot` | `string` | `"."` | Sandbox root for file tools |
 | `budget.maxTokens` | `int` | `2000000` | Hard token ceiling |

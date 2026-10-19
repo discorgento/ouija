@@ -196,8 +196,7 @@ func TestDiscoverConfig_ProjectOverridesDefaults(t *testing.T) {
 	writeProjectConfig(t, p, `{
 		"provider": "ollama",
 		"model": "llama3",
-		"passes": 7,
-		"dimensions": ["security"],
+		"totems": {"task": {"passes": 7}},
 		"rules": ["one rule"]
 	}`)
 
@@ -206,11 +205,8 @@ func TestDiscoverConfig_ProjectOverridesDefaults(t *testing.T) {
 		t.Fatalf("DiscoverConfig() error = %v", err)
 	}
 
-	if cfg.Passes != 7 {
-		t.Errorf("passes = %d, want 7", cfg.Passes)
-	}
-	if len(cfg.Dimensions) != 1 || cfg.Dimensions[0] != "security" {
-		t.Errorf("dimensions = %v, want [security]", cfg.Dimensions)
+	if got := string(cfg.Totems["task"]); got != `{"passes": 7}` {
+		t.Errorf("totems.task = %s, want the project's section", got)
 	}
 	if len(cfg.Rules) != 1 || cfg.Rules[0] != "one rule" {
 		t.Errorf("rules = %v, want [one rule]", cfg.Rules)
@@ -496,5 +492,39 @@ func TestRun_CleanupErrorIsReported(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "cleanup") {
 		t.Errorf("error = %q, want it to mention the cleanup step", err)
+	}
+}
+
+// Configs written before per-totem settings keep working: top-level passes and
+// dimensions move to totems.task (and passes to totems.doc, which shared it),
+// unless the file already has those sections.
+func TestLegacyTotemKeysMigrate(t *testing.T) {
+	isolateGlobalConfig(t)
+	dir := t.TempDir()
+
+	old := filepath.Join(dir, "old.json")
+	writeProjectConfig(t, old, `{"provider":"ollama","model":"x","passes":7,"dimensions":["security"]}`)
+	cfg, _, err := DiscoverConfig(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task struct {
+		Passes     int      `json:"passes"`
+		Dimensions []string `json:"dimensions"`
+	}
+	if err := cfg.TotemConfig("task", &task); err != nil || task.Passes != 7 || len(task.Dimensions) != 1 {
+		t.Fatalf("migrated totems.task = %+v, %v", task, err)
+	}
+	var doc struct{ Passes int }
+	if err := cfg.TotemConfig("doc", &doc); err != nil || doc.Passes != 7 {
+		t.Fatalf("migrated totems.doc = %+v, %v", doc, err)
+	}
+
+	both := filepath.Join(dir, "both.json")
+	writeProjectConfig(t, both, `{"provider":"ollama","model":"x","passes":7,"totems":{"task":{"passes":2}}}`)
+	cfg, _, _ = DiscoverConfig(both)
+	task.Passes = 0
+	if err := cfg.TotemConfig("task", &task); err != nil || task.Passes != 2 {
+		t.Fatalf("an explicit totems.task must win over legacy keys: %+v, %v", task, err)
 	}
 }

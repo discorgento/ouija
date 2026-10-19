@@ -62,7 +62,7 @@ the API key (e.g. a client-specific key).
 Saved to `.ouija/config.json`. `init` writes the **whole** project config, not
 just the two keys: it starts from the built-in defaults, overlays the global
 defaults, then applies your choices, so the file also carries `maxNudges`,
-`passes`, `budget` (`maxTokens`/`maxSteps`/`maxUSD`), `dimensions`, `rules`,
+`budget` (`maxTokens`/`maxSteps`/`maxUSD`), `rules`,
 `projectRoot`, `systemPrompt`, `costPer1MInput` and `costPer1MOutput`. What you
 edit can be as small as:
 
@@ -94,7 +94,7 @@ Any change to the file lapses the trust (`ouija doctor` shows it).
 Config is validated automatically on load:
 
 - **`Config.Validate()`** — checks all fields with `errors.Join` (provider, model,
-  passes, maxNudges, budget limits)
+  maxNudges, budget limits, `totems.<name>` sections)
 - **`ValidateConfig()`** — also checks the provider is registered
 
 Errors are reported at startup, not mid-run.
