@@ -237,6 +237,10 @@ sanitization — all **fail closed**: an inconclusive check means *deny*.
 - `review` totem (review the current git diff).
 - `deploy` totem (preview + apply changes).
 - Adversarial verification step (a skeptic refutes each finding before reconcile).
+- `ouija generate totem --external` — scaffold a full external module
+  (`go.mod` + `cmd/` + example totem) in one command.
+- Totem registry — index and install third-party totems
+  (`ouija totem add github.com/…`).
 
 ## Known limitations (honest debts)
 

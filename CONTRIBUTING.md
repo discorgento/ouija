@@ -44,6 +44,20 @@ make test-race          # before touching concurrency (chat, engine)
   [release pipeline](.github/workflows/release.yml) — see
   [Releases](docs/how-to/contribute.md#releases).
 
+## Contributing a totem
+
+A totem is an agent workflow in Go. You can contribute one two ways:
+
+- **Upstream** (ships in the `ouija` binary, appears in `ouija help` and MCP for
+  everyone): `ouija generate totem` in this repo, implement the `Run` method,
+  open a PR. See [Add a totem](docs/how-to/add-totem.md).
+- **External** (your own repo, your own binary, your own MCP namespace): import
+  the public `bootstrap`, `engine`, `registry` packages, build your own CLI.
+  The engine, budget, sandbox, trace and MCP export are all inherited — no fork
+  needed.
+
+The engine is in `engine/`, not `internal/` — it is designed to be imported.
+
 ## License
 
 By contributing you agree that your work is released under the
