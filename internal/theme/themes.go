@@ -149,7 +149,7 @@ func Swatch(name string) string {
 		return ""
 	}
 	cols := []string{p.pink, p.lavender, p.violet, p.green, p.amber, p.red}
-	defaults := []color.Color{lipgloss.Color("213"), lipgloss.Color("141"), lipgloss.Color("99"), lipgloss.Color("118"), lipgloss.Color("220"), lipgloss.Color("196")}
+	defaults := []color.Color{lipgloss.Color("177"), lipgloss.Color("141"), lipgloss.Color("99"), lipgloss.Color("118"), lipgloss.Color("220"), lipgloss.Color("196")}
 	var b strings.Builder
 	for i, h := range cols {
 		c := defaults[i]

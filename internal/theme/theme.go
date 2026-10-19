@@ -12,8 +12,8 @@ import (
 // Brand colors (ANSI 256, so they hold in terminals without truecolor); a
 // theme other than ouija replaces them (themes.go).
 var (
-	Pink     color.Color = lipgloss.Color("213") // user, highlights
-	Blush    color.Color = lipgloss.Color("225") // soft highlight
+	Pink     color.Color = lipgloss.Color("177") // user, highlights (an orchid, more purple than pink)
+	Blush    color.Color = lipgloss.Color("189") // soft highlight
 	Lavender color.Color = lipgloss.Color("141") // accents, focused fields
 	Mauve    color.Color = lipgloss.Color("140") // secondary text on accent
 	Violet   color.Color = lipgloss.Color("99")  // headers, values
@@ -57,12 +57,12 @@ var Rainbow = []color.Color{Pink, Lavender, Violet, Purple, Mauve, Blush}
 // it starts, so a gradient that flows (Gradient with a growing shift) wraps
 // around without a seam.
 var gradientStops = []color.Color{
-	lipgloss.Color("#ff5fd7"), // hot pink
-	lipgloss.Color("#af87ff"), // lavender
-	lipgloss.Color("#875fff"), // violet
-	lipgloss.Color("#8700ff"), // deep purple
-	lipgloss.Color("#af87ff"),
-	lipgloss.Color("#ff5fd7"),
+	lipgloss.Color("#c39bff"), // lilac — the logo's gradient (assets/logo.svg)
+	lipgloss.Color("#a78bfa"),
+	lipgloss.Color("#8b5cf6"), // violet
+	lipgloss.Color("#6d28d9"), // deep purple
+	lipgloss.Color("#a78bfa"),
+	lipgloss.Color("#c39bff"),
 }
 
 // Gradient returns n colors along the brand gradient, which spans 2n steps
