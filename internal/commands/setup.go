@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
 	"charm.land/huh/v2"
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/models"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
@@ -67,17 +69,11 @@ func Setup(args []string) error {
 	selModel := huh.NewSelect[string]().
 		Title("Default model").
 		OptionsFunc(func() []huh.Option[string] {
-			mods := ms.Models(defProv)
-			opts := make([]huh.Option[string], len(mods))
-			for i, m := range mods {
-				info, _ := ms.ModelInfo(defProv, m)
-				label := m
-				if info.Label != "" {
-					label = info.Label
-				}
-				opts[i] = huh.NewOption(label, m)
+			key := ""
+			if k, ok := keys[defProv]; ok && k != nil {
+				key = *k
 			}
-			return opts
+			return modelOptions(ms, defProv, key)
 		}, &defProv).
 		Value(&defModel)
 
@@ -140,4 +136,24 @@ func buildGlobalConfig(keys map[string]*string, provider, model string) *ouijaco
 		}
 	}
 	return cfg
+}
+
+// modelOptions lists provider's models for a picker: the provider's own list
+// from its API when there is a key to ask with (or none is needed), else the
+// built-in suggestions.
+func modelOptions(ms *models.Store, provider, key string) []huh.Option[string] {
+	var p engine.Provider
+	if key != "" || providers.Keyless(provider) {
+		p, _ = providers.Build(provider, key)
+	}
+	list := ms.List(context.Background(), provider, p)
+	opts := make([]huh.Option[string], len(list))
+	for i, m := range list {
+		label := m.ID
+		if m.Label != "" && m.Label != m.ID {
+			label = m.Label + "  (" + m.ID + ")"
+		}
+		opts[i] = huh.NewOption(label, m.ID)
+	}
+	return opts
 }

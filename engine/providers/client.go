@@ -66,6 +66,20 @@ func (c *Client) PostJSON(ctx context.Context, url string, headers map[string]st
 	return data, resp.StatusCode, nil
 }
 
+// GetJSON GETs url and returns (responseBytes, statusCode, error).
+func (c *Client) GetJSON(ctx context.Context, url string, headers map[string]string) ([]byte, int, error) {
+	resp, err := c.RoundTrip(ctx, http.MethodGet, url, headers, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
+	}
+	return data, resp.StatusCode, nil
+}
+
 // PostSSE POSTs a body and streams SSE events to onEvent, using the circuit
 // breaker for the initial connection. Once streaming begins, no retry.
 func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]string, body []byte, onEvent func(eventType string, data []byte) error) error {

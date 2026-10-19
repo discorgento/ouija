@@ -56,7 +56,8 @@ Inside a project directory:
 ouija init
 ```
 
-Pre-fills from global defaults and lets you override provider, model, and optionally
+Pre-fills from global defaults and lets you override provider, model (listed
+from the provider's own API, like in `ouija setup`), and optionally
 the API key (e.g. a client-specific key).
 
 Saved to `.ouija/config.json`. `init` writes the **whole** project config, not

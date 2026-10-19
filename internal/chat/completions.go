@@ -32,7 +32,7 @@ func (m *model) updateCmdList() bool {
 
 		switch baseCmd {
 		case "/model":
-			modelNames := suggestedModels(m.eng.Config(), models.Load().Models(m.eng.Config().Provider))
+			modelNames := suggestedModels(m.eng.Config(), models.IDs(m.providerModels(m.eng.Config().Provider)))
 			m.picker.Show(modelNames, modelNames, "Models")
 			if typed != "" {
 				m.pickerFilter(typed)

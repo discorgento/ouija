@@ -103,6 +103,20 @@ type Capabilities struct {
 	StructuredOutput bool
 }
 
+// ModelInfo describes one model a provider offers.
+type ModelInfo struct {
+	ID            string // what goes in Config.Model
+	Label         string // human name, when the provider gives one
+	ContextWindow int    // input tokens, when the provider says (0 = unknown)
+}
+
+// ModelLister is implemented by a provider that can list its models from its
+// own API, so pickers show what it really offers today instead of a list
+// written into the code.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
 // Provider is the model adapter every backend implements.
 // Chat returns an iterator that yields stream events and then stops.
 // On error, the iterator yields a single (StreamEvent{}, error) pair.

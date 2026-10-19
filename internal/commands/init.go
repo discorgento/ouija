@@ -56,17 +56,11 @@ func Init(args []string) error {
 	selModel := huh.NewSelect[string]().
 		Title("Model").
 		OptionsFunc(func() []huh.Option[string] {
-			mods := ms.Models(provider)
-			opts := make([]huh.Option[string], len(mods))
-			for i, m := range mods {
-				info, _ := ms.ModelInfo(provider, m)
-				label := m
-				if info.Label != "" {
-					label = info.Label
-				}
-				opts[i] = huh.NewOption(label, m)
+			key := apiKey
+			if key == "" {
+				key = global.APIKeys[provider]
 			}
-			return opts
+			return modelOptions(ms, provider, key)
 		}, &provider).
 		Value(&model)
 

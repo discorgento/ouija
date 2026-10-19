@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -53,6 +54,16 @@ func (m *model) openPicker(cmd string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// providerModels lists provider's models: its own list from its API (built
+// with the configured key, cached for a day), else the built-in suggestions.
+func (m *model) providerModels(provider string) []models.Model {
+	var p engine.Provider
+	if m.buildProvider != nil {
+		p, _ = m.buildProvider(provider)
+	}
+	return models.Load().List(context.Background(), provider, p)
+}
+
 // modelPickerLabel heads the model list; selectCompletion keys on it.
 const modelPickerLabel = "Models"
 
@@ -60,8 +71,12 @@ const modelPickerLabel = "Models"
 // then the catalog — with labels and context sizes. It reports whether there
 // was anything to list.
 func (m *model) showModelPicker(provider string) bool {
-	store := models.Load()
-	modelNames := suggestedModelsFor(m.eng.Config(), provider, store.Models(provider))
+	list := m.providerModels(provider)
+	byID := make(map[string]models.Model, len(list))
+	for _, mod := range list {
+		byID[mod.ID] = mod
+	}
+	modelNames := suggestedModelsFor(m.eng.Config(), provider, models.IDs(list))
 	if len(modelNames) == 0 {
 		return false
 	}
@@ -70,11 +85,11 @@ func (m *model) showModelPicker(provider string) bool {
 	for i, name := range modelNames {
 		values[i] = name
 		display := name
-		if info, ok := store.ModelInfo(provider, name); ok && info.Label != "" {
-			display = info.Label
-			if info.ContextWindow > 0 {
-				display = fmt.Sprintf("%s  ·  %dk ctx", info.Label, info.ContextWindow/1000)
-			}
+		if info, ok := byID[name]; ok && info.Label != "" && info.Label != name {
+			display = info.Label + "  ·  " + name
+		}
+		if info, ok := byID[name]; ok && info.ContextWindow > 0 {
+			display = fmt.Sprintf("%s  ·  %dk ctx", display, info.ContextWindow/1000)
 		}
 		items[i] = display
 	}

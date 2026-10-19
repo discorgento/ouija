@@ -83,7 +83,9 @@ The same levels can be set statically in `.ouija/config.json`
 
 ## Restart the model or the provider
 
-`/model` and `/provider` open an interactive picker with context-window sizes
+`/model` and `/provider` open an interactive picker with context-window sizes —
+the models come from each provider's own API (cached for a day in
+`~/.cache/ouija/models/`), with a built-in list as the offline fallback
 (typing the trailing space opens the inline suggestion list). `/clear` wipes
 history when the context has grown too large.
 

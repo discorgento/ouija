@@ -42,6 +42,7 @@ func (p namedProvider) Chat(context.Context, engine.ChatRequest) iter.Seq2[engin
 // /provider never picks a model for the developer: naming a provider opens
 // its model list, and the switch happens only once a model is chosen.
 func TestProviderSwitchMakesTheDeveloperPickTheModel(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir()) // never the developer's model cache
 	eng := &switchEngine{cfg: &engine.Config{Provider: "ollama", Model: "llama3"}}
 	m := newModel(eng, func(name string) (engine.Provider, error) { return namedProvider{name}, nil }, "", "")
 

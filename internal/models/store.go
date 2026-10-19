@@ -49,8 +49,10 @@ type Store struct {
 
 // ─── Defaults ─────────────────────────────────────────────────────────────
 
-// defaultModels returns the built-in models. Edit this function to add or
-// remove providers/models — this is the single source of truth.
+// defaultModels returns the built-in models: the offline fallback and the
+// labels/context sizes a provider's API leaves out. Pickers list each
+// provider's models from its own API first (Store.List), so this list only
+// needs a few well-known entries — it is not the source of truth.
 func defaultModels() *ModelsFile {
 	return &ModelsFile{
 		Providers: map[string]ProviderDef{
