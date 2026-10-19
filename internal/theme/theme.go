@@ -9,14 +9,15 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Brand colors (ANSI 256, so they hold in terminals without truecolor).
+// Brand colors (ANSI 256, so they hold in terminals without truecolor); a
+// theme other than ouija replaces them (themes.go).
 var (
-	Pink     = lipgloss.Color("213") // user, highlights
-	Blush    = lipgloss.Color("225") // soft highlight
-	Lavender = lipgloss.Color("141") // accents, focused fields
-	Mauve    = lipgloss.Color("140") // secondary text on accent
-	Violet   = lipgloss.Color("99")  // headers, values
-	Purple   = lipgloss.Color("93")  // ouija (AI)
+	Pink     color.Color = lipgloss.Color("213") // user, highlights
+	Blush    color.Color = lipgloss.Color("225") // soft highlight
+	Lavender color.Color = lipgloss.Color("141") // accents, focused fields
+	Mauve    color.Color = lipgloss.Color("140") // secondary text on accent
+	Violet   color.Color = lipgloss.Color("99")  // headers, values
+	Purple   color.Color = lipgloss.Color("93")  // ouija (AI)
 )
 
 // Neutrals.
@@ -24,29 +25,29 @@ var (
 	// Text is the terminal's own text color: body text reads on any
 	// terminal theme, light or dark.
 	Text   color.Color = lipgloss.NoColor{}
-	Bright             = lipgloss.Color("255") // text on a colored background
-	Silver             = lipgloss.Color("250") // secondary text
-	Gray               = lipgloss.Color("243") // trace, inactive
-	Muted              = lipgloss.Color("60")  // hints, separators
-	Shade              = lipgloss.Color("236") // unselected button background
+	Bright color.Color = lipgloss.Color("255") // text on a colored background
+	Silver color.Color = lipgloss.Color("250") // secondary text
+	Gray   color.Color = lipgloss.Color("243") // trace, inactive
+	Muted  color.Color = lipgloss.Color("60")  // hints, separators
+	Shade  color.Color = lipgloss.Color("236") // unselected button background
 
 	// The UI paints no background of its own (the terminal's shows): these
 	// are for text on a colored pill and the like.
 	Surface       = lipgloss.Color("#12101e")
 	SurfaceRaised = lipgloss.Color("#1e1930")
 
-	DiffAddBg = lipgloss.Color("#13301f") // background of an added line
-	DiffDelBg = lipgloss.Color("#3a1424") // background of a removed line
+	DiffAddBg color.Color = lipgloss.Color("#13301f") // background of an added line
+	DiffDelBg color.Color = lipgloss.Color("#3a1424") // background of a removed line
 )
 
 // Status colors.
 var (
-	Green     = lipgloss.Color("118") // success, diff additions, read-only tools
-	GreenDeep = lipgloss.Color("71")  // "yes" button
-	Amber     = lipgloss.Color("220") // warnings, writes, diff hunks
-	Orange    = lipgloss.Color("208") // edit, outside the sandbox
-	Red       = lipgloss.Color("196") // errors, deletions, shell
-	RedDeep   = lipgloss.Color("131") // "no" button
+	Green     color.Color = lipgloss.Color("118") // success, diff additions, read-only tools
+	GreenDeep color.Color = lipgloss.Color("71")  // "yes" button
+	Amber     color.Color = lipgloss.Color("220") // warnings, writes, diff hunks
+	Orange    color.Color = lipgloss.Color("208") // edit, outside the sandbox
+	Red       color.Color = lipgloss.Color("196") // errors, deletions, shell
+	RedDeep   color.Color = lipgloss.Color("131") // "no" button
 )
 
 // Rainbow is the logo's per-letter cycle (ANSI 256).

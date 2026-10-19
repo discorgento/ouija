@@ -34,6 +34,9 @@ type Config struct {
 	// the contents the user trusted (`ouija trust`); see internal/app/trust.go.
 	TrustedProjects map[string]string `json:"trustedProjects,omitempty"`
 
+	// Theme is the UI's color theme (internal/theme; "" is ouija's own).
+	Theme string `json:"theme,omitempty"`
+
 	// Legacy fields — kept for backward compat with old configs.
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`

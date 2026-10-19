@@ -33,6 +33,7 @@ print the one in use.
 | `apiKeys` | `map[string]string` | No | API keys per provider. Empty = not configured |
 | `defaults.provider` | `string` | Yes (if defaults block) | Default provider name |
 | `defaults.model` | `string` | Yes (if defaults block) | Default model ID |
+| `theme` | `string` | No | UI color theme: `ouija` (default), `catppuccin`, `dracula`, `mono`. Set by `/theme` in the chat; `OUIJA_THEME` overrides it |
 
 Legacy flat `provider`/`model` fields at the top level are still read for
 backward compatibility.

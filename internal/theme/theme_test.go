@@ -1,10 +1,13 @@
 package theme
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/discorgento/ouija/internal/ouijaconfig"
 )
 
 func TestGradient(t *testing.T) {
@@ -36,5 +39,42 @@ func TestGradientTextKeepsTheText(t *testing.T) {
 	}
 	if strings.Count(out, "\x1b[") < len(strings.ReplaceAll(s, " ", "")) {
 		t.Fatal("not every non-space rune is colored")
+	}
+}
+
+// A theme replaces the colors; an unknown name keeps them.
+func TestApplyTheme(t *testing.T) {
+	saved := []any{Pink, Green, Current, Rainbow, append([]color.Color(nil), gradientStops...)}
+	t.Cleanup(func() {
+		Pink, Green, Current, Rainbow = saved[0].(color.Color), saved[1].(color.Color), saved[2].(string), saved[3].([]color.Color)
+		gradientStops = saved[4].([]color.Color)
+	})
+	apply("nope")
+	if Current != "ouija" {
+		t.Fatalf("an unknown theme changed Current to %q", Current)
+	}
+	apply("Dracula")
+	if Current != "dracula" || Hex(Pink) != "#ff79c6" || Hex(Green) != "#50fa7b" || Rainbow[0] != Pink {
+		t.Fatalf("dracula: current=%q pink=%s green=%s", Current, Hex(Pink), Hex(Green))
+	}
+	if names := Names(); names[0] != "ouija" || len(names) != 4 {
+		t.Fatalf("names = %v", names)
+	}
+}
+
+// Save writes the theme to the global config; an unknown one is refused.
+func TestSaveTheme(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("APPDATA", t.TempDir())
+	if err := Save("nope"); err == nil {
+		t.Fatal("saved an unknown theme")
+	}
+	if err := Save("mono"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ouijaconfig.Load()
+	if err != nil || cfg == nil || cfg.Theme != "mono" {
+		t.Fatalf("config theme = %+v, %v", cfg, err)
 	}
 }
