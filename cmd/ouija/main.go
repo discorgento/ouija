@@ -143,11 +143,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// A result that cannot be encoded fails the run: printing nothing and
+	// exiting 0 lost a paid-for result without a word.
+	text, ferr := registry.Format(out.Result)
 	if flags.JSON {
-		b, _ := json.MarshalIndent(out.Result, "", "  ")
-		fmt.Fprintln(stdout, string(b))
+		var b []byte
+		b, ferr = json.MarshalIndent(out.Result, "", "  ")
+		text = string(b)
+	}
+	if ferr != nil {
+		fmt.Fprintf(stderr, "error: the result cannot be printed: %v\n%+v\n", ferr, out.Result)
+		return 1
+	}
+	if flags.JSON {
+		fmt.Fprintln(stdout, text)
 	} else {
-		fmt.Fprintln(stdout, termsafe.Clean(registry.Render(out.Result))) // model-written text
+		fmt.Fprintln(stdout, termsafe.Clean(text)) // model-written text
 	}
 
 	tokens, steps, usd := out.Engine.Spent()

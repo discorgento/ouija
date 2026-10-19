@@ -20,10 +20,14 @@ import (
 	"github.com/discorgento/ouija/internal/mcp"
 )
 
-// App is a ready-to-use harness: the engine every totem runs on, plus the
+// App is a ready-to-use harness: the engine App.Run runs totems on, plus the
 // config it was built from.
 type App struct {
-	// Engine is the shared engine: ReAct loop, tools, budget, sandbox, trace.
+	// Engine is the shared engine App.Run uses: ReAct loop, tools, budget,
+	// sandbox, trace. Its budget adds up over every App.Run; a long-lived host
+	// that runs one totem per request should Setup a fresh App per request.
+	// ServeMCP does not use it: each MCP call gets a fresh engine built from
+	// the same config, with its own budget.
 	Engine *engine.Engine
 	// Config is the effective config after layer discovery and validation.
 	Config *engine.Config
@@ -89,12 +93,17 @@ func Setup(ctx context.Context, opts ...Option) (*App, error) {
 	}, nil
 }
 
-// ServeMCP serves the Model Context Protocol on in/out until in reaches EOF —
-// every registered totem becomes a `<name>_<totem>` tool callable by harnesses
-// like Claude Code, Cursor or OpenCode. Diagnostics go to stderr; stdout
-// carries the protocol.
+// ServeMCP serves the Model Context Protocol on in/out until in reaches EOF
+// or ctx ends — every registered totem becomes a `<name>_<totem>` tool
+// callable by harnesses like Claude Code, Cursor or OpenCode. Diagnostics go
+// to stderr; stdout carries the protocol. Each tool call runs on a fresh
+// engine from the App's config (its own budget, no approval UI, so write
+// tools are denied unless the config allows them) — not on App.Engine, whose
+// runtime setters therefore do not apply here.
 func (a *App) ServeMCP(ctx context.Context, in io.Reader, out io.Writer) error {
-	srv, err := mcp.New(nil)
+	srv, err := mcp.New(func(f string, args ...any) {
+		fmt.Fprintf(os.Stderr, "[%s-mcp] "+f+"\n", append([]any{a.name}, args...)...)
+	})
 	if err != nil {
 		return fmt.Errorf("mcp: %w", err)
 	}

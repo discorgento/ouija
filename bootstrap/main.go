@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -50,6 +51,21 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	if argv[1] == "mcp" {
+		// --config is honoured; anything else is a usage error (it was
+		// silently ignored, serving another project's config).
+		fs := flag.NewFlagSet(bin+" mcp", flag.ContinueOnError)
+		fs.SetOutput(stderr)
+		configPath := fs.String("config", "", "path to a JSON config")
+		if err := fs.Parse(argv[2:]); err != nil {
+			return 2
+		}
+		if fs.NArg() > 0 {
+			fmt.Fprintf(stderr, "unexpected argument %q (usage: %s mcp [--config file])\n", fs.Arg(0), bin)
+			return 2
+		}
+		if *configPath != "" {
+			opts = append(opts, WithConfigPath(*configPath))
+		}
 		app, err := Setup(ctx, opts...)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
@@ -93,11 +109,22 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
+	// A result that cannot be encoded fails the run instead of printing
+	// nothing and exiting 0.
+	text, ferr := registry.Format(out)
 	if flags.JSON {
-		b, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Fprintln(stdout, string(b))
+		var b []byte
+		b, ferr = json.MarshalIndent(out, "", "  ")
+		text = string(b)
+	}
+	if ferr != nil {
+		fmt.Fprintf(stderr, "error: the result cannot be printed: %v\n%+v\n", ferr, out)
+		return 1
+	}
+	if flags.JSON {
+		fmt.Fprintln(stdout, text)
 	} else {
-		fmt.Fprintln(stdout, termsafe.Clean(registry.Render(out))) // model-written text
+		fmt.Fprintln(stdout, termsafe.Clean(text)) // model-written text
 	}
 	tokens, steps, usd := a.Engine.Spent()
 	fmt.Fprintf(stderr, "\n%s · %d tokens · %d steps · $%.2f\n", a.Config.Model, tokens, steps, usd)

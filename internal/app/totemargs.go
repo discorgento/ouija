@@ -37,7 +37,11 @@ func ParseTotemArgs(name string, argv []string, stderr io.Writer) (registry.Args
 	fs.StringVar(&f.TraceFile, "trace-file", "", "path to write a Perfetto JSON trace")
 	fs.BoolVar(&f.JSON, "json", false, "print the raw JSON result")
 	params := registry.ParamsFlag{}
-	fs.Var(params, "set", "named input key=value (repeatable; JSON values allowed)")
+	var schema map[string]any
+	if t, ok := registry.Get(name); ok {
+		schema = registry.InputSchema(t)
+	}
+	fs.Var(&registry.TypedParams{Values: params, Schema: schema}, "set", "named input key=value (repeatable; typed by the totem's inputs, JSON for the rest)")
 	if err := fs.Parse(rest); err != nil {
 		return registry.Args{}, f, ErrUsage // flag already printed why
 	}

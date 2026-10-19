@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/discorgento/ouija/engine"
 )
@@ -89,10 +90,34 @@ func InputSchema(t Totem) map[string]any {
 // InputSchema, then Init (if t is an Initializer), Run, and Cleanup (if t is
 // a Cleaner — always, also after a failed Init). Hosts run totems through it
 // instead of calling Run, so every entrypoint behaves the same.
+//
+// One registered value serves every call — the MCP server runs calls
+// concurrently. A totem with Init or Cleanup keeps per-run state in its
+// struct, so its invocations are serialized (overlapping, one call closed
+// another's file); a totem without them runs concurrently and must not keep
+// per-run state. A panic in the totem is returned as an error, so one bad
+// call cannot take a long-running host down.
 func Invoke(ctx context.Context, eng *engine.Engine, t Totem, args Args) (result any, err error) {
+	// A "task" given as a parameter (--set task=…, an MCP argument) is the
+	// task: the required check accepted it, but Run saw an empty Args.Task.
+	if s, ok := args.Params["task"].(string); ok && strings.TrimSpace(args.Task) == "" {
+		args.Task = s
+	}
 	if err := checkRequired(InputSchema(t), args); err != nil {
 		return nil, fmt.Errorf("%s: %w", t.Name(), err)
 	}
+	_, hasInit := t.(Initializer)
+	_, hasCleanup := t.(Cleaner)
+	if hasInit || hasCleanup {
+		mu := stateLock(t.Name())
+		mu.Lock()
+		defer mu.Unlock()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = nil, fmt.Errorf("%s: panic: %v", t.Name(), r)
+		}
+	}()
 	if c, ok := t.(Cleaner); ok {
 		defer func() {
 			if cerr := c.Cleanup(); cerr != nil && err == nil {
@@ -106,6 +131,21 @@ func Invoke(ctx context.Context, eng *engine.Engine, t Totem, args Args) (result
 		}
 	}
 	return t.Run(ctx, eng, args)
+}
+
+var (
+	stateLocksMu sync.Mutex
+	stateLocks   = map[string]*sync.Mutex{}
+)
+
+// stateLock is the mutex serializing a stateful totem's invocations.
+func stateLock(name string) *sync.Mutex {
+	stateLocksMu.Lock()
+	defer stateLocksMu.Unlock()
+	if stateLocks[name] == nil {
+		stateLocks[name] = &sync.Mutex{}
+	}
+	return stateLocks[name]
 }
 
 // checkRequired reports the first input the schema requires that args lacks.
@@ -165,6 +205,36 @@ func (p ParamsFlag) Set(s string) error {
 	return nil
 }
 
+// TypedParams collects `--set key=value` like ParamsFlag, typing each value by
+// the totem's InputSchema: a property declared "string" keeps the text as
+// typed — `--set ticket=1234` became the number 1234, which a string field
+// then refused to decode, so the same totem worked over MCP and failed on the
+// CLI. Other or undeclared keys are read as JSON, as ParamsFlag does.
+type TypedParams struct {
+	Values ParamsFlag
+	Schema map[string]any
+}
+
+func (p *TypedParams) String() string { return p.Values.String() }
+
+// Set parses one key=value.
+func (p *TypedParams) Set(s string) error {
+	k, v, ok := strings.Cut(s, "=")
+	if ok && propertyType(p.Schema, k) == "string" {
+		p.Values[k] = v
+		return nil
+	}
+	return p.Values.Set(s)
+}
+
+// propertyType is the "type" a schema declares for a top-level property.
+func propertyType(schema map[string]any, key string) string {
+	props, _ := schema["properties"].(map[string]any)
+	prop, _ := props[key].(map[string]any)
+	t, _ := prop["type"].(string)
+	return t
+}
+
 // Renderer is an optional interface a totem result can implement to control
 // its human-facing terminal output (the CLI falls back to JSON otherwise).
 type Renderer interface {
@@ -172,13 +242,24 @@ type Renderer interface {
 }
 
 // Render turns a totem result into text: its Render() when it is a Renderer,
-// else indented JSON.
+// else indented JSON. A result JSON cannot encode (a NaN, a channel) is shown
+// with the reason, never as an empty string; Format returns that error.
 func Render(v any) string {
-	if r, ok := v.(Renderer); ok {
-		return r.Render()
+	s, err := Format(v)
+	if err != nil {
+		return fmt.Sprintf("(result not encodable as JSON: %v)\n%+v", err, v)
 	}
-	b, _ := json.MarshalIndent(v, "", "  ")
-	return string(b)
+	return s
+}
+
+// Format is Render that reports a result JSON cannot encode, so a host can
+// fail instead of printing nothing and exiting 0.
+func Format(v any) (string, error) {
+	if r, ok := v.(Renderer); ok {
+		return r.Render(), nil
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	return string(b), err
 }
 
 var totems = map[string]Totem{}

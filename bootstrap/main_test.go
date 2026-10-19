@@ -1,8 +1,10 @@
 package bootstrap
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -69,5 +71,18 @@ func TestMainExitCodes(t *testing.T) {
 	}
 	if code, _, errOut := runMain(t, "bootstrap-echo", "fail"); code != 1 || !strings.Contains(errOut, "asked to fail") {
 		t.Errorf("failing totem: exit %d, %q", code, errOut)
+	}
+}
+
+// `<bin> mcp` takes --config and refuses anything else (it ignored both).
+func TestMCPArgs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"bin", "mcp", "install"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
+		t.Fatalf("mcp install: exit %d, want 2 (usage)", code)
+	}
+	stderr.Reset()
+	code := run(context.Background(), []string{"bin", "mcp", "--config", filepath.Join(t.TempDir(), "missing.json")}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "missing.json") {
+		t.Fatalf("mcp --config <missing>: exit %d, stderr %q; want the path honoured (and refused)", code, stderr.String())
 	}
 }

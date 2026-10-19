@@ -316,7 +316,12 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 			s.writeToolResult(out, req.ID, toolErrorText(runErr), true)
 			return
 		}
-		s.writeToolResult(out, req.ID, registry.Render(result), false)
+		text, ferr := registry.Format(result)
+		if ferr != nil {
+			s.writeToolResult(out, req.ID, fmt.Sprintf("the result cannot be encoded: %v\n%+v", ferr, result), true)
+			return
+		}
+		s.writeToolResult(out, req.ID, text, false)
 	})
 }
 

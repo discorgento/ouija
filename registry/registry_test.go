@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/discorgento/ouija/engine"
 )
@@ -223,4 +227,94 @@ func TestRegisterRejectsLegacyInit(t *testing.T) {
 		}
 	}()
 	Register(&legacyTotem{fakeTotem{name: "legacy"}})
+}
+
+// statefulTotem keeps per-run state from Init to Cleanup.
+type statefulTotem struct {
+	active, overlaps int32
+}
+
+func (s *statefulTotem) Name() string    { return "stateful" }
+func (s *statefulTotem) Summary() string { return "" }
+func (s *statefulTotem) Init(context.Context, *engine.Engine) error {
+	if atomic.AddInt32(&s.active, 1) > 1 {
+		atomic.AddInt32(&s.overlaps, 1)
+	}
+	return nil
+}
+func (s *statefulTotem) Run(context.Context, *engine.Engine, Args) (any, error) {
+	time.Sleep(time.Millisecond)
+	return "ok", nil
+}
+func (s *statefulTotem) Cleanup() error { atomic.AddInt32(&s.active, -1); return nil }
+
+// A totem with Init/Cleanup never runs two invocations at once (the MCP
+// server calls one registered value concurrently).
+func TestInvokeSerializesStatefulTotems(t *testing.T) {
+	s := &statefulTotem{}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() { _, _ = Invoke(context.Background(), nil, s, Args{}) })
+	}
+	wg.Wait()
+	if s.overlaps != 0 {
+		t.Fatalf("%d overlapping invocations", s.overlaps)
+	}
+}
+
+type panicTotem struct{}
+
+func (panicTotem) Name() string    { return "boom" }
+func (panicTotem) Summary() string { return "" }
+func (panicTotem) Run(context.Context, *engine.Engine, Args) (any, error) {
+	panic("boom")
+}
+
+// A panic in a totem is an error, not a crash of the host.
+func TestInvokeRecoversPanics(t *testing.T) {
+	if _, err := Invoke(context.Background(), nil, panicTotem{}, Args{Task: "x"}); err == nil || !strings.Contains(err.Error(), "panic") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type echoTotem struct{}
+
+func (echoTotem) Name() string                                                 { return "echo" }
+func (echoTotem) Summary() string                                              { return "" }
+func (echoTotem) Run(_ context.Context, _ *engine.Engine, a Args) (any, error) { return a.Task, nil }
+
+// A task given as a parameter reaches Args.Task.
+func TestInvokeTaskFromParams(t *testing.T) {
+	out, err := Invoke(context.Background(), nil, echoTotem{}, Args{Params: map[string]any{"task": "hello"}})
+	if err != nil || out != "hello" {
+		t.Fatalf("out = %v, err = %v", out, err)
+	}
+}
+
+// A string input stays a string on the command line; others are JSON.
+func TestTypedParams(t *testing.T) {
+	schema := map[string]any{"properties": map[string]any{
+		"ticket": map[string]any{"type": "string"}, "passes": map[string]any{"type": "integer"},
+	}}
+	p := &TypedParams{Values: ParamsFlag{}, Schema: schema}
+	for _, s := range []string{"ticket=1234", "passes=2", "other=true"} {
+		if err := p.Set(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p.Values["ticket"] != "1234" || p.Values["passes"] != float64(2) || p.Values["other"] != true {
+		t.Fatalf("values = %#v", p.Values)
+	}
+}
+
+// A result JSON cannot encode is an error from Format, and Render still says
+// something instead of returning "".
+func TestFormatUnencodable(t *testing.T) {
+	v := map[string]any{"score": math.NaN()}
+	if _, err := Format(v); err == nil {
+		t.Fatal("Format accepted a NaN")
+	}
+	if Render(v) == "" {
+		t.Fatal("Render returned an empty string")
+	}
 }
