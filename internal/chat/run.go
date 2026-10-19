@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // Run starts the chat TUI. It blocks until the user exits.

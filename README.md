@@ -16,21 +16,61 @@ shared engine — provider adapters, sandboxed file tools, budget enforcement,
 tracing, structured logging, automatic provider fallback — reused by every totem
 and by the interactive chat TUI.
 
-> The metaphor is literal: a ouija board needs **several hands** reaching a
-> consensus to spell out an answer — exactly the *self-consistency* of the N
-> independent passes + reconcile in the `task` totem.
+> **A totem is an agent written in compiled Go code**, not YAML or Markdown. You get types, unit tests and golden files for the flow itself, while the engine enforces the cost budget, traces every step to Perfetto, sandboxes every tool call and exposes the agent over MCP. Reconciliation and retry are ordinary `for` loops — not instructions a model may or may not follow.
+
+The metaphor is literal: a ouija board needs **several hands** reaching a
+consensus to spell out an answer — exactly the *self-consistency* of the N
+independent passes + reconcile in the `task` totem.
 
 ```mermaid
 flowchart LR
     CLI["ouija CLI<br/>task · doc · sticker · chat"] --> APP["internal/app<br/>config → provider → engine"]
     MCP["ouija mcp<br/>MCP over stdio"] --> APP
-    APP --> ENG["internal/engine<br/>ReAct loop · tools · budget · trace"]
+    APP --> ENG["engine<br/>ReAct loop · tools · budget · trace"]
     ENG --> PROV["providers/<br/>anthropic · openai · openrouter · opencode · ollama"]
     APP --> TOTEMS["totems/<br/>task · doc · sticker"]
 ```
 
 The engine knows nothing about tasks or documents — every totem defines its own
 flow on top. See [Architecture](docs/explanation/architecture.md).
+
+### Totems you own
+
+The engine is **not locked away in `internal/`**. The `engine`, `registry` and
+`schema` packages are public Go modules, so you can write a totem in *your own
+repository*, build it into *your own binary*, and still get the full engine —
+budget, trace, sandbox and MCP — for free:
+
+```go
+// github.com/you/your-agents/totems/sentinel/sentinel.go
+package sentinel
+
+import (
+    "context"
+    "github.com/discorgento/ouija/engine"
+    "github.com/discorgento/ouija/registry"
+)
+
+type Totem struct{}
+
+func (t *Totem) Name() string    { return "sentinel" }
+func (t *Totem) Summary() string { return "Example external totem" }
+func (t *Totem) Init(context.Context, *engine.Engine, *engine.Config) error { return nil }
+func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
+    res, err := eng.Run(ctx, engine.RunRequest{Label: "sentinel", Prompt: args.Task})
+    if err != nil {
+        return nil, err
+    }
+    return map[string]string{"summary": res.Text}, nil
+}
+func (t *Totem) Cleanup() error { return nil }
+
+func init() { registry.Register(&Totem{}) }
+```
+
+`go build ./cmd/totem` produces a standalone binary with your totem and the
+full engine behind it. No fork, no upstream rebuild. Walkthrough:
+[Add a totem](docs/how-to/add-totem.md).
 
 ---
 

@@ -23,7 +23,7 @@ PR cannot merge.
 While iterating:
 
 ```sh
-go test ./internal/engine -run TestBashDenylist -v
+go test ./engine -run TestBashDenylist -v
 make test-race          # before touching concurrency (chat, engine)
 ```
 

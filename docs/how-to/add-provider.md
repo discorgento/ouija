@@ -34,7 +34,7 @@ type Provider interface {
 ### 1. Create the file
 
 ```sh
-touch internal/engine/providers/mistral.go
+touch engine/providers/mistral.go
 ```
 
 ### 2. Register in init
@@ -46,7 +46,7 @@ import (
     "context"
     "fmt"
     "iter"
-    "github.com/discorgento/ouija/internal/engine"
+    "github.com/discorgento/ouija/engine"
 )
 
 func init() {

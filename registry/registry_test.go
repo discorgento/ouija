@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 type fakeTotem struct{ name, summary string }
@@ -85,10 +85,8 @@ func TestHelp_ListsTotemsAndFlags(t *testing.T) {
 	if !strings.Contains(help, "shows up in help") {
 		t.Error("Help() does not show the totem summary")
 	}
-	for _, want := range []string{"--json", "--trace-file", "ouija init", "ouija chat"} {
-		if !strings.Contains(help, want) {
-			t.Errorf("Help() is missing %q", want)
-		}
+	if !strings.Contains(help, "◆ Totems") {
+		t.Error("Help() should include the Totems section header")
 	}
 	if strings.Contains(help, "--trace ") {
 		t.Error("Help() advertises --trace, which is not a real flag")

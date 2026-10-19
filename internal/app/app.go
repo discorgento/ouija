@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/discorgento/ouija/internal/engine"
-	"github.com/discorgento/ouija/internal/engine/providers"
+	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
-	"github.com/discorgento/ouija/internal/registry"
+	"github.com/discorgento/ouija/registry"
 )
 
 // Outcome is the result of running a totem, plus the engine/config for stats.

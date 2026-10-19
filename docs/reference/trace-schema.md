@@ -56,7 +56,7 @@ The category is derived from the name: `chat`/`phase2` → `chat`, a `tool.` pre
     "dur": 80000,
     "pid": 1,
     "tid": 1,
-    "args": {"tool": "read_file", "path": "internal/engine/trace.go"}
+    "args": {"tool": "read_file", "path": "engine/trace.go"}
   }
 ]
 ```

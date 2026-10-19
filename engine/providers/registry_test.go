@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // TestKeyless checks the keyless helper the doctor relies on.

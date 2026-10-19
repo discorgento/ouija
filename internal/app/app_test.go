@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
-	"github.com/discorgento/ouija/internal/registry"
+	"github.com/discorgento/ouija/registry"
 )
 
 // isolateGlobalConfig points the global (~/.config/ouija) lookup at a temp dir

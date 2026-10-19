@@ -12,14 +12,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/chat"
 	"github.com/discorgento/ouija/internal/commands"
-	"github.com/discorgento/ouija/internal/engine"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/mcp"
-	"github.com/discorgento/ouija/internal/registry"
 	"github.com/discorgento/ouija/internal/version"
+	"github.com/discorgento/ouija/registry"
 
 	_ "github.com/discorgento/ouija/totems"
 )
@@ -28,16 +28,61 @@ func main() {
 	os.Exit(run(os.Args, os.Stdout, os.Stderr))
 }
 
+// help renders the CLI-specific help banner and command sections, splicing in
+// the list of registered totems (which the registry renders generically).
+func help() string {
+	var b strings.Builder
+	b.WriteString("🔮  ouija — multi-totem AI harness · any project · any LLM\n")
+	b.WriteString(registry.Help())
+
+	b.WriteString("\n  ◆ Setup\n")
+	b.WriteString("      setup      Interactive global config wizard (API keys + provider)\n")
+	b.WriteString("      init       Create .ouija/config.json (interactive)\n")
+	b.WriteString("      config     Change provider/model (interactive)\n")
+	b.WriteString("      doctor     Diagnose config, provider key, and harness wiring\n")
+
+	b.WriteString("\n  ◆ Development\n")
+	b.WriteString("      generate   Scaffold a new totem (interactive)\n")
+	b.WriteString("                   ouija generate totem\n")
+
+	b.WriteString("\n  ◆ Workflow\n")
+	b.WriteString("      chat       Interactive chat with project-aware AI\n")
+	b.WriteString("                   ouija chat\n")
+	b.WriteString("      learn      Save/show knowledge about the project\n")
+	b.WriteString("                   ouija learn \"fact\"\n")
+	b.WriteString("      task       Analyze a task and produce a plan\n")
+	b.WriteString("                   ouija task \"description\"\n")
+
+	b.WriteString("\n  ◆ Harnesses\n")
+	b.WriteString("      mcp        Serve/connect the MCP server for any agent\n")
+	b.WriteString("                   ouija mcp · ouija mcp install · ouija mcp status\n")
+
+	b.WriteString("\n  ◆ Flags\n")
+	b.WriteString("      --json            Print raw JSON\n")
+	b.WriteString("      --trace-file <f>  Perfetto JSON trace\n")
+
+	b.WriteString("\n  ◆ Info\n")
+	b.WriteString("      version            Print the version\n")
+	b.WriteString("      help               Show this help\n")
+
+	b.WriteString("\n  ◆ Example\n")
+	b.WriteString("      ouija init\n")
+	b.WriteString("      ouija chat\n")
+	b.WriteString("      ouija learn \"This module uses React\"\n")
+	b.WriteString("      ouija task \"Fix sorting bug\"\n")
+	return b.String()
+}
+
 // run is the testable entry point: it returns the exit code instead of calling
 // os.Exit, and writes to the given streams instead of the process globals.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 {
-		fmt.Fprint(stdout, registry.Help())
+		fmt.Fprint(stdout, help())
 		return 0
 	}
 	switch args[1] {
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, registry.Help())
+		fmt.Fprint(stdout, help())
 		return 0
 	case "version", "-v", "--version":
 		fmt.Fprintln(stdout, "ouija "+version.Version)
@@ -66,7 +111,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	name := args[1]
 	if _, ok := registry.Get(name); !ok {
-		fmt.Fprintf(stderr, "unknown totem: %s\n\n%s", name, registry.Help())
+		fmt.Fprintf(stderr, "unknown totem: %s\n\n%s", name, help())
 		return 1
 	}
 

@@ -10,6 +10,23 @@
 `ouija generate totem`, which creates, registers, and installs the new totem
 in one step.
 
+## Where to put your totem
+
+Two valid homes, same interface:
+
+| | In the ouija repo | In **your** repo |
+|---|---|---|
+| Package | `totems/<name>/` | `github.com/you/your-agents/totems/<name>/` |
+| Import | `github.com/discorgento/ouija/engine` + `.../registry` | same |
+| Registration | auto via `go:generate ./totems/` | manual: `init() { registry.Register(...) }` |
+| Distribution | ships inside the `ouija` binary | `go build ./cmd/…` → your own binary |
+| Engine features | all | all (budget, trace, sandbox, MCP) |
+
+You never have to fork ouija. `engine`, `registry` and `schema` are public Go
+packages — import them into your own module, register your totems, and build a
+standalone binary. If you also want the standard ouija CLI (`setup`, `chat`,
+`mcp`), you can either ship it alongside or call `ouija task` as a subprocess.
+
 ## The Totem interface
 
 ```go
@@ -236,6 +253,40 @@ eng.Run(ctx, engine.RunRequest{
 - The `root` parameter is the engine's sandbox root — don't use `os.Getwd()` or hardcoded paths.
 - A custom tool is gated by the host: the `ToolRunner` applies the permission level and, for `Ask`, the approval prompt, before your `Fn` runs. A write-tier custom tool is denied by default when no `PermissionConfig` is set.
 - After `Run`, check `res.Tools` to see which tools the model called. The `task` totem uses `slices.Contains(res.Tools, "write_plan")` to decide whether to run its Go fallback.
+
+---
+
+## Build your own binary
+
+Once your totem lives in your repo, a minimal `cmd/totem/main.go` wires it up:
+
+```go
+package main
+
+import (
+    "fmt"
+    "os"
+
+    "github.com/discorgento/ouija/registry"
+    _ "github.com/you/your-agents/totems/sentinel"
+)
+
+func main() {
+    if len(os.Args) < 2 {
+        fmt.Println(registry.Help())
+        return
+    }
+    fmt.Println("would run:", os.Args[1])
+}
+```
+
+`go mod tidy` will pull `github.com/discorgento/ouija` and its engine. Build
+with `go build -o my-totem ./cmd/totem`, or cross-compile with the same flags
+ouija uses (`make dist` → `CGO_ENABLED=0 go build -trimpath`).
+
+A totem registered this way is a normal Go package: it has tests, it can ship
+in a monorepo with your product, and it gets engine upgrades by bumping a
+`go.mod` line — not by rebasing a fork.
 
 ---
 

@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/discorgento/ouija/internal/engine"
-	"github.com/discorgento/ouija/internal/engine/providers"
+	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/models"
 )
 

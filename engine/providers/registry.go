@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // registry maps a provider name to its constructor. Constructors take the API

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 
 	_ "github.com/discorgento/ouija/totems" // register the real totems for tools/list
 )

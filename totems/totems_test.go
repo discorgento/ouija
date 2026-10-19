@@ -3,7 +3,7 @@ package totems
 import (
 	"testing"
 
-	"github.com/discorgento/ouija/internal/registry"
+	"github.com/discorgento/ouija/registry"
 )
 
 // Importing this package pulls in imports_gen.go, whose blank imports run each

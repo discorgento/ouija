@@ -77,8 +77,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/discorgento/ouija/internal/engine"
-	"github.com/discorgento/ouija/internal/registry"
+	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/registry"
 )
 
 func init() { registry.Register(&%[2]s{}) }

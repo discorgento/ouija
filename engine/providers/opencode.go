@@ -5,7 +5,7 @@ import (
 	"iter"
 	"time"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // ── OpenCode Zen ──────────────────────────────────────────────────────────

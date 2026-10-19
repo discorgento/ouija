@@ -3,7 +3,7 @@ package chat
 import (
 	"strings"
 
-	"github.com/discorgento/ouija/internal/engine/providers"
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/models"
 )
 

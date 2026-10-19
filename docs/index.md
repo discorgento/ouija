@@ -30,7 +30,7 @@ accomplish, look up, understand. Every page follows
 | [Run a totem](how-to/run-totems.md) | `task`, `doc`, `sticker`, `learn`, per-run stats |
 | [Use the chat TUI](how-to/chat.md) | Approvals, permissions, queueing, sessions |
 | [MCP integration](how-to/integrate-mcp.md) | Using ouija from OpenCode, Claude Code, Cursor |
-| [Add a totem](how-to/add-totem.md) | Step-by-step walkthrough to create a new totem |
+| [Add a totem](how-to/add-totem.md) | Create a new totem — in the ouija repo or your own |
 | [Add a provider](how-to/add-provider.md) | Implementing a new LLM backend provider |
 | [Contribute](how-to/contribute.md) | Workflow, code conventions, commits, tests |
 

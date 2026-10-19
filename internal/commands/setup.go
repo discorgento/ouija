@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"charm.land/huh/v2"
-	"github.com/discorgento/ouija/internal/engine/providers"
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/models"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 )

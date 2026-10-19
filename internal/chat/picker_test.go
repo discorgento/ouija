@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // The project's modelSuggestions must surface in the /model list, pinned before

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/version"
 )

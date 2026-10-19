@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // ─── /model suggestions ───────────────────────────────────────────────────

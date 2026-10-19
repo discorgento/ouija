@@ -3,7 +3,7 @@ package providers
 import (
 	"testing"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 func sampleMsgs() []engine.Message {

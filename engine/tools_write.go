@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/discorgento/ouija/internal/schema"
+	"github.com/discorgento/ouija/schema"
 )
 
 // writeFileTool creates or overwrites a file with the given content.

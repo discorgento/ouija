@@ -69,7 +69,7 @@ never leave the runner holding stale state.
 
 ## Tool gating (permissions)
 
-Every tool call goes through `ToolRunner.Run` (`internal/engine/toolrunner.go`),
+Every tool call goes through `ToolRunner.Run` (`engine/toolrunner.go`),
 which applies its checks in a fixed order:
 
 1. **UI progress callback** — `ToolCallback` fires before anything else.

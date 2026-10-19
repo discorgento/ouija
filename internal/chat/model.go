@@ -9,8 +9,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/art"
-	"github.com/discorgento/ouija/internal/engine"
 )
 
 // line is one rendered chat entry.

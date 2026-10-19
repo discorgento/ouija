@@ -3,7 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
-	"github.com/discorgento/ouija/internal/schema"
+	"github.com/discorgento/ouija/schema"
 	"io/fs"
 	"os"
 	"path/filepath"

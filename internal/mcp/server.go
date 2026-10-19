@@ -20,10 +20,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
-	"github.com/discorgento/ouija/internal/engine"
-	"github.com/discorgento/ouija/internal/registry"
 	"github.com/discorgento/ouija/internal/version"
+	"github.com/discorgento/ouija/registry"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/discorgento/ouija/internal/schema"
+	"github.com/discorgento/ouija/schema"
 
 	"mvdan.cc/sh/v3/syntax"
 )

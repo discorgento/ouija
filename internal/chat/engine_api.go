@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 
-	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/engine"
 )
 
 // ProviderFactory builds a provider by name (e.g. "anthropic", "openai").

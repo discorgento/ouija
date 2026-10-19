@@ -8,12 +8,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/app"
-	"github.com/discorgento/ouija/internal/engine/providers"
 	"github.com/discorgento/ouija/internal/mcp"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
-	"github.com/discorgento/ouija/internal/registry"
 	"github.com/discorgento/ouija/internal/version"
+	"github.com/discorgento/ouija/registry"
 )
 
 // Doctor prints a diagnostic report of the local setup: where the binary and

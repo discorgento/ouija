@@ -72,8 +72,8 @@ func TestScaffoldTemplateUsesCurrentModulePath(t *testing.T) {
 	text := string(src)
 
 	for _, want := range []string{
-		`"github.com/discorgento/ouija/internal/engine"`,
-		`"github.com/discorgento/ouija/internal/registry"`,
+		`"github.com/discorgento/ouija/engine"`,
+		`"github.com/discorgento/ouija/registry"`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("scaffold template does not import %s", want)

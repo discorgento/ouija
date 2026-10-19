@@ -29,7 +29,7 @@ gofmt, vet, `go test -race ./...`, build) — a red PR is a PR that cannot merge
 A single package, or a single test, while iterating:
 
 ```sh
-go test ./internal/engine -run TestBashDenylist -v
+go test ./engine -run TestBashDenylist -v
 make test-race          # before touching concurrency (chat, engine)
 ```
 
@@ -169,8 +169,8 @@ packages.
 
 ## Security-sensitive code
 
-Permission gating, the sandbox (`internal/engine/sandbox.go`), the bash denylist
-(`internal/engine/tools_bash.go`) and config handling all **fail closed**: when
+Permission gating, the sandbox (`engine/sandbox.go`), the bash denylist
+(`engine/tools_bash.go`) and config handling all **fail closed**: when
 unsure, they deny. A change that makes any of them more permissive must come with
 tests proving the previous behaviour was wrong — otherwise treat it as a security
 change and open an issue before writing code.
