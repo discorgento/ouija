@@ -237,8 +237,7 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	rootAbs, _ := filepath.Abs(root)
 	var out strings.Builder
 	matches := 0
-	var walkErr error
-	walkErr = filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}

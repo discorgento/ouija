@@ -436,9 +436,6 @@ func flattenPerfetto(s *Span, pid, tid int, events *[]perfettoEvent) {
 		attrs[k] = v
 	}
 	if s.Error != "" {
-		if attrs == nil {
-			attrs = make(map[string]string)
-		}
 		attrs["error"] = s.Error
 	}
 	children := append([]*Span(nil), s.Children...)

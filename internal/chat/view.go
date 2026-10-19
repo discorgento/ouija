@@ -111,31 +111,6 @@ func renderGlamour(texts ...string) string {
 	return strings.TrimSuffix(out, "\n")
 }
 
-// writeGlamourPrefixed renders markdown through glamour at the given
-// width, then writes each resulting line to buf prefixed by pipePrefix.
-func writeGlamourPrefixed(buf *strings.Builder, text, pipePrefix string, contentWidth int) {
-	if text == "" {
-		return
-	}
-	rendered := renderGlamourFull(text, contentWidth)
-	for _, line := range strings.Split(rendered, "\n") {
-		buf.WriteString(pipePrefix)
-		buf.WriteString(line)
-		buf.WriteByte('\n')
-	}
-}
-
-// writeWrapped word-wraps plain text with a simple algorithm and writes
-// each line to buf with pipePrefix. Used for user messages which contain
-// only plain text (no markdown rendering needed).
-func writeWrapped(buf *strings.Builder, text, pipePrefix, indent string, maxWidth int, renderFn func(...string) string) {
-	for _, textLine := range wrapLines(text, indent, maxWidth) {
-		buf.WriteString(pipePrefix)
-		buf.WriteString(renderFn(strings.TrimPrefix(textLine, indent)))
-		buf.WriteByte('\n')
-	}
-}
-
 // ─── Card component ────────────────────────────────────────────────────
 
 // card is a reusable card component with background, foreground,
@@ -320,8 +295,7 @@ func (m *model) View() tea.View {
 
 	// ── status bar ─────────────────────────────────────────────────
 	elapsed := time.Since(m.startTime)
-	left = fmt.Sprintf("%s",
-		ftScope.Render(fmt.Sprintf("%d msg", m.msgCount)))
+	left = ftScope.Render(fmt.Sprintf("%d msg", m.msgCount))
 	if m.steps > 0 {
 		left += fmt.Sprintf("  %s", ftDim.Render(fmt.Sprintf("%d steps", m.steps)))
 	}
@@ -346,7 +320,7 @@ func (m *model) View() tea.View {
 		left += fmt.Sprintf("  %s", ftScope.Render(fmt.Sprintf("%d%%", int(scrollPct*100))))
 	}
 
-	right := fmt.Sprintf("%s", ftVal.Render(fmt.Sprintf("%d tok", displayTokens)))
+	right := ftVal.Render(fmt.Sprintf("%d tok", displayTokens))
 	if m.usd > 0 {
 		right = fmt.Sprintf("%s  %s", ftVal.Render(fmt.Sprintf("$%.2f", m.usd)), right)
 	}
@@ -577,13 +551,6 @@ func renderWelcomeBanner(shift int, projectRoot string) string {
 	content += bannerAction.Render("✦ Ask · 📁 Read · 🧠 ✦")
 
 	return lipgloss.NewStyle().Render(content)
-}
-
-func renderBannerLine(text string) string {
-	if text == "" {
-		return ""
-	}
-	return bannerGrad.Render(text)
 }
 
 // ─── Budget tracking ────────────────────────────────────────────────

@@ -529,12 +529,3 @@ func (m *model) handleSave(filename string) bool {
 	}
 	return true
 }
-
-// shortDur formats a duration in a compact human-readable form.
-func shortDur(d time.Duration) string {
-	d = d.Round(100 * time.Millisecond)
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
-}

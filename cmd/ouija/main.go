@@ -254,7 +254,7 @@ func cmdChat(args []string, stderr io.Writer) int {
 func cmdMcp(args []string, stdout, stderr io.Writer) int {
 	sub := "serve"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		sub, args = args[0], args[1:]
+		sub = args[0]
 	}
 
 	switch sub {

@@ -18,9 +18,6 @@ import (
 const (
 	// bashDefaultTimeout is the maximum execution time for a bash command.
 	bashDefaultTimeout = 30 * time.Second
-
-	// bashMaxOutput is the cap on command output bytes.
-	bashMaxOutput = maxToolBytes
 )
 
 // bashTool executes a shell command in the project root.

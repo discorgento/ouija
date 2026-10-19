@@ -193,11 +193,7 @@ var (
 	roleYou = lipgloss.NewStyle().Bold(true).Foreground(pink)
 	roleOui = lipgloss.NewStyle().Bold(true).Foreground(purple)
 
-	txtYou      = lipgloss.NewStyle().Foreground(pink)
-	txtDim      = lipgloss.NewStyle().Foreground(gray)
-	txtProgress = lipgloss.NewStyle().Foreground(lipgloss.Color("225")).Italic(true)
-
-	bannerGrad = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("141"))
+	txtDim = lipgloss.NewStyle().Foreground(gray)
 
 	bannerColors = []color.Color{
 		lipgloss.Color("213"),
@@ -213,9 +209,6 @@ var (
 	hdrOui  = lipgloss.NewStyle().Bold(true).Foreground(violet)
 	hdrMeta = lipgloss.NewStyle().Faint(true).Foreground(white)
 
-	inPrompt = lipgloss.NewStyle().Foreground(lipgloss.Color("183"))
-
-	ftOui   = lipgloss.NewStyle().Bold(true).Foreground(purple)
 	ftDim   = lipgloss.NewStyle().Faint(true).Foreground(white)
 	ftScope = lipgloss.NewStyle().Foreground(gray)
 	ftVal   = lipgloss.NewStyle().Foreground(violet)

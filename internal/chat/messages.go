@@ -50,12 +50,6 @@ type approvalResponseMsg struct {
 	skipExecution bool          // tool already applied externally; skip execution
 }
 
-// saveResultMsg carries the result of a save operation.
-type saveResultMsg struct {
-	path string
-	err  error
-}
-
 // editorDoneMsg is sent when the external editor closes.
 type editorDoneMsg struct {
 	err error

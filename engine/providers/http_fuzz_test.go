@@ -64,11 +64,8 @@ func FuzzSSEParse(f *testing.F) {
 				}
 				dataBuf.WriteString(d)
 
-			case strings.HasPrefix(line, ":"):
-				// SSE comment — ignore.
-
 			default:
-				// Ignore unrecognised lines (e.g. "id:", "retry:").
+				// Ignore SSE comments (":") and unrecognised lines (e.g. "id:", "retry:").
 			}
 		}
 	})

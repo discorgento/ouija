@@ -102,11 +102,8 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 			}
 			dataBuf.WriteString(data)
 
-		case strings.HasPrefix(line, ":"):
-			// SSE comment — ignore.
-
 		default:
-			// Ignore unrecognized lines (e.g. "id:", "retry:").
+			// Ignore SSE comments (":") and unrecognized lines (e.g. "id:", "retry:").
 		}
 	}
 }

@@ -210,7 +210,8 @@ func TestContextPropagation(t *testing.T) {
 	}
 
 	// Chain: child context should still propagate.
-	childCtx := context.WithValue(ctx, "extra", "value")
+	type extraKey struct{}
+	childCtx := context.WithValue(ctx, extraKey{}, "value")
 	if s := SpanFromContext(childCtx); s != span {
 		t.Fatal("expected span in child context")
 	}
