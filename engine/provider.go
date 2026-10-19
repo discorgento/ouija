@@ -117,6 +117,10 @@ type ModelInfo struct {
 // written into the code.
 type ModelLister interface {
 	ListModels(ctx context.Context) ([]ModelInfo, error)
+	// ListCacheKey identifies what the list depends on (endpoint, key), so
+	// a cached list is reused only for the same one; "" means do not cache
+	// (a local server whose models change with every pull).
+	ListCacheKey() string
 }
 
 // Provider is the model adapter every backend implements.

@@ -137,3 +137,23 @@ func TestOpenAIRepeatedIDAndCompactSSE(t *testing.T) {
 		t.Fatalf("tool calls = %+v; want read_file{path: a.go}", resp.ToolCalls)
 	}
 }
+
+// OpenRouter's list keeps only text models that take tools, sorted.
+func TestListOpenRouterFiltersModels(t *testing.T) {
+	o := NewOpenRouter("k")
+	o.client.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body := `{"data":[
+			{"id":"z/chat","supported_parameters":["tools","temperature"],"architecture":{"output_modalities":["text"]}},
+			{"id":"a/chat","supported_parameters":["tools"]},
+			{"id":"m/no-tools","supported_parameters":["temperature"]},
+			{"id":"i/image-only","supported_parameters":["tools"],"architecture":{"output_modalities":["image"]}}]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
+	})
+	got, err := o.ListModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "a/chat" || got[1].ID != "z/chat" {
+		t.Fatalf("models = %+v; want a/chat, z/chat", got)
+	}
+}

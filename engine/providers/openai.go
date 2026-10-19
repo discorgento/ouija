@@ -7,6 +7,8 @@ import (
 	"errors"
 	"iter"
 	"maps"
+	"net"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -46,6 +48,15 @@ func (o *OpenAICompat) Chat(ctx context.Context, req engine.ChatRequest) iter.Se
 }
 
 // ListModels lists the models of the API (for Ollama, the ones installed).
+// ListCacheKey implements engine.ModelLister: the endpoint and key (hashed).
+// Ollama's list is local and changes with every pull — never cached.
+func (o *OpenAICompat) ListCacheKey() string {
+	if o.name == "ollama" {
+		return ""
+	}
+	return listCacheKey(o.baseURL, o.apiKey)
+}
+
 func (o *OpenAICompat) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
 	if o.requireKey && o.apiKey == "" {
 		return nil, o.errNoKey()
@@ -76,7 +87,7 @@ func NewOpenRouter(apiKey string) *OpenAICompat {
 		h["X-Title"] = v
 	}
 	return &OpenAICompat{name: "openrouter", client: NewClient(5 * time.Minute),
-		baseURL: cmp.Or(os.Getenv("OPENROUTER_BASE_URL"), "https://openrouter.ai/api/v1"),
+		baseURL: strings.TrimRight(cmp.Or(os.Getenv("OPENROUTER_BASE_URL"), "https://openrouter.ai/api/v1"), "/"),
 		apiKey:  apiKey, headers: h, requireKey: true}
 }
 
@@ -84,7 +95,36 @@ func NewOpenRouter(apiKey string) *OpenAICompat {
 // takes no API key — it is registered as a keyless provider.
 func NewOllama() *OpenAICompat {
 	return &OpenAICompat{name: "ollama", client: NewClient(10 * time.Minute),
-		baseURL: cmp.Or(os.Getenv("OLLAMA_HOST"), "http://localhost:11434") + "/v1", apiKey: "ollama"}
+		baseURL: ollamaBaseURL(os.Getenv("OLLAMA_HOST")), apiKey: "ollama"}
+}
+
+// ollamaBaseURL turns OLLAMA_HOST into the OpenAI-compatible endpoint. It
+// takes the forms Ollama itself accepts — "0.0.0.0:11434", "localhost",
+// "http://host:port/" — defaulting the scheme to http and the port to 11434;
+// the raw value + "/v1" broke on all but a full URL with no trailing slash.
+func ollamaBaseURL(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "http://localhost:11434/v1"
+	}
+	if !strings.Contains(host, "://") {
+		host = "http://" + host
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Host == "" {
+		return "http://localhost:11434/v1"
+	}
+	if u.Port() == "" {
+		port := "11434"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+		u.Host = net.JoinHostPort(u.Hostname(), port)
+	}
+	if h := u.Hostname(); h == "0.0.0.0" || h == "::" { // a bind address: connect locally
+		u.Host = net.JoinHostPort("localhost", u.Port())
+	}
+	return strings.TrimRight(u.Scheme+"://"+u.Host+u.Path, "/") + "/v1"
 }
 
 // ── Shared OpenAI-compatible implementation ─────────────────────────────

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,26 +33,55 @@ const (
 // no key, a provider without a list endpoint). The built-in catalog fills in a
 // label or context size the API leaves out.
 func (s *Store) List(ctx context.Context, provider string, p engine.Provider) []Model {
-	if cached, ok := readLiveCache(provider); ok {
-		return cached
+	list, _ := s.Fetch(ctx, provider, p)
+	return list
+}
+
+// errNoLister is Fetch's error for a provider (or nil p) with no list endpoint.
+var errNoLister = errors.New("the provider has no model list to fetch")
+
+// Fetch is List that also says why it fell back to the built-in catalog: the
+// provider's error (a bad key, no network) or errNoLister. A caller can show
+// it, and should not keep a fallback as if it were the provider's list.
+func (s *Store) Fetch(ctx context.Context, provider string, p engine.Provider) ([]Model, error) {
+	lister, ok := p.(engine.ModelLister)
+	if !ok {
+		return s.Catalog(provider), errNoLister
 	}
-	if lister, ok := p.(engine.ModelLister); ok {
-		ctx, cancel := context.WithTimeout(ctx, liveTimeout)
-		defer cancel()
-		if infos, err := lister.ListModels(ctx); err == nil && len(infos) > 0 {
-			live := make([]Model, len(infos))
-			for i, info := range infos {
-				known, _ := s.ModelInfo(provider, info.ID)
-				live[i] = Model{
-					ID:            info.ID,
-					Label:         cmp.Or(info.Label, known.Label),
-					ContextWindow: max(info.ContextWindow, known.ContextWindow),
-				}
-			}
-			writeLiveCache(provider, live)
-			return live
+	// The cache is keyed by what the list depends on (endpoint, key): a
+	// list fetched through one gateway or key is never shown for another.
+	key := lister.ListCacheKey()
+	if key != "" {
+		if cached, ok := readLiveCache(provider, key); ok {
+			return cached, nil
 		}
 	}
+	ctx, cancel := context.WithTimeout(ctx, liveTimeout)
+	defer cancel()
+	infos, err := lister.ListModels(ctx)
+	if err == nil && len(infos) == 0 {
+		err = errors.New("the provider listed no models")
+	}
+	if err == nil {
+		live := make([]Model, len(infos))
+		for i, info := range infos {
+			known, _ := s.ModelInfo(provider, info.ID)
+			live[i] = Model{
+				ID:            info.ID,
+				Label:         cmp.Or(info.Label, known.Label),
+				ContextWindow: max(info.ContextWindow, known.ContextWindow),
+			}
+		}
+		if key != "" {
+			writeLiveCache(provider, key, live)
+		}
+		return live, nil
+	}
+	return s.Catalog(provider), err
+}
+
+// Catalog is the built-in model suggestions for provider — no network.
+func (s *Store) Catalog(provider string) []Model {
 	var out []Model
 	for _, id := range s.Models(provider) {
 		info, _ := s.ModelInfo(provider, id)
@@ -74,16 +104,16 @@ type liveCache struct {
 	Models    []Model   `json:"models"`
 }
 
-func liveCachePath(provider string) (string, bool) {
+func liveCachePath(provider, key string) (string, bool) {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "", false
 	}
-	return filepath.Join(dir, "ouija", "models", filepath.Base(provider)+".json"), true
+	return filepath.Join(dir, "ouija", "models", filepath.Base(provider)+"-"+filepath.Base(key)+".json"), true
 }
 
-func readLiveCache(provider string) ([]Model, bool) {
-	path, ok := liveCachePath(provider)
+func readLiveCache(provider, key string) ([]Model, bool) {
+	path, ok := liveCachePath(provider, key)
 	if !ok {
 		return nil, false
 	}
@@ -92,14 +122,19 @@ func readLiveCache(provider string) ([]Model, bool) {
 		return nil, false
 	}
 	var c liveCache
-	if json.Unmarshal(b, &c) != nil || len(c.Models) == 0 || time.Since(c.FetchedAt) > liveTTL {
+	if json.Unmarshal(b, &c) != nil || len(c.Models) == 0 {
+		return nil, false
+	}
+	// A timestamp in the future (a clock that was ahead) counts as stale:
+	// time.Since alone kept such a cache fresh until that date.
+	if age := time.Since(c.FetchedAt); age > liveTTL || age < -time.Minute {
 		return nil, false
 	}
 	return c.Models, true
 }
 
-func writeLiveCache(provider string, list []Model) {
-	path, ok := liveCachePath(provider)
+func writeLiveCache(provider, key string, list []Model) {
+	path, ok := liveCachePath(provider, key)
 	if !ok {
 		return
 	}

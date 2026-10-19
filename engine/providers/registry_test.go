@@ -113,3 +113,31 @@ func TestNames_isSorted(t *testing.T) {
 		}
 	}
 }
+
+func TestOllamaBaseURL(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                        "http://localhost:11434/v1",
+		"0.0.0.0:11434":           "http://localhost:11434/v1",
+		"localhost:11434":         "http://localhost:11434/v1",
+		"gpu-box":                 "http://gpu-box:11434/v1",
+		"http://localhost:11434/": "http://localhost:11434/v1",
+		"https://ollama.example":  "https://ollama.example:443/v1",
+		"http://[::1]:11434":      "http://[::1]:11434/v1",
+	} {
+		if got := ollamaBaseURL(in); got != want {
+			t.Errorf("ollamaBaseURL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestChatModelID(t *testing.T) {
+	for id, ok := range map[string]bool{
+		"gpt-4.1-mini": true, "o3": true, "openai/gpt-4o": true, "gpt-4o-mini-tts": false,
+		"text-embedding-3-small": false, "whisper-1": false, "tts-1-hd": false, "dall-e-3": false,
+		"omni-moderation-latest": false, "gpt-4o-transcribe": false, "gpt-image-1": false, "babbage-002": false,
+	} {
+		if got := chatModelID(id); got != ok {
+			t.Errorf("chatModelID(%q) = %v, want %v", id, got, ok)
+		}
+	}
+}
