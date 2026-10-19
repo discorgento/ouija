@@ -84,20 +84,26 @@
   <!-- === TOP-LEFT: ouija planchette mark (assets/logo.svg, small) === -->
   <defs>
     <linearGradient id="plEdge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ff5fd7"/>
-      <stop offset=".55" stop-color="#af87ff"/>
-      <stop offset="1" stop-color="#8700ff"/>
+      <stop offset="0" stop-color="#c39bff"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#5b21b6"/>
     </linearGradient>
   </defs>
-  <g transform="translate(48.8, 46.9) scale(0.32)" opacity="0.7">
-    <path fill="#1a0b30" stroke="url(#plEdge)" stroke-width="5" stroke-linejoin="round"
-          d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"/>
-    <circle cx="60" cy="58" r="21" fill="#0c0616" stroke="url(#plEdge)" stroke-width="4.5"/>
-    <path d="M51 50 L59 58 L51 66" fill="none" stroke="#ff8ae0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M62 67 H71" stroke="#c9a9ff" stroke-width="5" stroke-linecap="round"/>
-    <circle cx="38" cy="99" r="6.5" fill="#ff5fd7"/>
-    <circle cx="60" cy="105" r="6.5" fill="#af87ff"/>
-    <circle cx="82" cy="99" r="6.5" fill="#8a5cff"/>
+  <g transform="translate(51, 46) scale(0.34)" opacity="0.85">
+    <!-- the planchette: broad top with a soft dip, the point down to the letter -->
+    <path fill="url(#plEdge)" d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z"/>
+    <path fill="none" stroke="#ffffff" stroke-opacity=".45" stroke-width="2"
+          transform="translate(50 60) scale(.88) translate(-50 -60)"
+          d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z"/>
+    <!-- two stars -->
+    <g fill="#ffffff" fill-opacity=".85">
+      <path d="M27 40 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z"/>
+      <path d="M73 40 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z"/>
+    </g>
+    <!-- the window the answer shows through: a prompt -->
+    <circle cx="50" cy="71" r="17" fill="#130926"/>
+    <path d="M43 64 L50 71 L43 78" fill="none" stroke="#e7a6ff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M52.5 78 H59" stroke="#c4b5fd" stroke-width="5.5" stroke-linecap="round"/>
   </g>
 
   <!-- === TOP-RIGHT: decorative dots === -->

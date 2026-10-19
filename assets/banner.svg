@@ -1,72 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 840 300" role="img" aria-label="ouija — AI agents you write in Go: several hands on the board, one answer">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 0 448 200" role="img" aria-label="ouija — AI agents you write in Go">
   <defs>
-    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ff5fd7"/>
-      <stop offset=".55" stop-color="#af87ff"/>
-      <stop offset="1" stop-color="#8700ff"/>
+    <linearGradient id="pg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c39bff"/>
+      <stop offset=".5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#5b21b6"/>
     </linearGradient>
-    <linearGradient id="word" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="152" y2="0">
-      <stop offset="0" stop-color="#ff5fd7"/>
-      <stop offset=".5" stop-color="#af87ff"/>
-      <stop offset="1" stop-color="#8a5cff"/>
+    <linearGradient id="w" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="152" y2="0">
+      <stop offset="0" stop-color="#c39bff"/>
+      <stop offset=".55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#6d28d9"/>
     </linearGradient>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2b1050"/>
-      <stop offset="1" stop-color="#120620"/>
-    </linearGradient>
-    <radialGradient id="lens" cx=".5" cy=".42" r=".6">
-      <stop offset="0" stop-color="#2a1a4a"/>
-      <stop offset="1" stop-color="#0c0616"/>
-    </radialGradient>
-    <radialGradient id="aura" cx=".42" cy=".5" r=".55">
-      <stop offset="0" stop-color="#8700ff" stop-opacity=".30"/>
-      <stop offset="1" stop-color="#8700ff" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="3.4"/>
-    </filter>
-    <path id="arc1" d="M64 140 Q420 -80 776 140"/>
   </defs>
 
-  <!-- the board -->
-  <rect x="2" y="2" width="836" height="296" rx="30" fill="#0e0a19"/>
-  <rect x="2" y="2" width="836" height="296" rx="30" fill="url(#aura)"/>
-  <rect x="2" y="2" width="836" height="296" rx="30" fill="none" stroke="url(#edge)" stroke-opacity=".55" stroke-width="2"/>
-  <g fill="#af87ff" fill-opacity=".10" font-family="Georgia, 'Times New Roman', serif" font-weight="700">
-    <text font-size="21" letter-spacing="7"><textPath href="#arc1" xlink:href="#arc1" startOffset="50%" text-anchor="middle">ABCDEFGHIJKLMNOPQRSTUVWXYZ</textPath></text>
-    <text x="60" y="56" font-size="22" letter-spacing="3">YES</text>
-    <text x="780" y="56" font-size="22" letter-spacing="3" text-anchor="end">NO</text>
-    <text x="420" y="286" font-size="14" letter-spacing="6" text-anchor="middle">GOOD BYE</text>
-  </g>
-  <!-- sun and moon, faint -->
-  <g stroke="#af87ff" stroke-opacity=".14" stroke-width="2" fill="none" stroke-linecap="round">
-    <circle cx="80" cy="250" r="12"/>
-    <path d="M80 228 V222 M80 278 V272 M58 250 H52 M108 250 H102 M64 234 L60 230 M96 266 L100 270 M96 234 L100 230 M64 266 L60 270"/>
-    <path d="M770 238 A14 14 0 1 0 770 266 A11 11 0 1 1 770 238 Z" fill="#af87ff" fill-opacity=".10"/>
-  </g>
-
-  <!-- the planchette -->
-  <g transform="translate(176 72) scale(1.3)">
-    <path d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"
-          fill="none" stroke="url(#edge)" stroke-width="5" stroke-opacity=".8" filter="url(#glow)"/>
-    <path fill="url(#body)" stroke="url(#edge)" stroke-width="4" stroke-linejoin="round"
-          d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"/>
-    <circle cx="60" cy="58" r="21" fill="url(#lens)" stroke="url(#edge)" stroke-width="3.5"/>
-    <circle cx="60" cy="58" r="15.5" fill="none" stroke="#af87ff" stroke-opacity=".35" stroke-width="1.2"/>
-    <path d="M51 50 L59 58 L51 66" fill="none" stroke="#ff8ae0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M62 67 H71" stroke="#c9a9ff" stroke-width="4" stroke-linecap="round"/>
-    <path d="M47 46 A16 16 0 0 1 56 41" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/>
-    <path d="M38 99 C42 88 52 82 56 79 M82 99 C78 88 68 82 64 79 M60 104 V80" fill="none" stroke="#af87ff" stroke-opacity=".28" stroke-width="1.3" stroke-dasharray="2 3" stroke-linecap="round"/>
-    <circle cx="38" cy="99" r="5.4" fill="#ff5fd7"/>
-    <circle cx="60" cy="105" r="5.4" fill="#af87ff"/>
-    <circle cx="82" cy="99" r="5.4" fill="#8a5cff"/>
-    <path fill="#ffd1f4" d="M30 52 l1.3 3 3 1.3 -3 1.3 -1.3 3 -1.3 -3 -3 -1.3 3 -1.3 z"/>
-    <path fill="#d9c4ff" d="M90 52 l1.3 3 3 1.3 -3 1.3 -1.3 3 -1.3 -3 -3 -1.3 3 -1.3 z"/>
+  <g transform="translate(14 26) scale(1.27)">
+    <!-- the planchette: broad top with a soft dip, the point down to the letter -->
+    <path fill="url(#pg)" d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z"/>
+    <path fill="none" stroke="#ffffff" stroke-opacity=".45" stroke-width="2"
+          transform="translate(50 60) scale(.88) translate(-50 -60)"
+          d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z"/>
+    <!-- two stars -->
+    <g fill="#ffffff" fill-opacity=".85">
+      <path d="M27 40 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z"/>
+      <path d="M73 40 l1.5 3.5 3.5 1.5 -3.5 1.5 -1.5 3.5 -1.5 -3.5 -3.5 -1.5 3.5 -1.5 z"/>
+    </g>
+    <!-- the window the answer shows through: a prompt -->
+    <circle cx="50" cy="71" r="17" fill="#130926"/>
+    <path d="M43 64 L50 71 L43 78" fill="none" stroke="#e7a6ff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M52.5 78 H59" stroke="#c4b5fd" stroke-width="5.5" stroke-linecap="round"/>
   </g>
 
   <!-- the name, one stroke per letter (no font: it looks the same everywhere) -->
-  <g transform="translate(352 30) scale(1.85)">
-    <g fill="none" stroke="url(#word)" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(160 6) scale(1.62)">
+    <g fill="none" stroke="url(#w)" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="20" cy="52" r="16"/>
       <path d="M48 36 V54 A14 14 0 0 0 76 54 V36 M76 36 V68"/>
       <path d="M92 40 V68"/>
@@ -74,12 +39,10 @@
       <circle cx="136" cy="52" r="16"/>
       <path d="M152 36 V68"/>
     </g>
-    <circle cx="92" cy="22" r="5.6" fill="#ff5fd7"/>
-    <circle cx="110" cy="22" r="5.6" fill="#af87ff"/>
+    <circle cx="92" cy="22" r="5.6" fill="#c39bff"/>
+    <circle cx="110" cy="22" r="5.6" fill="#8b5cf6"/>
   </g>
 
-  <text x="362" y="234" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        font-size="22" font-weight="600" fill="#e9dcff" letter-spacing=".4">AI agents you write in Go</text>
-  <text x="362" y="260" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-        font-size="16" font-style="italic" fill="#a493c8" letter-spacing=".3">several hands on the board, one answer</text>
+  <text x="287" y="190" text-anchor="middle" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
+        font-size="19" font-weight="600" fill="#8f7cc4" letter-spacing=".3">AI agents you write in Go</text>
 </svg>

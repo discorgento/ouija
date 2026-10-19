@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="ouija — AI agents you write in Go: several hands on the board, one answer" width="720">
+  <img src="assets/banner.svg" alt="ouija — AI agents you write in Go" width="460">
 </p>
 
 <p align="center">
