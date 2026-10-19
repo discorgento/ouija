@@ -185,3 +185,15 @@ func TestKeyReleasePairing(t *testing.T) {
 		t.Fatalf("input = %q, want a release-only key handled", got)
 	}
 }
+
+// Releasing Shift before Enter must not turn the release into a second Enter
+// (the release reads "enter", the press read "shift+enter").
+func TestShiftEnterReleaseIsNotEnter(t *testing.T) {
+	m := newApprovalTestModel()
+	m.input.SetValue("line one")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	m.Update(tea.KeyReleaseMsg{Code: tea.KeyEnter})
+	if got := m.input.Value(); got != "line one\n" {
+		t.Fatalf("input = %q; want the newline only, nothing sent", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -300,7 +301,15 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 	// Clear the approval state — it will be replaced with an "editing" banner.
 	m.approvalReq = nil
 
-	editor := cmp.Or(os.Getenv("EDITOR"), "vi")
+	// EDITOR may carry arguments ("code --wait"); Windows has no vi.
+	editorArgs := strings.Fields(os.Getenv("EDITOR"))
+	if len(editorArgs) == 0 {
+		editorArgs = []string{"vi"}
+		if runtime.GOOS == "windows" {
+			editorArgs = []string{"notepad"}
+		}
+	}
+	editor := editorArgs[0]
 
 	m.lines = append(m.lines, line{
 		role: "banner",
@@ -311,7 +320,7 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 	}
 
-	return m, tea.ExecProcess(exec.Command(editor, tmpPath), func(err error) tea.Msg {
+	return m, tea.ExecProcess(exec.Command(editor, append(editorArgs[1:], tmpPath)...), func(err error) tea.Msg {
 		return editorDoneMsg{err: err}
 	})
 }

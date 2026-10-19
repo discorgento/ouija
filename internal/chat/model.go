@@ -145,7 +145,7 @@ type model struct {
 
 	// pressed holds the keys whose press was handled and whose release is
 	// still due (see the KeyReleaseMsg case).
-	pressed map[string]bool
+	pressed map[rune]bool
 
 	// pendingEdit tracks an in-progress external editor session.
 	pendingEdit *pendingEditFile

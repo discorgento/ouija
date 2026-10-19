@@ -47,9 +47,9 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.pressed == nil {
-			m.pressed = make(map[string]bool)
+			m.pressed = make(map[rune]bool)
 		}
-		m.pressed[msg.String()] = true
+		m.pressed[msg.Code] = true
 		return m.handleKey(msg)
 
 	case tea.KeyReleaseMsg:
@@ -57,8 +57,11 @@ func (m *model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// for Enter (no press event at all); most send both. A release whose
 		// press was handled is ignored — matched per key, so overlapping keys
 		// (press a, press b, release a, release b) never fire twice.
-		if k := msg.String(); m.pressed[k] {
-			delete(m.pressed, k)
+		// Matched on the key code, not String(): releasing Shift before
+		// Enter made the release read "enter" (no shift) — unmatched, so it
+		// sent the message (Windows console reports every release).
+		if m.pressed[msg.Code] {
+			delete(m.pressed, msg.Code)
 			return m, nil
 		}
 		return m.handleKey(tea.KeyPressMsg(msg))

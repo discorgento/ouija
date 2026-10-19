@@ -7,6 +7,8 @@ package atomicfile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"time"
 )
 
 // Write replaces path with data. A new file gets perm. An existing file keeps
@@ -51,7 +53,7 @@ func Write(path string, data []byte, perm os.FileMode, keepMode bool) error {
 	if err := os.Chmod(tmp, mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, target); err != nil {
+	if err := renameRetry(tmp, target); err != nil {
 		return err
 	}
 	tmp = ""
@@ -61,4 +63,19 @@ func Write(path string, data []byte, perm os.FileMode, keepMode bool) error {
 		d.Close()
 	}
 	return nil
+}
+
+// renameRetry is os.Rename, retried briefly on Windows: replacing a file
+// fails with "Access is denied" while any process (another ouija reading the
+// config, an antivirus scan) holds it open without delete sharing.
+func renameRetry(from, to string) error {
+	err := os.Rename(from, to)
+	if runtime.GOOS != "windows" {
+		return err
+	}
+	for wait := 10 * time.Millisecond; err != nil && wait <= 640*time.Millisecond; wait *= 2 {
+		time.Sleep(wait)
+		err = os.Rename(from, to)
+	}
+	return err
 }
