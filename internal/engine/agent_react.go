@@ -1,0 +1,487 @@
+package engine
+
+import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+)
+
+// RunToolFn gates and executes a tool call. Engine injects its own runTool
+// as this function so the agent loop is decoupled from permission/approval/
+// allowlist concerns.
+type RunToolFn func(ctx context.Context, label string, call ToolCall, extraFns map[string]ToolFn, extraRisk map[string]RiskTier) ToolResult
+
+// ReAct implements the Agent interface with a standard plan→act→observe loop:
+//  1. Call the provider with the current message list (+ available tools)
+//  2. If the model returns tool calls, execute them and append observations
+//  3. Repeat until the model returns text (or submit_result)
+//  4. Return the final text and the full updated conversation
+type ReAct struct {
+	provider Provider
+	toolReg  ToolRegistry
+	cfg      *Config
+	logger   *slog.Logger
+	tokenCb  TokenCallback
+	tracer   *Tracer
+	budget   *tracker
+
+	// runTool is the Engine's gated tool executor (permissions, approval,
+	// bash allowlist, escape sandbox). Injected at construction to keep
+	// ReAct decoupled from the Engine's permission system.
+	runTool RunToolFn
+}
+
+// ReActConfig groups the dependencies needed to create a ReAct agent.
+// Created by Engine.New() and wired together.
+type ReActConfig struct {
+	Provider Provider
+	ToolReg  ToolRegistry
+	Config   *Config
+	Logger   *slog.Logger
+	TokenCb  TokenCallback
+	Tracer   *Tracer
+	Budget   *tracker
+	RunTool  RunToolFn
+}
+
+// NewReAct creates a ReAct agent with the given dependencies.
+func NewReAct(cfg ReActConfig) *ReAct {
+	return &ReAct{
+		provider: cfg.Provider,
+		toolReg:  cfg.ToolReg,
+		cfg:      cfg.Config,
+		logger:   cfg.Logger,
+		tokenCb:  cfg.TokenCb,
+		tracer:   cfg.Tracer,
+		budget:   cfg.Budget,
+		runTool:  cfg.RunTool,
+	}
+}
+
+// Run implements Agent.Run. msgs already contain the user's prompt.
+// Doom-loop state reset is handled by Engine before calling Run.
+func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
+	maxTok := req.MaxTokens
+	if maxTok <= 0 {
+		maxTok = 8192
+	}
+
+	// Validate extra tools early.
+	for _, ct := range req.ExtraTools {
+		if ct.Def.Name == "" {
+			return nil, msgs, fmt.Errorf("ExtraTools contains a tool with empty Def.Name")
+		}
+		if ct.Fn == nil {
+			return nil, msgs, fmt.Errorf("extra tool %q has nil Fn", ct.Def.Name)
+		}
+	}
+
+	// Build the tool list the model sees: defaults + extras.
+	useStructured := req.Schema != nil
+
+	var toolDefs []ToolDef
+	if req.UseTools {
+		toolDefs = append(toolDefs, a.toolReg.Defs()...)
+	}
+	for _, ct := range req.ExtraTools {
+		if a.toolReg.Has(ct.Def.Name) {
+			a.logger.Warn("extra tool shadows built-in", "name", ct.Def.Name)
+		}
+		toolDefs = append(toolDefs, ct.Def)
+	}
+
+	// When using structured output, avoid the two-phase slow path for simple
+	// requests: if no tools are needed, skip Phase 1 entirely.
+	if useStructured && len(toolDefs) == 0 {
+		span := a.tracer.Start("chat")
+		resp, err := a.streamChat(ctx, ChatRequest{
+			System:    req.System,
+			Messages:  msgs,
+			Schema:    req.Schema,
+			MaxTokens: maxTok,
+			Model:     a.cfg.Model,
+		})
+		if err != nil {
+			span.SetError(err.Error())
+			span.End()
+			return nil, msgs, err
+		}
+		if berr := a.budget.add(resp.Usage); berr != nil {
+			span.SetError(berr.Error())
+			span.End()
+			return nil, msgs, berr
+		}
+		span.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
+		span.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
+		span.End()
+		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
+		if js, ok := extractJSON(resp.Text); ok {
+			return &RunResult{Text: js, Tools: nil}, msgs, nil
+		}
+		return &RunResult{Text: resp.Text, Tools: nil}, msgs, nil
+	}
+
+	// Build lookup maps for extra tool dispatch.
+	extraFns := make(map[string]ToolFn, len(req.ExtraTools))
+	extraRisk := make(map[string]RiskTier, len(req.ExtraTools))
+	for _, ct := range req.ExtraTools {
+		extraFns[ct.Def.Name] = ct.Fn
+		extraRisk[ct.Def.Name] = ct.Def.Risk
+	}
+
+	if req.Label != "" {
+		a.logger.Info("agent start", "label", req.Label)
+	}
+
+	nudges := 0
+	var toolNames []string
+	const submitToolName = submitTool
+
+	// ── Phase 1: tool-gathering loop ───────────────────────────────
+	// Runs with tools but WITHOUT Schema (no response_format) so the
+	// model can freely call tools to gather information.
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, msgs, err
+		}
+		msgs = compact(msgs)
+
+		chatSpan := a.tracer.Start("chat")
+		resp, err := a.streamChat(ctx, ChatRequest{
+			System:    req.System,
+			Messages:  msgs,
+			Tools:     toolDefs,
+			MaxTokens: maxTok,
+			Model:     a.cfg.Model,
+		})
+		if err != nil {
+			chatSpan.SetError(err.Error())
+			chatSpan.End()
+			return nil, msgs, err
+		}
+		if berr := a.budget.add(resp.Usage); berr != nil {
+			chatSpan.SetError(berr.Error())
+			chatSpan.End()
+			return nil, msgs, berr
+		}
+		if resp.StopReason == "length" {
+			a.logger.Warn("response truncated", "label", req.Label, "stop_reason", "length")
+		}
+		chatSpan.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
+		chatSpan.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
+
+		if len(resp.ToolCalls) > 0 {
+			// Deduplicate tool calls with identical name+input in the same batch.
+			seen := make(map[string]bool)
+			deduped := make([]ToolCall, 0, len(resp.ToolCalls))
+			for _, call := range resp.ToolCalls {
+				fp := fingerprint(call.Input)
+				key := call.Name + ":" + fp
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				deduped = append(deduped, call)
+			}
+			resp.ToolCalls = deduped
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text, ToolCalls: resp.ToolCalls})
+
+			// Defer submit_result to last so other tools execute in the same
+			// turn before the agent signals completion.
+			var submitResult string
+
+			// Collect all tool names for RunResult metadata.
+			for _, call := range resp.ToolCalls {
+				toolNames = append(toolNames, call.Name)
+			}
+
+			// Propagate the chat span via context so toolrunner creates child spans.
+			toolCtx := WithSpan(ctx, chatSpan)
+
+			// Classify tools: parallel-safe (read-only) run concurrently;
+			// sequential (write, bash) run one at a time.
+			parCalls, seqCalls := classifyToolCalls(resp.ToolCalls, extraRisk)
+
+			// ── Parallel execution ──────────────────────────────────────
+			if len(parCalls) > 0 {
+				type callResult struct {
+					idx    int
+					result ToolResult
+				}
+				ch := make(chan callResult, len(parCalls))
+				for i, call := range parCalls {
+					i, call := i, call
+					go func() {
+						out := a.runTool(toolCtx, req.Label, call, extraFns, extraRisk)
+						ch <- callResult{i, out}
+					}()
+				}
+				results := make([]ToolResult, len(parCalls))
+				for range len(parCalls) {
+					cr := <-ch
+					results[cr.idx] = cr.result
+				}
+				close(ch)
+				// Append results in call order so the model sees deterministic order.
+				for i, call := range parCalls {
+					msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: results[i].String()})
+				}
+			}
+
+			// ── Sequential execution ────────────────────────────────────
+			for _, call := range seqCalls {
+				if call.Name == submitToolName {
+					chatSpan.SetAttr("submit_result", "true")
+					b, _ := json.Marshal(call.Input)
+					submitResult = string(b)
+					continue
+				}
+				out := a.runTool(toolCtx, req.Label, call, extraFns, extraRisk)
+				msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: out.String()})
+			}
+			chatSpan.End()
+			if submitResult != "" {
+				return &RunResult{Text: submitResult, Tools: toolNames}, msgs, nil
+			}
+			continue
+		}
+
+		chatSpan.End()
+
+		// No tool calls this turn.
+
+		// ── Phase 2: structured output ──────────────────────────────
+		// Model signalled it's done gathering info. Make a final call
+		// with response_format enabled to get guaranteed JSON.
+		if useStructured {
+			phaseSpan := a.tracer.Start("phase2")
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
+			finalResp, err := a.streamChat(ctx, ChatRequest{
+				System:    req.System,
+				Messages:  msgs,
+				Schema:    req.Schema, // enables response_format in the provider
+				MaxTokens: maxTok,
+				Model:     a.cfg.Model,
+			})
+			if err != nil {
+				phaseSpan.SetError(err.Error())
+				phaseSpan.End()
+				return nil, msgs, err
+			}
+			if berr := a.budget.add(finalResp.Usage); berr != nil {
+				phaseSpan.SetError(berr.Error())
+				phaseSpan.End()
+				return nil, msgs, berr
+			}
+			phaseSpan.SetAttr("input_tokens", fmt.Sprintf("%d", finalResp.Usage.InputTokens))
+			phaseSpan.SetAttr("output_tokens", fmt.Sprintf("%d", finalResp.Usage.OutputTokens))
+			phaseSpan.End()
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: finalResp.Text})
+			return &RunResult{Text: finalResp.Text, Tools: toolNames}, msgs, nil
+		}
+
+		// ── Legacy fallback: submit_result + extractJSON + nudges ──
+		if req.Schema != nil {
+			if js, ok := extractJSON(resp.Text); ok {
+				msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
+				return &RunResult{Text: js, Tools: toolNames}, msgs, nil
+			}
+			maxNudges := a.cfg.MaxNudges
+			if maxNudges <= 0 {
+				maxNudges = 3
+			}
+			if nudges >= maxNudges {
+				return nil, msgs, fmt.Errorf("model did not return structured output after %d attempts", nudges)
+			}
+			nudges++
+			assistant := cmp.Or(resp.Text, "(no output)")
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: assistant})
+			msgs = append(msgs, Message{Role: RoleUser, Content: "Reply by calling the " + submitToolName + " tool with the final object (or a single JSON object)."})
+			continue
+		}
+
+		// No schema → just return the text response.
+		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
+		return &RunResult{Text: resp.Text, Tools: toolNames}, msgs, nil
+	}
+}
+
+// streamChat calls the provider's streaming Chat and accumulates events into
+// a ChatResponse. Text tokens are forwarded to a.tokenCb (if set) in real time.
+func (a *ReAct) streamChat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	timeout := time.Duration(a.cfg.StreamTimeoutSec()) * time.Second
+	chatCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		chatCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	resp, err := CollectStream(a.provider.Chat(chatCtx, req), a.tokenCb)
+	if err != nil {
+		return resp, err
+	}
+	if resp.Usage.InputTokens == 0 && resp.Usage.OutputTokens == 0 && resp.Text != "" {
+		resp.Usage.OutputTokens = estimateTokens(resp.Text)
+		if resp.Usage.OutputTokens < 1 {
+			resp.Usage.OutputTokens = 1
+		}
+		var inBuilder strings.Builder
+		if req.System != "" {
+			inBuilder.WriteString(req.System)
+		}
+		for _, m := range req.Messages {
+			inBuilder.WriteString(m.Content)
+		}
+		if n := estimateTokens(inBuilder.String()); n > 0 {
+			resp.Usage.InputTokens = n
+		}
+	}
+	return resp, nil
+}
+
+// compactKeepRecent keeps the N most recent messages verbatim; older tool
+// results get their content trimmed to bound context growth (cheap compaction).
+const compactKeepRecent = 6
+const compactTrimAt = 800
+
+// compactMaxMsgs is the maximum number of conversation messages kept in the
+// sliding window. Older messages beyond this limit are dropped to prevent
+// unbounded context growth across long chat sessions.
+const compactMaxMsgs = 60
+
+// compact trims old tool results and applies a sliding window to keep the
+// conversation size bounded. It returns the (possibly shrunk) message slice.
+// Message order is preserved; the most recent messages are kept verbatim.
+func compact(msgs []Message) []Message {
+	if len(msgs) <= compactKeepRecent {
+		return msgs
+	}
+	// 1. Trim content of older tool-result messages.
+	for i := range len(msgs) - compactKeepRecent {
+		if msgs[i].Role == RoleTool && len(msgs[i].Content) > compactTrimAt {
+			msgs[i].Content = msgs[i].Content[:compactTrimAt] + "…[compacted]"
+		}
+	}
+	// 2. Sliding window: drop oldest messages to stay within limit.
+	if len(msgs) > compactMaxMsgs {
+		n := make([]Message, compactMaxMsgs)
+		copy(n, msgs[len(msgs)-compactMaxMsgs:])
+		return n
+	}
+	return msgs
+}
+
+// compressConversation collapses tool-heavy turns into a compact form:
+// user question → final assistant response, skipping intermediate tool calls
+// and results that are useless for future turns. This prevents context bloat
+// from large file reads while preserving the model's synthesized answer.
+func compressConversation(msgs []Message) []Message {
+	n := len(msgs)
+	if n < 4 {
+		return msgs
+	}
+
+	var out []Message
+	i := 0
+	for i < n {
+		if msgs[i].Role != RoleUser {
+			out = append(out, msgs[i])
+			i++
+			continue
+		}
+		// Found a user message. Walk forward to find the turn boundaries and
+		// identify the final assistant response with actual text content.
+		turnStart := i
+		var finalContent *Message
+		var hasTools bool
+		j := i + 1
+		for j < n {
+			if msgs[j].Role == RoleUser {
+				break // next turn
+			}
+			if msgs[j].Role == RoleAssistant && len(msgs[j].ToolCalls) > 0 {
+				hasTools = true
+			}
+			if msgs[j].Role == RoleAssistant && msgs[j].Content != "" && len(msgs[j].ToolCalls) == 0 {
+				finalContent = &msgs[j]
+			}
+			j++
+		}
+		if hasTools && finalContent != nil {
+			// Compress: keep the user question, any edit/write diffs (small,
+			// useful for the model and TUI), and the final response.
+			out = append(out, msgs[turnStart])
+			for k := turnStart; k < j; k++ {
+				if msgs[k].Role == RoleTool && (strings.HasPrefix(msgs[k].Content, "✓ edited") || strings.HasPrefix(msgs[k].Content, "✓ wrote")) {
+					out = append(out, msgs[k])
+				}
+			}
+			out = append(out, *finalContent)
+		} else {
+			// No tool calls or no final content — keep verbatim.
+			for k := turnStart; k < j; k++ {
+				out = append(out, msgs[k])
+			}
+		}
+		i = j
+	}
+	return out
+}
+
+// extractJSON pulls the first balanced-looking JSON object out of free text.
+func extractJSON(s string) (string, bool) {
+	i := strings.Index(s, "{")
+	j := strings.LastIndex(s, "}")
+	if i < 0 || j <= i {
+		return "", false
+	}
+	cand := s[i : j+1]
+	var v any
+	if json.Unmarshal([]byte(cand), &v) != nil {
+		return "", false
+	}
+	return cand, true
+}
+
+// estimateTokens estimates the number of tokens in a text string when the
+// provider does not report usage. Uses a simple heuristic based on character
+// composition:
+//   - Pure ASCII text averages ~4 chars/token
+//   - Mixed/Latin-script text (Portuguese, French, etc.) averages ~3-3.5
+//   - CJK/non-Latin text averages ~1.5-2 chars/token
+//
+// This is a rough estimate — real tokenization depends on the model's
+// tokenizer. The function errs towards overestimation for non-ASCII text
+// to avoid surprise budget breaches.
+func estimateTokens(text string) int {
+	if text == "" {
+		return 0
+	}
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return len(text) / 4
+	}
+	asciiCount := 0
+	for _, r := range runes {
+		if r <= 0x7f {
+			asciiCount++
+		}
+	}
+	nonASCII := len(runes) - asciiCount
+	ratio := float64(nonASCII) / float64(len(runes))
+	switch {
+	case ratio > 0.5:
+		// Mostly non-Latin (CJK, emoji, etc.) — ~2 chars/token.
+		return len(runes) / 2
+	case ratio > 0.15:
+		// Mixed with significant non-ASCII (accented Latin, etc.) — ~3 chars/token.
+		return len(runes) / 3
+	default:
+		// Mostly ASCII — ~4 chars/token.
+		return len(runes) / 4
+	}
+}

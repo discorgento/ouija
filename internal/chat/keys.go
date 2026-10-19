@@ -1,0 +1,368 @@
+package chat
+
+import (
+	"cmp"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// ─── Key handling ─────────────────────────────────────────────────────
+
+func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Use Keystroke() instead of String() — Keystroke() always returns the
+	// symbolic key name ("enter", "esc", "left", etc.) regardless of whether
+	// the decoder populated Key.Text with the raw rune. String() can return
+	// the raw text (e.g. "\r" for Enter) on some terminal configurations,
+	// which would silently break key matching.
+	key := msg.Keystroke()
+	code := msg.Key().Code
+
+	// ── Quit ──────────────────────────────────────────────────────────
+	if key == "ctrl+c" || key == "ctrl+d" {
+		m.cancel()
+		return m, tea.Quit
+	}
+
+	// ── Approval prompt active ────────────────────────────────────
+	if m.approvalReq != nil {
+		// Match critical keys by code (not string) to avoid terminal-
+		// specific quirks with String()/Keystroke() for Enter/arrows.
+		switch {
+		case code == tea.KeyLeft || key == "left":
+			opts := approvalOptionsFor(m.approvalReq.tool)
+			m.approvalIdx = (m.approvalIdx - 1 + len(opts)) % len(opts)
+			m.rebuildContent()
+			return m, nil
+		case code == tea.KeyRight || key == "right":
+			opts := approvalOptionsFor(m.approvalReq.tool)
+			m.approvalIdx = (m.approvalIdx + 1) % len(opts)
+			m.rebuildContent()
+			return m, nil
+		case code == tea.KeyEnter || key == "enter":
+			// Confirm the currently selected option.
+			opts := approvalOptionsFor(m.approvalReq.tool)
+			opt := opts[m.approvalIdx]
+			if opt.key == "esc" {
+				return m.approvalCancel()
+			}
+			if opt.key == "e" {
+				return m.handleApprovalEdit()
+			}
+			if opt.key == "n" {
+				// A rejection blocks the whole tool for this generation, not
+				// just this target — the user does not want the agent to keep
+				// proposing it (matches the rejectedTools contract).
+				m.rejectedTools[baseTool(m.approvalReq.tool)] = true
+			}
+			m.approvalReq.respCh <- opt.resp
+			m.approvalReq = nil
+			m.setViewportSize() // restore viewport height
+			return m, nil
+		case code == tea.KeyEscape || key == "esc" || key == "escape":
+			return m.approvalCancel()
+		case key == "y":
+			if baseTool(m.approvalReq.tool) == "delete_file" {
+				return m, nil // must press 'd' for delete
+			}
+			m.approvalReq.respCh <- approvalResponseMsg{allowed: true}
+			m.approvalReq = nil
+			m.setViewportSize()
+			return m, nil
+		case key == "d":
+			if baseTool(m.approvalReq.tool) == "delete_file" {
+				m.approvalReq.respCh <- approvalResponseMsg{allowed: true}
+				m.approvalReq = nil
+				m.setViewportSize()
+				return m, nil
+			}
+			return m, nil
+		case key == "n":
+			m.rejectedTools[baseTool(m.approvalReq.tool)] = true
+			m.approvalReq.respCh <- approvalResponseMsg{allowed: false, cancelled: false}
+			m.approvalReq = nil
+			m.setViewportSize()
+			return m, nil
+		case key == "s":
+			m.approvalReq.respCh <- approvalResponseMsg{allowed: true, forSession: true}
+			m.approvalReq = nil
+			m.setViewportSize()
+			return m, nil
+		case key == "e":
+			return m.handleApprovalEdit()
+		default:
+			// Ignore other keys during approval prompt.
+			return m, nil
+		}
+	}
+
+	// ── Escape: cancel or clear queue ────────────────────────────────
+	// NB: msg.String() returns "esc" (not "escape") in bubbletea v2.
+	if key == "esc" || key == "escape" {
+		if m.waiting {
+			// Cancel current response — only the per-generation context.
+			m.generationCancelled = true
+			m.chatCancel()
+			m.chatCtx, m.chatCancel = context.WithCancel(m.ctx)
+			m.waiting = false
+			m.setViewportSize() // restore viewport height when status line disappears
+			m.partialText = ""
+			m.currentTool = ""
+			m.gen++ // invalidate stale in-flight response
+
+			m.lines = append(m.lines,
+				line{role: "banner", text: "✕ cancelled"},
+			)
+			m.rebuildContent()
+			if m.autoScroll {
+				m.vp.GotoBottom()
+			}
+
+			// Auto-dispatch next queued message if any.
+			if len(m.pendingQueue) > 0 {
+				next := m.pendingQueue[0]
+				m.pendingQueue = m.pendingQueue[1:]
+				m.waiting = true
+				m.setViewportSize() // make room for persistent status line
+				return m, m.startChat(next)
+			}
+			return m, nil
+		}
+		if len(m.pendingQueue) > 0 {
+			// Clear queue.
+			m.pendingQueue = nil
+			m.lines = append(m.lines,
+				line{role: "banner", text: "○ queue cleared"},
+			)
+			m.rebuildContent()
+			if m.autoScroll {
+				m.vp.GotoBottom()
+			}
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// ── Copy last assistant response ──────────────────────────────────
+	if key == "ctrl+y" {
+		return m.handleCopyMessage()
+	}
+
+	// ── Input history ────────────────────────────────────────────────
+	if key == "alt+up" {
+		return m.handleHistoryPrev()
+	}
+	if key == "alt+down" {
+		return m.handleHistoryNext()
+	}
+
+	// ── Viewport navigation ─────────────────────────────────────────
+	if key == "pgup" || key == "pgdown" || key == "home" || key == "end" {
+		vp, cmd := m.vp.Update(msg)
+		m.vp = vp
+		if key == "pgup" || key == "home" {
+			m.autoScroll = false
+		} else if key == "pgdown" && m.vp.ScrollPercent() >= 0.99 {
+			m.autoScroll = true
+		} else if key == "end" {
+			m.autoScroll = true
+		} else if m.vp.ScrollPercent() < 0.99 {
+			m.autoScroll = false
+		}
+		return m, cmd
+	}
+
+	// ── Slash command list / picker navigation ─────────────────────
+	if m.picker.Visible {
+		handled, confirmed := m.picker.HandleKey(key)
+		if handled {
+			if confirmed {
+				m.selectCompletion()
+				m.setViewportSize()
+				input := strings.TrimSpace(m.input.Value())
+				if strings.HasPrefix(input, "/") {
+					return m.handleSend()
+				}
+				return m, nil
+			}
+			m.setViewportSize()
+			return m, nil
+		}
+		// Key not handled by picker — let text input process it.
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		if m.updateCmdList() {
+			m.setViewportSize()
+		}
+		return m, cmd
+	}
+	if m.showCmdList {
+		switch key {
+		case "down":
+			m.selCmdIdx = (m.selCmdIdx + 1) % len(slashCmds)
+			return m, nil
+		case "up":
+			m.selCmdIdx = (m.selCmdIdx - 1 + len(slashCmds)) % len(slashCmds)
+			return m, nil
+		case "tab":
+			m.selectCompletion()
+			m.setViewportSize()
+			return m, nil
+		case "enter":
+			cmdName := strings.Fields(slashCmds[m.selCmdIdx].cmd)[0]
+			m.input.SetValue(cmdName)
+			m.showCmdList = false
+			return m.handleSend()
+		case "esc", "escape":
+			m.showCmdList = false
+			m.setViewportSize()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		if m.updateCmdList() {
+			m.setViewportSize()
+		}
+		return m, cmd
+	}
+
+	// ── Edit last message on Up with empty input ─────────────────────
+	if key == "up" && strings.TrimSpace(m.input.Value()) == "" {
+		for i := len(m.lines) - 1; i >= 0; i-- {
+			if m.lines[i].role == "user" {
+				m.input.SetValue(m.lines[i].text)
+				m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
+				m.setViewportSize()
+				break
+			}
+		}
+		return m, nil
+	}
+
+	// ── Enter / Shift+Enter / Alt+Enter ─────────────────────────────
+	if code == tea.KeyEnter {
+		// Shift+Enter or Alt+Enter → insert newline
+		if msg.Key().Mod&(tea.ModShift|tea.ModAlt) != 0 {
+			m.input.InsertString("\n")
+			m.input.SetHeight(min(m.input.Line()+1, m.input.MaxHeight))
+			m.setViewportSize()
+			return m, nil
+		}
+		// Plain Enter → send
+		return m.handleSend()
+	}
+
+	// ── Route to textarea ────────────────────────────────────────────
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	// Refresh command list when user types (e.g. "/model " → show models).
+	if m.updateCmdList() {
+		m.setViewportSize()
+	}
+	return m, cmd
+}
+
+// approvalCancel handles escape during the approval prompt:
+// cancels the current generation and restores the normal input.
+func (m *model) approvalCancel() (tea.Model, tea.Cmd) {
+	m.generationCancelled = true
+	m.chatCancel()
+	m.chatCtx, m.chatCancel = context.WithCancel(m.ctx)
+	m.waiting = false
+	m.setViewportSize() // restore viewport height when status line disappears
+	m.partialText = ""
+	m.currentTool = ""
+	m.approvalReq.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
+	m.approvalReq = nil
+	m.gen++
+	m.lines = append(m.lines,
+		line{role: "banner", text: "✕ cancelled"},
+	)
+	m.rebuildContent()
+	if m.autoScroll {
+		m.vp.GotoBottom()
+	}
+	// Auto-dispatch next queued message if any.
+	if len(m.pendingQueue) > 0 {
+		next := m.pendingQueue[0]
+		m.pendingQueue = m.pendingQueue[1:]
+		return m, m.startChat(next)
+	}
+	return m, nil
+}
+
+// handleApprovalEdit opens the proposed file in $EDITOR for manual editing.
+func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
+	req := m.approvalReq
+	if req == nil {
+		return m, nil
+	}
+	p, _ := req.input["path"].(string)
+	oldStr, _ := req.input["oldString"].(string)
+	newStr, _ := req.input["newString"].(string)
+	if p == "" || oldStr == "" {
+		// Can't edit — just return.
+		return m, nil
+	}
+
+	projectRoot := m.eng.Config().ProjectRoot
+	full := p
+	if projectRoot != "" && !filepath.IsAbs(p) {
+		full = filepath.Join(projectRoot, p)
+	}
+
+	// Read original content and apply the edit to get proposed content.
+	b, err := os.ReadFile(full)
+	if err != nil {
+		// Can't read file — fall through to show error in banner.
+		return m.addBanner("⚠ could not read file: " + err.Error())
+	}
+	orig := string(b)
+	proposed := strings.Replace(orig, oldStr, newStr, 1)
+
+	// Write proposed content to temp file.
+	tmpFile, err := os.CreateTemp("", "ouija-edit-*")
+	if err != nil {
+		return m.addBanner("⚠ could not create temp file: " + err.Error())
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.WriteString(proposed); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return m.addBanner("⚠ could not write temp file: " + err.Error())
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return m.addBanner("⚠ could not close temp file: " + err.Error())
+	}
+
+	// Store pending edit state.
+	m.pendingEdit = &pendingEditFile{
+		path:    full,
+		tmpFile: tmpPath,
+		respCh:  req.respCh,
+	}
+
+	// Clear the approval state — it will be replaced with an "editing" banner.
+	m.approvalReq = nil
+
+	editor := cmp.Or(os.Getenv("EDITOR"), "vi")
+
+	m.lines = append(m.lines, line{
+		role: "banner",
+		text: fmt.Sprintf("✎ editing in %s (save & close to apply, kill to cancel)", editor),
+	})
+	m.rebuildContent()
+	if m.autoScroll {
+		m.vp.GotoBottom()
+	}
+
+	return m, tea.ExecProcess(exec.Command(editor, tmpPath), func(err error) tea.Msg {
+		return editorDoneMsg{err: err}
+	})
+}

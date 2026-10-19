@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="{{LOCALE}}">
+<head>
+<meta charset="UTF-8">
+<title>{{SHORT_TITLE}} — {{CLIENT_NAME}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  /* =====================================================
+     DESIGN TOKENS
+     ===================================================== */
+  :root {
+    --ink:        #0f172a;
+    --ink-soft:   #1f2937;
+    --muted:      #6b7280;
+    --line:       #e5e7eb;
+    --line-soft:  #f1f5f9;
+    --bg:         #f3f4f6;
+    --paper:      #ffffff;
+
+    --brand:      #0369a1;
+    --brand-deep: #075985;
+    --accent-ev:  #059669;
+    --accent-fi:  #dc2626;
+    --accent-wa:  #d97706;
+
+    --bg-ev:      #ecfdf5;
+    --bg-fi:      #fef2f2;
+    --bg-wa:      #fffbeb;
+
+    --font-sans:  'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono:  'JetBrains Mono', 'Fira Code', Consolas, Monaco, 'Courier New', monospace;
+  }
+
+  /* =====================================================
+     PRINT PAGE SETUP
+     ===================================================== */
+  @page {
+    size: A4;
+    margin: 20mm 18mm;
+  }
+
+  /* =====================================================
+     RESET / BASE
+     ===================================================== */
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 10.5pt;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* On-screen "paper" wrapper — confines width and gives the doc shadow.
+     On print, the wrapper unstyles itself so @page margins take over. */
+  .document {
+    max-width: 210mm;            /* A4 width */
+    margin: 24px auto;
+    background: var(--paper);
+    padding: 24mm 20mm;
+    box-shadow: 0 8px 32px rgba(15, 23, 42, 0.10),
+                0 2px 8px  rgba(15, 23, 42, 0.05);
+    border-radius: 6px;
+  }
+
+  @media print {
+    body { background: transparent; }
+    .document {
+      max-width: none;
+      margin: 0;
+      padding: 0;
+      box-shadow: none;
+      border-radius: 0;
+    }
+  }
+
+  /* =====================================================
+     COVER PAGE
+     ===================================================== */
+  .cover {
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cover-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 18px;
+    border-bottom: 3px solid var(--ink);
+  }
+  .cover-brand .brand-logo {
+    height: 36px;
+    width: auto;
+    display: block;
+  }
+  .cover-brand .logo-mark {
+    width: 48px;
+    height: 48px;
+    background: var(--ink);
+    color: var(--paper);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 22pt;
+    letter-spacing: -0.5px;
+    border-radius: 10px;
+  }
+  .cover-brand .brand-name {
+    font-size: 18pt;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.4px;
+    line-height: 1;
+  }
+  .cover-brand .brand-tag {
+    font-size: 8.5pt;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+    margin-top: 5px;
+  }
+
+  .cover-title-block {
+    margin-top: 18mm;
+  }
+  .cover-bottom {
+    margin-top: 14mm;
+  }
+  .cover-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 2.6px;
+    font-size: 9pt;
+    color: var(--brand);
+    font-weight: 600;
+    margin-bottom: 18px;
+  }
+  .cover-title {
+    font-size: 28pt;
+    font-weight: 700;
+    color: var(--ink);
+    line-height: 1.18;
+    letter-spacing: -0.6px;
+    margin: 0 0 14px 0;
+  }
+  .cover-subtitle {
+    font-size: 13pt;
+    color: var(--muted);
+    font-weight: 400;
+    line-height: 1.5;
+    margin: 0;
+    max-width: 150mm;
+  }
+
+  .cover-meta {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px 32px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+  }
+  .cover-meta dt {
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1.3px;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 5px;
+  }
+  .cover-meta dd {
+    margin: 0;
+    font-size: 10.5pt;
+    color: var(--ink);
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .cover-footer {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+    font-size: 8.5pt;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* =====================================================
+     HEADINGS
+     ===================================================== */
+  h1, h2, h3 {
+    color: var(--ink);
+    letter-spacing: -0.2px;
+    page-break-after: avoid;
+  }
+
+  h1 {
+    font-size: 18pt;
+    font-weight: 700;
+    margin: 32px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--brand);
+  }
+  h1:first-of-type {
+    margin-top: 8px;
+  }
+
+  h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    margin: 24px 0 10px;
+  }
+
+  h3 {
+    font-size: 10.5pt;
+    font-weight: 700;
+    color: var(--brand-deep);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin: 18px 0 6px;
+  }
+
+  /* =====================================================
+     TEXT
+     ===================================================== */
+  p {
+    margin: 0 0 10px;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  strong { color: var(--ink); font-weight: 600; }
+  em     { color: var(--ink-soft); }
+
+  a {
+    color: var(--brand);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(3, 105, 161, 0.3);
+  }
+
+  ul, ol {
+    margin: 4px 0 12px;
+    padding-left: 22px;
+  }
+  li {
+    margin-bottom: 5px;
+    text-align: justify;
+  }
+
+  /* =====================================================
+     CODE
+     ===================================================== */
+  code {
+    font-family: var(--font-mono);
+    font-size: 9pt;
+    background: var(--line-soft);
+    color: var(--ink);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  pre {
+    background: var(--ink);
+    color: #e2e8f0;
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 8.5pt;
+    line-height: 1.55;
+    page-break-inside: avoid;
+    margin: 12px 0 16px;
+    border-left: 3px solid var(--brand);
+  }
+  pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+    white-space: pre;
+  }
+
+  /* =====================================================
+     TABLE
+     ===================================================== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 18px;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  thead th {
+    background: var(--ink);
+    color: var(--paper);
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  tbody td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tbody tr:nth-child(even) td { background: #f8fafc; }
+  tbody tr:last-child td      { border-bottom: 0; }
+  td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--brand);
+    white-space: nowrap;
+  }
+
+  /* Compact "field card" table — used for the per-field summary */
+  table.field-card td:first-child {
+    width: 32%;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  /* =====================================================
+     CALLOUTS
+     ===================================================== */
+  .callout {
+    padding: 12px 16px;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    border-left: 4px solid var(--brand);
+    background: var(--line-soft);
+    page-break-inside: avoid;
+  }
+  .callout p { margin-bottom: 6px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout ul, .callout ol { margin-bottom: 4px; }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-bottom: 6px;
+    color: var(--ink);
+  }
+
+  .callout-warning {
+    background: var(--bg-wa);
+    border-left-color: var(--accent-wa);
+  }
+  .callout-warning .callout-title { color: #92400e; }
+
+  .callout-example {
+    background: var(--bg-ev);
+    border-left-color: var(--accent-ev);
+  }
+  .callout-example .callout-title { color: #065f46; }
+
+  /* =====================================================
+     TOC
+     ===================================================== */
+  .toc {
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin: 16px 0 28px;
+    page-break-inside: avoid;
+  }
+  .toc-title {
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+    color: var(--muted);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .toc ol {
+    margin: 0;
+    padding-left: 22px;
+  }
+  .toc li {
+    font-size: 10pt;
+    color: var(--ink);
+    margin-bottom: 3px;
+    text-align: left;
+  }
+
+  /* =====================================================
+     SIGNATURE
+     ===================================================== */
+  .signature {
+    margin-top: 16mm;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 10pt;
+    color: var(--muted);
+    page-break-inside: avoid;
+  }
+  .signature-name {
+    font-size: 11pt;
+    font-weight: 700;
+    color: var(--ink);
+    margin-top: 6px;
+  }
+
+  /* =====================================================
+     PRINT HINTS
+     ===================================================== */
+  @media print {
+    h1, h2, h3       { page-break-after: avoid; }
+    pre, table,
+    .callout, .toc   { page-break-inside: avoid; }
+    a                { color: var(--brand); border: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="document">
+
+<!-- ============== COVER ============== -->
+<section class="cover">
+  <header class="cover-brand">
+    <div>
+      <svg class="brand-logo" width="336" height="75" viewBox="0 0 336 75" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0" y="0" width="336" height="75" rx="8" fill="var(--line-soft)"/>
+        <text x="168" y="46" text-anchor="middle" font-family="Inter, sans-serif" font-size="28" font-weight="700" fill="var(--muted)" letter-spacing="4">{{LOGO_TEXTO}}</text>
+      </svg>
+      <div class="brand-tag">{{BRAND_TAG}}</div>
+    </div>
+  </header>
+
+  <div class="cover-title-block">
+    <div class="cover-eyebrow">{{DOC_TYPE}}</div>
+    <h1 class="cover-title">{{TITLE_LINE_1}}<br>{{TITLE_LINE_2}}</h1>
+    <p class="cover-subtitle">{{SUBTITLE — a phrase describing the document, with <strong>emphasis</strong> on what matters}}.</p>
+  </div>
+
+  <div class="cover-bottom">
+    <dl class="cover-meta">
+      <div>
+        <dt>Applies to</dt>
+        <dd>{{CLIENT_NAME}}</dd>
+      </div>
+      <div>
+        <dt>Subject</dt>
+        <dd>{{SUBJECT}}</dd>
+      </div>
+      <div>
+        <dt>Prepared by</dt>
+        <dd>{{PREPARED_BY}}</dd>
+      </div>
+      <div>
+        <dt>Date</dt>
+        <dd>{{FULL_DATE}}</dd>
+      </div>
+      <div>
+        <dt>Version</dt>
+        <dd>1.0</dd>
+      </div>
+      <div>
+        <dt>Distribution</dt>
+        <dd>{{DISTRIBUTION}}</dd>
+      </div>
+    </dl>
+
+    <div class="cover-footer">
+      <span>{{COVER_FOOTER}}</span>
+      <span>Confidential — for project use only</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============== BODY ============== -->
+
+<!--
+  Document body. Available components (remove unused examples):
+  h1 numbered = sections; h2 = subsections; h3 = sub-subsections in caps.
+-->
+
+<h1>1. {{First Section — e.g. Executive Summary / Overview}}</h1>
+
+<p>{{Opening paragraph.}}</p>
+
+<div class="toc">
+  <div class="toc-title">Table of Contents</div>
+  <ol>
+    <li>{{Section 1}}</li>
+    <li>{{Section 2}}</li>
+  </ol>
+</div>
+
+<h1>2. {{Second Section}}</h1>
+
+<!-- Neutral callout (blue) — notes, panel paths, information -->
+<div class="callout">
+  <div class="callout-title">{{Callout title}}</div>
+  <p>{{Content.}}</p>
+</div>
+
+<!-- Finding/issue callout (red) -->
+<div class="callout callout-finding">
+  <div class="callout-title">{{E.g. Report finding}}</div>
+  <p>{{Quote or description of the issue.}}</p>
+</div>
+
+<!-- Evidence/result callout (green) -->
+<div class="callout callout-evidence">
+  <div class="callout-title">{{E.g. Verification result}}</div>
+  <p>{{Evidence with <strong>highlighted numbers</strong>.}}</p>
+</div>
+
+<!-- Example/recipe callout (green) -->
+<div class="callout callout-example">
+  <div class="callout-title">{{E.g. Combined usage example}}</div>
+  <ol><li>{{Step 1}}</li><li>{{Step 2}}</li></ol>
+</div>
+
+<!-- Warning callout (amber) -->
+<div class="callout callout-warning">
+  <div class="callout-title">Warning</div>
+  <p>{{Notice.}}</p>
+</div>
+
+<!-- Standard table; use td.num for right-aligned numbers -->
+<table>
+  <thead><tr><th>{{Column}}</th><th>{{Column}}</th></tr></thead>
+  <tbody>
+    <tr><td>{{Item}}</td><td class="num">{{123}}</td></tr>
+  </tbody>
+</table>
+
+<!-- Field card: compact label/value card (1st column becomes capitalized label) -->
+<table class="field-card">
+  <tbody>
+    <tr><td>Field</td><td>{{Field name in panel}}</td></tr>
+    <tr><td>Factory default</td><td>{{Value}}</td></tr>
+  </tbody>
+</table>
+
+<!-- Code block / reproducible commands -->
+<pre><code># {{comment}}
+{{command}}                  # Expected: {{result}}</code></pre>
+
+<div class="signature">
+  Sincerely,
+  <div class="signature-name">{{SIGNATURE_NAME}}</div>
+  <div>{{SIGNATURE_CONTACT}}</div>
+</div>
+
+</div><!-- /.document -->
+
+</body>
+</html>

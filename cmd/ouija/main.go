@@ -1,0 +1,241 @@
+// ouija — AI project assistant.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/discorgento/ouija/internal/app"
+	"github.com/discorgento/ouija/internal/chat"
+	"github.com/discorgento/ouija/internal/commands"
+	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/internal/knowledge"
+	"github.com/discorgento/ouija/internal/mcp"
+	"github.com/discorgento/ouija/internal/registry"
+	"github.com/discorgento/ouija/internal/version"
+
+	_ "github.com/discorgento/ouija/totems"
+)
+
+func main() {
+	os.Exit(run(os.Args, os.Stdout, os.Stderr))
+}
+
+// run is the testable entry point: it returns the exit code instead of calling
+// os.Exit, and writes to the given streams instead of the process globals.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 {
+		fmt.Fprint(stdout, registry.Help())
+		return 0
+	}
+	switch args[1] {
+	case "help", "-h", "--help":
+		fmt.Fprint(stdout, registry.Help())
+		return 0
+	case "version", "-v", "--version":
+		fmt.Fprintln(stdout, "ouija "+version.Version)
+		return 0
+	case "setup":
+		return runCommand(commands.Setup, args[2:], stderr)
+	case "init":
+		return runCommand(commands.Init, args[2:], stderr)
+	case "config":
+		return runCommand(commands.Config, args[2:], stderr)
+	case "learn":
+		return runCommand(commands.Learn, args[2:], stderr)
+	case "generate":
+		return runCommand(commands.Generate, args[2:], stderr)
+	case "chat":
+		return cmdChat(args[2:], stderr)
+	case "mcp":
+		return cmdMcp(args[2:], stdout, stderr)
+	case "doctor":
+		if err := commands.Doctor(stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	name := args[1]
+	if _, ok := registry.Get(name); !ok {
+		fmt.Fprintf(stderr, "unknown totem: %s\n\n%s", name, registry.Help())
+		return 1
+	}
+
+	// Task is optional — if the next argument looks like a flag, there's no task.
+	task := ""
+	flagStart := 2
+	if len(args) >= 3 && !strings.HasPrefix(args[2], "-") {
+		task = args[2]
+		flagStart = 3
+	}
+
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "path to a JSON config")
+	traceFile := fs.String("trace-file", "", "path to write Perfetto JSON trace")
+	jsonOut := fs.Bool("json", false, "print the raw JSON result")
+	if err := fs.Parse(args[flagStart:]); err != nil {
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	out, runErr := app.Run(ctx, name, registry.Args{Task: task}, *configPath, true, *traceFile)
+	if out != nil && out.ConfigPath != "" {
+		fmt.Fprintf(stderr, "[ouija] config: %s\n", out.ConfigPath)
+	}
+	if runErr != nil {
+		fmt.Fprintf(stderr, "[ouija] error: %v\n", runErr)
+		if hint := errorHint(runErr); hint != "" {
+			fmt.Fprintf(stderr, "[ouija] hint: %s\n", hint)
+		}
+		if out != nil {
+			t, s, _ := out.Engine.Spent()
+			fmt.Fprintf(stderr, "[ouija] %d tokens, %d steps\n", t, s)
+		}
+		return 1
+	}
+
+	if r, ok := out.Result.(registry.Renderer); ok && !*jsonOut {
+		fmt.Fprintln(stdout, r.Render())
+	} else {
+		b, _ := json.MarshalIndent(out.Result, "", "  ")
+		fmt.Fprintln(stdout, string(b))
+	}
+
+	tokens, steps, usd := out.Engine.Spent()
+	cost := ""
+	if usd > 0 {
+		cost = fmt.Sprintf(" · $%.2f", usd)
+	}
+	fmt.Fprintf(stderr, "\n[ouija] %s · %s · %d tokens · %d steps%s\n", out.Config.Provider, out.Config.Model, tokens, steps, cost)
+	return 0
+}
+
+// runCommand runs a subcommand and maps a failure to exit code 1.
+func runCommand(fn func([]string) error, args []string, stderr io.Writer) int {
+	if err := fn(args); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		if hint := errorHint(err); hint != "" {
+			fmt.Fprintf(stderr, "hint: %s\n", hint)
+		}
+		return 1
+	}
+	return 0
+}
+
+// errorHint returns an actionable suggestion for a known error class, or "" when
+// the error carries no recognised code. It lets callers turn a bare failure
+// message into a fix ("run ouija setup") without inspecting message strings.
+func errorHint(err error) string {
+	switch {
+	case engine.Is(err, engine.ErrCodeAuth):
+		return "set an API key: `ouija setup` (global) or `ouija init` (project)"
+	case engine.Is(err, engine.ErrCodeConfig):
+		return "check your setup with `ouija doctor`"
+	case engine.Is(err, engine.ErrCodeProvider):
+		return "list registered providers with `ouija doctor`"
+	case engine.Is(err, engine.ErrCodeBudget):
+		return "raise budget.maxTokens / budget.maxSteps in your config"
+	}
+	return ""
+}
+
+// cmdChat starts the interactive chat TUI and returns the process exit code.
+func cmdChat(args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "path to a JSON config")
+	traceFile := fs.String("trace-file", "", "path to write Perfetto JSON trace")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Chat always renders the trace to stderr — the flag is not required.
+	out, err := app.SetupEngine(ctx, *configPath, true)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		if hint := errorHint(err); hint != "" {
+			fmt.Fprintf(stderr, "hint: %s\n", hint)
+		}
+		return 1
+	}
+
+	eng := out.Engine
+	cfg := out.Config
+
+	system := "You are ouija, a project-aware AI assistant. " +
+		"Use the available tools to read files, search the codebase, and answer questions. " +
+		"Be concise and direct. Project rules:\n- " + strings.Join(cfg.Rules, "\n- ")
+
+	if cfg.ProjectRoot != "" {
+		system += "\n\nProject root: " + cfg.ProjectRoot
+	}
+
+	// Load project knowledge.
+	if known := knowledge.Load("."); known != "" {
+		system += "\n\n## Known project facts\n" + known
+	}
+
+	chat.Run(eng, app.BuildProviderByName, system, out.ConfigPath)
+
+	// Chat's default trace: the whole session's span tree.
+	eng.Tracer().Render(stderr)
+
+	if *traceFile != "" {
+		if err := eng.Tracer().WritePerfettoFile(*traceFile); err != nil {
+			fmt.Fprintf(stderr, "[ouija] trace file error: %v\n", err)
+		}
+	}
+	eng.Close()
+	return 0
+}
+
+// cmdMcp runs `ouija mcp [serve|install|status]`. Bare `ouija mcp` serves the
+// Model Context Protocol over stdio, which is what a harness launches. install
+// registers the server with every agent harness found on this machine.
+func cmdMcp(args []string, stdout, stderr io.Writer) int {
+	sub := "serve"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+
+	switch sub {
+	case "serve":
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := mcp.Serve(ctx, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	case "install":
+		if err := mcp.Install(stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	case "status":
+		if err := mcp.Status(stdout); err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 1
+		}
+		return 0
+	default:
+		fmt.Fprintf(stderr, "unknown mcp subcommand: %s\n\n  ouija mcp [serve|install|status]\n", sub)
+		return 2
+	}
+}

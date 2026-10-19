@@ -1,0 +1,500 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/discorgento/ouija/internal/engine"
+	"github.com/discorgento/ouija/internal/ouijaconfig"
+	"github.com/discorgento/ouija/internal/registry"
+)
+
+// isolateGlobalConfig points the global (~/.config/ouija) lookup at a temp dir
+// so these tests never read the developer's real config or API keys.
+func isolateGlobalConfig(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("HOME", dir)
+	t.Setenv("AppData", dir)
+}
+
+func writeProjectConfig(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+// minimalConfig is valid on its own: LoadConfig fills the rest from
+// DefaultConfig, so only the two required fields need to be present.
+const minimalConfig = `{"provider":"ollama","model":"llama3"}`
+
+func TestBuildProvider(t *testing.T) {
+	if _, err := BuildProvider("", ""); err == nil {
+		t.Error(`BuildProvider("") error = nil, want an error`)
+	}
+
+	_, err := BuildProvider("no-such-provider", "")
+	if err == nil {
+		t.Fatal("BuildProvider(unknown) error = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("error = %q, want it to mention \"unknown provider\"", err)
+	}
+	if !strings.Contains(err.Error(), "registered") {
+		t.Errorf("error = %q, want it to list the registered providers", err)
+	}
+
+	// A registered provider must return a usable instance. "opencode" is
+	// registered by the providers package's init().
+	p, err := BuildProvider("opencode", "sk-test")
+	if err != nil {
+		t.Fatalf("BuildProvider(opencode) error = %v", err)
+	}
+	if p == nil {
+		t.Fatal("BuildProvider(opencode) = nil provider")
+	}
+}
+
+func TestBuildProviderByName(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	if _, err := BuildProviderByName("no-such-provider"); err == nil {
+		t.Error("BuildProviderByName(unknown) error = nil, want an error")
+	}
+
+	// With no global config the key resolves to "", but a keyless provider
+	// still builds fine.
+	if _, err := BuildProviderByName("ollama"); err != nil {
+		t.Errorf("BuildProviderByName(ollama) error = %v, want nil", err)
+	}
+}
+
+func TestResolveAPIKey(t *testing.T) {
+	global := &ouijaconfig.Config{APIKeys: map[string]string{"anthropic": "global-key"}}
+
+	t.Run("global key", func(t *testing.T) {
+		if got := resolveAPIKey("anthropic", global, nil); got != "global-key" {
+			t.Errorf("resolveAPIKey = %q, want global-key", got)
+		}
+	})
+
+	t.Run("project overrides global", func(t *testing.T) {
+		project := &engine.Config{APIKey: "project-key"}
+		if got := resolveAPIKey("anthropic", global, project); got != "project-key" {
+			t.Errorf("resolveAPIKey = %q, want project-key", got)
+		}
+	})
+
+	t.Run("no sources", func(t *testing.T) {
+		if got := resolveAPIKey("anthropic", nil, nil); got != "" {
+			t.Errorf("resolveAPIKey = %q, want empty", got)
+		}
+	})
+
+	t.Run("unknown provider", func(t *testing.T) {
+		if got := resolveAPIKey("openai", global, nil); got != "" {
+			t.Errorf("resolveAPIKey = %q, want empty", got)
+		}
+	})
+}
+
+func TestDiscoverConfig_ResolvesProjectAPIKey(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, p, `{"provider":"opencode","model":"zen","apiKey":"sk-project"}`)
+
+	cfg, _, err := DiscoverConfig(p)
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+	if cfg.APIKey != "sk-project" {
+		t.Errorf("cfg.APIKey = %q, want sk-project", cfg.APIKey)
+	}
+}
+
+func TestDiscoverConfig_ExplicitPath(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "custom.json")
+	writeProjectConfig(t, p, minimalConfig)
+
+	cfg, gotPath, err := DiscoverConfig(p)
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+	if gotPath != p {
+		t.Errorf("config path = %q, want %q", gotPath, p)
+	}
+	if cfg.Provider != "ollama" || cfg.Model != "llama3" {
+		t.Errorf("provider/model = %q/%q, want ollama/llama3", cfg.Provider, cfg.Model)
+	}
+}
+
+// Walk-up discovery must find the config from a nested directory, and
+// .ouija/config.json wins over ouija.json when both exist.
+func TestDiscoverConfig_WalksUpAndPrefersDotOuija(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	root := t.TempDir()
+	writeProjectConfig(t, filepath.Join(root, "ouija.json"), `{"provider":"openai","model":"gpt-4o"}`)
+	writeProjectConfig(t, filepath.Join(root, ".ouija", "config.json"), minimalConfig)
+
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Chdir(nested)
+
+	cfg, gotPath, err := DiscoverConfig("")
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+
+	want := filepath.Join(root, ".ouija", "config.json")
+	if gotPath != want {
+		t.Errorf("config path = %q, want %q", gotPath, want)
+	}
+	if cfg.Provider != "ollama" {
+		t.Errorf("provider = %q, want ollama (from .ouija/config.json)", cfg.Provider)
+	}
+}
+
+func TestDiscoverConfig_NoConfigFallsBackToDefaults(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	t.Chdir(t.TempDir())
+
+	cfg, gotPath, err := DiscoverConfig("")
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+	if gotPath != "" {
+		t.Errorf("config path = %q, want empty when no project config exists", gotPath)
+	}
+	if cfg.Provider != engine.DefaultConfig().Provider {
+		t.Errorf("provider = %q, want the built-in default %q", cfg.Provider, engine.DefaultConfig().Provider)
+	}
+}
+
+func TestDiscoverConfig_ProjectOverridesDefaults(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, p, `{
+		"provider": "ollama",
+		"model": "llama3",
+		"passes": 7,
+		"dimensions": ["security"],
+		"rules": ["one rule"]
+	}`)
+
+	cfg, _, err := DiscoverConfig(p)
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+
+	if cfg.Passes != 7 {
+		t.Errorf("passes = %d, want 7", cfg.Passes)
+	}
+	if len(cfg.Dimensions) != 1 || cfg.Dimensions[0] != "security" {
+		t.Errorf("dimensions = %v, want [security]", cfg.Dimensions)
+	}
+	if len(cfg.Rules) != 1 || cfg.Rules[0] != "one rule" {
+		t.Errorf("rules = %v, want [one rule]", cfg.Rules)
+	}
+}
+
+// The optional sections must survive the merge: applyProjectConfig used to copy
+// only provider/model/passes/…, so a `permission`, `tools.bash.allowlist`,
+// `streamTimeout`, `maxNudges`, `systemPrompt` or `modelSuggestions` block in
+// .ouija/config.json was parsed by LoadConfig and then dropped before the
+// engine saw it (headless runs AND the chat TUI both read cfg.Permission).
+func TestDiscoverConfig_ProjectOptionalSectionsSurvive(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, p, `{
+		"provider": "ollama",
+		"model": "llama3",
+		"systemPrompt": "custom system prompt",
+		"maxNudges": 0,
+		"streamTimeout": 30,
+		"permission": {"default": "allow", "tools": {"bash": "deny"}},
+		"tools": {"bash": {"allowlist": ["git status", "npm run build"]}},
+		"modelSuggestions": {"ollama": ["llama3.2"]}
+	}`)
+
+	cfg, _, err := DiscoverConfig(p)
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+
+	if cfg.Permission == nil {
+		t.Fatal("permission = nil, want the project section to reach the engine")
+	}
+	if cfg.Permission.Default != "allow" {
+		t.Errorf("permission.default = %q, want allow", cfg.Permission.Default)
+	}
+	if cfg.Permission.Tools["bash"] != "deny" {
+		t.Errorf("permission.tools.bash = %q, want deny", cfg.Permission.Tools["bash"])
+	}
+	if cfg.Tools == nil || cfg.Tools.Bash == nil {
+		t.Fatalf("tools = %v, want tools.bash.allowlist preserved", cfg.Tools)
+	}
+	if got, want := cfg.Tools.Bash.Allowlist, []string{"git status", "npm run build"}; len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("tools.bash.allowlist = %v, want %v", got, want)
+	}
+	if cfg.StreamTimeout != 30 {
+		t.Errorf("streamTimeout = %d, want 30", cfg.StreamTimeout)
+	}
+	// maxNudges: 0 is an explicit override, not an absent key — it must not
+	// fall back to the built-in 3.
+	if cfg.MaxNudges != 0 {
+		t.Errorf("maxNudges = %d, want the explicit 0", cfg.MaxNudges)
+	}
+	if cfg.SystemPrompt != "custom system prompt" {
+		t.Errorf("systemPrompt = %q, want the project value", cfg.SystemPrompt)
+	}
+	if got := cfg.ModelSuggestions["ollama"]; len(got) != 1 || got[0] != "llama3.2" {
+		t.Errorf("modelSuggestions[ollama] = %v, want [llama3.2]", got)
+	}
+}
+
+// An absent optional section must keep the built-in defaults — copying
+// blindly would let LoadConfig's default-filled struct override cfg.
+func TestDiscoverConfig_AbsentOptionalSectionsKeepDefaults(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, p, minimalConfig)
+
+	cfg, _, err := DiscoverConfig(p)
+	if err != nil {
+		t.Fatalf("DiscoverConfig() error = %v", err)
+	}
+
+	if cfg.Permission != nil {
+		t.Errorf("permission = %v, want nil when the section is absent", cfg.Permission)
+	}
+	if cfg.Tools != nil {
+		t.Errorf("tools = %v, want nil when the section is absent", cfg.Tools)
+	}
+	if cfg.MaxNudges != engine.DefaultConfig().MaxNudges {
+		t.Errorf("maxNudges = %d, want the default %d", cfg.MaxNudges, engine.DefaultConfig().MaxNudges)
+	}
+	if cfg.SystemPrompt != engine.DefaultConfig().SystemPrompt {
+		t.Error("systemPrompt = the project default, want it untouched when the key is absent")
+	}
+	if cfg.StreamTimeout != 0 {
+		t.Errorf("streamTimeout = %d, want 0 (unset) so StreamTimeoutSec falls back to 120", cfg.StreamTimeout)
+	}
+	if cfg.Budget.MaxTokens != engine.DefaultConfig().Budget.MaxTokens {
+		t.Errorf("budget.maxTokens = %d, want the default %d", cfg.Budget.MaxTokens, engine.DefaultConfig().Budget.MaxTokens)
+	}
+}
+
+func TestResolveProjectRoot_DotBecomesWorkingDirectory(t *testing.T) {
+	want, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	cfg := &engine.Config{ProjectRoot: "."}
+	resolveProjectRoot(cfg, filepath.Join(t.TempDir(), "ouija.json"), false)
+
+	if cfg.ProjectRoot != want {
+		t.Errorf("ProjectRoot = %q, want the working directory %q", cfg.ProjectRoot, want)
+	}
+}
+
+func TestResolveProjectRoot_WalkUpResolvesRelativeToConfigDir(t *testing.T) {
+	cfgDir := t.TempDir()
+
+	cfg := &engine.Config{ProjectRoot: "sub"}
+	resolveProjectRoot(cfg, filepath.Join(cfgDir, "ouija.json"), false)
+
+	if want := filepath.Join(cfgDir, "sub"); cfg.ProjectRoot != want {
+		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, want)
+	}
+}
+
+// A --config path is taken as authoritative: a relative projectRoot is left
+// alone so it resolves against the caller's own working directory.
+func TestResolveProjectRoot_ExplicitKeepsRelativePath(t *testing.T) {
+	cfg := &engine.Config{ProjectRoot: "sub"}
+	resolveProjectRoot(cfg, filepath.Join(t.TempDir(), "ouija.json"), true)
+
+	if cfg.ProjectRoot != "sub" {
+		t.Errorf("ProjectRoot = %q, want it left untouched", cfg.ProjectRoot)
+	}
+}
+
+func TestResolveProjectRoot_NoConfigPathIsNoop(t *testing.T) {
+	cfg := &engine.Config{ProjectRoot: "unchanged"}
+	resolveProjectRoot(cfg, "", false)
+
+	if cfg.ProjectRoot != "unchanged" {
+		t.Errorf("ProjectRoot = %q, want it left untouched", cfg.ProjectRoot)
+	}
+}
+
+func TestValidateConfig(t *testing.T) {
+	t.Run("unknown provider is rejected", func(t *testing.T) {
+		cfg := engine.DefaultConfig()
+		cfg.Provider = "no-such-provider"
+
+		if err := ValidateConfig(cfg); err == nil {
+			t.Error("ValidateConfig() error = nil for an unknown provider")
+		}
+	})
+
+	t.Run("missing provider is rejected", func(t *testing.T) {
+		cfg := engine.DefaultConfig()
+		cfg.Provider = ""
+
+		if err := ValidateConfig(cfg); err == nil {
+			t.Error("ValidateConfig() error = nil for a missing provider")
+		}
+	})
+
+	t.Run("registered provider with required fields is accepted", func(t *testing.T) {
+		cfg := engine.DefaultConfig()
+		cfg.Provider = "ollama"
+
+		if err := ValidateConfig(cfg); err != nil {
+			t.Errorf("ValidateConfig() error = %v, want nil", err)
+		}
+	})
+}
+
+func TestSetupEngine_RejectsInvalidConfig(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, p, `{"provider":"ollama","model":""}`)
+
+	if _, err := SetupEngine(context.Background(), p, false); err == nil {
+		t.Fatal("SetupEngine() error = nil for a config without a model, want an error")
+	}
+}
+
+// --- lifecycle: Init → Run → Cleanup -----------------------------------------
+
+type fakeTotem struct {
+	name       string
+	initErr    error
+	cleanupErr error
+
+	inited  bool
+	ran     bool
+	cleaned bool
+}
+
+func (f *fakeTotem) Name() string    { return f.name }
+func (f *fakeTotem) Summary() string { return "test-only totem" }
+func (f *fakeTotem) Init(context.Context, *engine.Engine, *engine.Config) error {
+	f.inited = true
+	return f.initErr
+}
+func (f *fakeTotem) Run(context.Context, *engine.Engine, registry.Args) (any, error) {
+	f.ran = true
+	return "fake result", nil
+}
+func (f *fakeTotem) Cleanup() error {
+	f.cleaned = true
+	return f.cleanupErr
+}
+
+func TestRun_LifecycleInitRunCleanup(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, cfgPath, minimalConfig)
+
+	f := &fakeTotem{name: "app-test-lifecycle"}
+	registry.Register(f)
+
+	out, err := Run(context.Background(), f.Name(), registry.Args{Task: "do the thing"}, cfgPath, false, "")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if !f.inited || !f.ran || !f.cleaned {
+		t.Errorf("lifecycle: init=%v run=%v cleanup=%v, want all true", f.inited, f.ran, f.cleaned)
+	}
+	if out == nil || out.Result != "fake result" {
+		t.Errorf("Outcome.Result = %#v, want the totem result", out)
+	}
+	if out.ConfigPath != cfgPath {
+		t.Errorf("Outcome.ConfigPath = %q, want %q", out.ConfigPath, cfgPath)
+	}
+}
+
+func TestRun_UnknownTotem(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	if _, err := Run(context.Background(), "totem-that-does-not-exist", registry.Args{}, "", false, ""); err == nil {
+		t.Fatal("Run() error = nil for an unknown totem, want an error")
+	}
+}
+
+// A failed Init must still run Cleanup (totems acquire resources in Init).
+func TestRun_InitErrorStillCleansUp(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, cfgPath, minimalConfig)
+
+	f := &fakeTotem{name: "app-test-init-error", initErr: errors.New("boom")}
+	registry.Register(f)
+
+	_, err := Run(context.Background(), f.Name(), registry.Args{}, cfgPath, false, "")
+	if err == nil {
+		t.Fatal("Run() error = nil after an Init failure, want an error")
+	}
+	if !strings.Contains(err.Error(), "init") {
+		t.Errorf("error = %q, want it to mention the init step", err)
+	}
+	if !f.cleaned {
+		t.Error("Cleanup() was not called after Init failed")
+	}
+	if f.ran {
+		t.Error("Run() was called even though Init failed")
+	}
+}
+
+func TestRun_CleanupErrorIsReported(t *testing.T) {
+	isolateGlobalConfig(t)
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "ouija.json")
+	writeProjectConfig(t, cfgPath, minimalConfig)
+
+	f := &fakeTotem{name: "app-test-cleanup-error", cleanupErr: errors.New("cleanup boom")}
+	registry.Register(f)
+
+	_, err := Run(context.Background(), f.Name(), registry.Args{}, cfgPath, false, "")
+	if err == nil {
+		t.Fatal("Run() error = nil after a Cleanup failure, want an error")
+	}
+	if !strings.Contains(err.Error(), "cleanup") {
+		t.Errorf("error = %q, want it to mention the cleanup step", err)
+	}
+}

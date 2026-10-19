@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%"   stop-color="#0f172a"/>
+      <stop offset="50%"  stop-color="#1a1333"/>
+      <stop offset="100%" stop-color="#0d0a1a"/>
+    </linearGradient>
+
+    <!-- Glow filter for accent elements -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Stronger glow for hero text -->
+    <filter id="heroGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feComponentTransfer in="blur" result="glow">
+        <feFuncA type="linear" slope="0.6"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Badge gradient palette (pill-shaped tech tags) -->
+    <linearGradient id="b1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#06b6d4"/><stop offset="100%" stop-color="#0891b2"/>
+    </linearGradient>
+    <linearGradient id="b2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="b3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <linearGradient id="b4" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#fb923c"/><stop offset="100%" stop-color="#ea580c"/>
+    </linearGradient>
+    <linearGradient id="b5" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f472b6"/><stop offset="100%" stop-color="#db2777"/>
+    </linearGradient>
+    <linearGradient id="b6" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8"/><stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+
+    <!-- Badge glow -->
+    <filter id="badgeGlow" x="-10%" y="-20%" width="120%" height="140%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Subtle circuit-board pattern -->
+    <pattern id="circuit" x="0" y="0" width="60" height="60" patternUnits="userSpaceOnUse">
+      <circle cx="30" cy="30" r="0.8" fill="#1e293b"/>
+      <circle cx="0" cy="0" r="0.5" fill="#1e293b"/>
+      <circle cx="60" cy="60" r="0.5" fill="#1e293b"/>
+      <circle cx="0" cy="60" r="0.5" fill="#1e293b"/>
+      <circle cx="60" cy="0" r="0.5" fill="#1e293b"/>
+      <line x1="30" y1="30" x2="60" y2="60" stroke="#1e293b" stroke-width="0.4"/>
+      <line x1="0" y1="0" x2="30" y2="30" stroke="#1e293b" stroke-width="0.4"/>
+    </pattern>
+  </defs>
+
+  <!-- === MAIN SHAPE === -->
+  <rect x="0" y="0" width="600" height="600" rx="36" fill="url(#bgGrad)"/>
+
+  <!-- Circuit pattern overlay -->
+  <rect x="0" y="0" width="600" height="600" rx="36" fill="url(#circuit)" opacity="0.5"/>
+
+  <!-- Inner border glow -->
+  <rect x="2" y="2" width="596" height="596" rx="35" fill="none" stroke="#312e81" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Cut margin with dashes -->
+  <rect x="30" y="30" width="540" height="540" rx="30" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="8,6"/>
+
+  <!-- === TOP-LEFT: ouija planchette icon === -->
+  <g transform="translate(68, 68)" opacity="0.25">
+    <circle cx="0" cy="0" r="14" fill="none" stroke="#a78bfa" stroke-width="1.5"/>
+    <circle cx="-5" cy="0" r="2.5" fill="#a78bfa"/>
+    <circle cx="5" cy="0" r="2.5" fill="#a78bfa"/>
+    <circle cx="0" cy="-5" r="2.5" fill="#a78bfa"/>
+    <circle cx="0" cy="5" r="2.5" fill="#a78bfa"/>
+    <line x1="-7" y1="7" x2="7" y2="7" stroke="#a78bfa" stroke-width="1.5"/>
+    <line x1="-7" y1="-7" x2="7" y2="-7" stroke="#a78bfa" stroke-width="1.5"/>
+  </g>
+
+  <!-- === TOP-RIGHT: decorative dots === -->
+  <g fill="#334155">
+    <circle cx="510" cy="68" r="2.5"/>
+    <circle cx="522" cy="68" r="2.5"/>
+    <circle cx="534" cy="68" r="2.5"/>
+  </g>
+
+  <!-- === HERO: PROJECT NAME === -->
+  <text x="300" y="225" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+        font-size="{{NAME_SIZE}}" font-weight="800" fill="#ffffff" letter-spacing="1.5"
+        filter="url(#heroGlow)">{{PROJECT_NAME}}</text>
+
+  <!-- === TAGLINE === -->
+  <text x="300" y="275" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+        font-size="16" fill="#94a3b8" letter-spacing="0.5">{{TAGLINE}}</text>
+
+  <!-- === DIVIDER LINE with glow dot === -->
+  <line x1="140" y1="315" x2="296" y2="315" stroke="#312e81" stroke-width="1.5"/>
+  <circle cx="300" cy="315" r="3" fill="#a78bfa" filter="url(#glow)"/>
+  <line x1="304" y1="315" x2="460" y2="315" stroke="#312e81" stroke-width="1.5"/>
+
+  <!-- === TECH BADGES (2 rows x 3 cols) === -->
+  <!-- Row 1 -->
+  <g filter="url(#badgeGlow)">
+    <!-- BADGE_1 (wide) -->
+    <rect x="24" y="348" width="204" height="40" rx="20" fill="url(#b1)"/>
+    <text x="126" y="373" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_1}}</text>
+
+    <!-- BADGE_2 (wide) -->
+    <rect x="240" y="348" width="204" height="40" rx="20" fill="url(#b2)"/>
+    <text x="342" y="373" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_2}}</text>
+
+    <!-- BADGE_3 (narrow) -->
+    <rect x="456" y="348" width="120" height="40" rx="20" fill="url(#b3)"/>
+    <text x="516" y="373" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_3}}</text>
+  </g>
+
+  <!-- Row 2 -->
+  <g filter="url(#badgeGlow)">
+    <!-- BADGE_4 (wide) -->
+    <rect x="24" y="402" width="204" height="40" rx="20" fill="url(#b4)"/>
+    <text x="126" y="427" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_4}}</text>
+
+    <!-- BADGE_5 (wide) -->
+    <rect x="240" y="402" width="204" height="40" rx="20" fill="url(#b5)"/>
+    <text x="342" y="427" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_5}}</text>
+
+    <!-- BADGE_6 (narrow) -->
+    <rect x="456" y="402" width="120" height="40" rx="20" fill="url(#b6)"/>
+    <text x="516" y="427" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+          font-size="16" font-weight="600" fill="#ffffff">{{BADGE_6}}</text>
+  </g>
+
+  <!-- === BOTTOM ROW === -->
+  <!-- Version badge (left) -->
+  <rect x="60" y="480" width="130" height="28" rx="14" fill="#1e293b" stroke="#312e81" stroke-width="1"/>
+  <text x="125" y="499" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
+        font-size="11" fill="#64748b" letter-spacing="0.5">{{BOTTOM_LEFT}}</text>
+
+  <!-- Platform version (right) -->
+  <text x="540" y="499" text-anchor="end" font-family="system-ui, -apple-system, sans-serif"
+        font-size="12" fill="#475569" letter-spacing="0.5">{{BOTTOM_RIGHT}}</text>
+
+  <!-- === ouija WATERMARK (bottom-right) === -->
+  <g transform="translate(540, 555)" opacity="0.15">
+    <text x="0" y="0" text-anchor="end" font-family="monospace" font-size="10" fill="#a78bfa" letter-spacing="2">ouija</text>
+  </g>
+</svg>
