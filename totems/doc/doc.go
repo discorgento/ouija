@@ -9,12 +9,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -43,6 +45,13 @@ var docAspects = []string{"configuration", "behavior", "integration"}
 // Config is the doc totem's section of the project config, `totems.doc`.
 type Config struct {
 	Passes int `json:"passes"` // independent fact-gathering passes per aspect
+	// The cover and signature: facts no code holds, so they come from here
+	// (or `--set client=…`), never from the model.
+	Client  string `json:"client"`  // who the document is for
+	Author  string `json:"author"`  // "prepared by" and the signature
+	Contact string `json:"contact"` // the signature's contact line
+	Brand   string `json:"brand"`   // logo text, brand tag and cover footer
+	Locale  string `json:"locale"`  // the document's language tag, default "en"
 }
 
 // loadConfig reads `totems.doc`; an absent or non-positive passes means 3.
@@ -135,9 +144,12 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	}
 
 	// 4) Compose the final HTML from the embedded template + verified facts.
-	composeSystem := "You write professional technical documentation. Fill the template below — keep its structure, cover, CSS and design-system components; replace the {{...}} " +
-		"placeholders and write the body sections. VERIFIED FACTS ONLY. Output ONLY the complete self-contained HTML.\n\n" +
-		"TEMPLATE:\n" + templateHTML
+	// The cover's placeholders are filled here, not by the model: it would
+	// invent a client, an author and a date, or leave {{CLIENT_NAME}} in a
+	// client-facing PDF.
+	composeSystem := "You write professional technical documentation. Complete the template below — keep its structure, cover, CSS and design-system components exactly; " +
+		"write the body sections. VERIFIED FACTS ONLY. Output ONLY the complete self-contained HTML, from <!DOCTYPE html> to </html>.\n\n" +
+		"TEMPLATE:\n" + fillCover(templateHTML, &sheet, dc, args.Params, time.Now())
 	composePrompt := fmt.Sprintf(
 		"DOC REQUEST: %s\n\nVERIFIED FACT SHEET (JSON):\n%s\n\n"+
 			"Write the full HTML document now.",
@@ -148,10 +160,11 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	if err != nil {
 		return nil, fmt.Errorf("compose failed: %w", err)
 	}
-	htmlRes.Text = stripFence(htmlRes.Text)
-	if !strings.Contains(strings.ToLower(htmlRes.Text), "<html") {
-		return nil, fmt.Errorf("compose did not produce HTML (got %d bytes) — rerun or check the model", len(htmlRes.Text))
+	page, ok := extractHTML(htmlRes.Text)
+	if !ok {
+		return nil, fmt.Errorf("compose did not produce a complete HTML document (got %d bytes, no </html> — cut off by the output limit?) — rerun or use a model with a larger output", len(htmlRes.Text))
 	}
+	htmlRes.Text = page
 
 	// 5) Write the trio and render the PDF. Every output path goes through the
 	// sandbox (symlink-aware): `scope` is attacker-influenceable (CLI flag /
@@ -182,6 +195,9 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	}
 	res.PDF, res.PDFNote = renderPDF(ctx, res.HTML, pdfPath)
 	res.OpenQuestions = sheet.OpenQuestions
+	if left := placeholderRe.FindAllString(page, -1); len(left) > 0 {
+		res.Warnings = append(res.Warnings, "template placeholders left unfilled: "+strings.Join(slices.Compact(slices.Sorted(slices.Values(left))), ", "))
+	}
 	return res, nil
 }
 
@@ -325,6 +341,7 @@ type docResult struct {
 	MD            string   `json:"md"`
 	PDFNote       string   `json:"pdfNote,omitempty"`
 	OpenQuestions []string `json:"openQuestions,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
 func (r *docResult) Render() string {
@@ -337,6 +354,9 @@ func (r *docResult) Render() string {
 		fmt.Fprintf(&b, "- PDF:  (not rendered) %s\n", r.PDFNote)
 	}
 	fmt.Fprintf(&b, "- MD:   %s\n", r.MD)
+	for _, w := range r.Warnings {
+		fmt.Fprintf(&b, "\n⚠ %s\n", w)
+	}
 	if len(r.OpenQuestions) > 0 {
 		b.WriteString("\n## ⚠️  Open questions (verify before delivering)\n\n")
 		for _, q := range r.OpenQuestions {
@@ -348,14 +368,52 @@ func (r *docResult) Render() string {
 
 // --- helpers ---
 
-var fenceRe = regexp.MustCompile("(?s)^```[a-zA-Z]*\\n(.*)\\n```\\s*$")
+var (
+	htmlStart     = regexp.MustCompile(`(?i)<!doctype html|<html`)
+	htmlEnd       = regexp.MustCompile(`(?i)</html\s*>`)
+	placeholderRe = regexp.MustCompile(`\{\{[A-Z_]+\}\}`)
+)
 
-func stripFence(s string) string {
-	s = strings.TrimSpace(s)
-	if m := fenceRe.FindStringSubmatch(s); m != nil {
-		return m[1]
+// extractHTML takes the document out of the compose reply: from the first
+// <!doctype>/<html> to the last </html>, so prose or a code fence around it
+// never ends up as visible text. ok is false without a closing </html> — a
+// reply cut off by the output limit, which used to be written (and printed
+// to PDF) as if complete.
+func extractHTML(reply string) (string, bool) {
+	start := htmlStart.FindStringIndex(reply)
+	ends := htmlEnd.FindAllStringIndex(reply, -1)
+	if start == nil || len(ends) == 0 || ends[len(ends)-1][1] <= start[0] {
+		return "", false
 	}
-	return s
+	return reply[start[0]:ends[len(ends)-1][1]], true
+}
+
+// fillCover fills the template's cover and signature placeholders: from the
+// fact sheet, today's date, and `totems.doc` (overridden by --set params).
+func fillCover(tpl string, sheet *factSheet, dc Config, params map[string]any, now time.Time) string {
+	param := func(key, fallback string) string {
+		if v, ok := params[key].(string); ok && v != "" {
+			return v
+		}
+		return fallback
+	}
+	esc := html.EscapeString
+	client, author, brand := param("client", dc.Client), param("author", dc.Author), param("brand", dc.Brand)
+	return strings.NewReplacer(
+		"{{SHORT_TITLE}}", esc(sheet.Title),
+		"{{SUBJECT}}", esc(sheet.Subtitle),
+		"{{DOC_TYPE}}", esc(sheet.DocType),
+		"{{CLIENT_NAME}}", esc(client),
+		"{{PREPARED_BY}}", esc(author),
+		"{{SIGNATURE_NAME}}", esc(author),
+		"{{SIGNATURE_CONTACT}}", esc(param("contact", dc.Contact)),
+		"{{LOGO_TEXTO}}", esc(brand),
+		"{{BRAND_TAG}}", esc(brand),
+		"{{COVER_FOOTER}}", esc(brand),
+		"{{DISTRIBUTION}}", esc(param("distribution", "")),
+		"{{FULL_DATE}}", now.Format("2 January 2006"),
+		"{{LOCALE}}", esc(param("locale", cmp.Or(dc.Locale, "en"))),
+	).Replace(tpl)
 }
 
 func technicalMD(s *factSheet) string {

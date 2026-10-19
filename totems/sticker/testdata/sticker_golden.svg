@@ -119,7 +119,7 @@
     <!-- BADGE_1 (wide) -->
     <rect x="24" y="348" width="204" height="40" rx="20" fill="url(#b1)"/>
     <text x="126" y="373" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
-          font-size="16" font-weight="600" fill="#ffffff">Platform 2.4...</text>
+          font-size="16" font-weight="600" fill="#ffffff">M2 2.4.7</text>
 
     <!-- BADGE_2 (wide) -->
     <rect x="240" y="348" width="204" height="40" rx="20" fill="url(#b2)"/>
@@ -129,7 +129,7 @@
     <!-- BADGE_3 (narrow) -->
     <rect x="456" y="348" width="120" height="40" rx="20" fill="url(#b3)"/>
     <text x="516" y="373" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
-          font-size="16" font-weight="600" fill="#ffffff">Theme...</text>
+          font-size="16" font-weight="600" fill="#ffffff">Go</text>
   </g>
 
   <!-- Row 2 -->
@@ -137,7 +137,7 @@
     <!-- BADGE_4 (wide) -->
     <rect x="24" y="402" width="204" height="40" rx="20" fill="url(#b4)"/>
     <text x="126" y="427" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
-          font-size="16" font-weight="600" fill="#ffffff">Go</text>
+          font-size="16" font-weight="600" fill="#ffffff">Hyvä 1.2.0</text>
 
     <!-- BADGE_5 (wide) -->
     <rect x="240" y="402" width="204" height="40" rx="20" fill="url(#b5)"/>
@@ -147,7 +147,7 @@
     <!-- BADGE_6 (narrow) -->
     <rect x="456" y="402" width="120" height="40" rx="20" fill="url(#b6)"/>
     <text x="516" y="427" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif"
-          font-size="16" font-weight="600" fill="#ffffff">Postg...</text>
+          font-size="16" font-weight="600" fill="#ffffff">Redis</text>
   </g>
 
   <!-- === BOTTOM ROW === -->

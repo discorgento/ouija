@@ -45,8 +45,7 @@ func TestDetectVersions(t *testing.T) {
 	}
 }
 
-// Scout on a scripted model → an escaped SVG under docs/sticker/ (named after
-// the first word of the project name), with the
+// Scout on a scripted model → an escaped SVG under docs/sticker/, with the
 // versions read from composer.json, not from the model.
 func TestRunWritesSticker(t *testing.T) {
 	root := t.TempDir()
@@ -61,7 +60,7 @@ func TestRunWritesSticker(t *testing.T) {
 	}
 	path := out.(*stickerResult).SVG
 	svg, err := os.ReadFile(path)
-	if err != nil || !strings.HasSuffix(path, filepath.Join("docs", "sticker", "acme.sticker.svg")) {
+	if err != nil || !strings.HasSuffix(path, filepath.Join("docs", "sticker", "acme-shop.sticker.svg")) {
 		t.Fatalf("svg %s: %v", path, err)
 	}
 	if !strings.Contains(string(svg), "Pets &amp; toys") || !strings.Contains(string(svg), "2.4.6") || strings.Contains(string(svg), "9.9.9") {

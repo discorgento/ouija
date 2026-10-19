@@ -61,14 +61,9 @@ func TestBuildBadges(t *testing.T) {
 		if len(b) != 6 {
 			t.Fatalf("expected 6 badges, got %d: %v", len(b), b)
 		}
-		if b[0] != "Platform 2.4.7" {
-			t.Fatalf("badge[0]=%q", b[0])
-		}
-		if b[1] != "PHP 8.3" {
-			t.Fatalf("badge[1]=%q", b[1])
-		}
-		if b[2] != "Theme 1.2.0" {
-			t.Fatalf("badge[2]=%q", b[2])
+		// Versions take the wide pills (0, 1, 3); the narrow one gets a short tag.
+		if b[0] != "M2 2.4.7" || b[1] != "PHP 8.3" || b[3] != "Hyvä 1.2.0" || b[2] != "Redis" {
+			t.Fatalf("badges = %q", b)
 		}
 	})
 
@@ -80,6 +75,13 @@ func TestBuildBadges(t *testing.T) {
 		}
 		if b[0] != "Go" || b[1] != "React" {
 			t.Fatalf("first two badges should be tech tags, got %v", b[:2])
+		}
+	})
+
+	t.Run("a long tag skips a narrow pill", func(t *testing.T) {
+		b := buildBadges(&scoutData{TechTags: []string{"Go", "React", "PostgreSQL"}})
+		if b[0] != "Go" || b[1] != "React" || b[3] != "PostgreSQL" {
+			t.Fatalf("badges = %q", b)
 		}
 	})
 
@@ -143,11 +145,17 @@ func TestCleanProjectName(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"acme/my-module", "Acme"},
-		{"My Project", "My"},
+		{"acme/my-module", "My-module"},
+		{"github.com/acme/ouija", "Ouija"},
+		{"@acme/widgets", "Widgets"},
+		{"école/app", "App"},
+		{"écoleapp", "écoleapp"},
+		{"My Project", "My Project"},
+		{"Laravel Framework", "Laravel"},
+		{"The Ouija Harness", "The Ouija Harness"},
 		{"SingleWord", "SingleWord"},
 		{"", ""},
-		{"  spaced  ", "spaced"}, // cleanProjectName does not capitalize
+		{"  spaced  ", "spaced"}, // a plain name is not capitalized
 	}
 	for _, tc := range tests {
 		got := cleanProjectName(tc.input)
@@ -280,6 +288,9 @@ func TestStripVersionCaret(t *testing.T) {
 		{"^2.4.7-p10", "2.4.7-p10"},
 		{"2.4.7", "2.4.7"},
 		{">=8.2 || ^8.3", "8.2"},
+		{"~8.1.0||~8.2.0||~8.3.0", "8.1.0"}, // composer's usual PHP range, no spaces
+		{"^1.3 | ^2", "1.3"},
+		{"8.1, 8.2", "8.1"},
 		{"", ""},
 	}
 	for _, tc := range tests {

@@ -3,11 +3,13 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/knowledge"
@@ -130,10 +132,21 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 			"First, call the write_plan tool with the rendered plan markdown to save it to docs/task-plan.md. "+
 			"Then call submit_result with the structured JSON result.",
 		args.Task, scoutJSON, tc.Passes, sb.String())
+	// Whether the model's own write_plan actually saved the plan: having
+	// called it is not enough (an empty or cut-off content fails), and the
+	// fallback below must run then.
+	var planWritten atomic.Bool
+	writePlan := func(ctx context.Context, root string, in map[string]any) engine.ToolResult {
+		r := writePlanFn(ctx, root, in)
+		if r.Error == nil {
+			planWritten.Store(true)
+		}
+		return r
+	}
 	recResult, err := eng.Run(ctx, engine.RunRequest{
 		Label: "reconcile", System: recSystem, Prompt: recPrompt,
-		ExtraTools: []engine.CustomTool{{Def: writePlanDef, Fn: writePlanFn}},
-		Schema:     finalSchema(), MaxTokens: 8192,
+		ExtraTools: []engine.CustomTool{{Def: writePlanDef, Fn: writePlan}},
+		Schema:     finalSchema(dims), MaxTokens: 8192,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("reconcile failed: %w", err)
@@ -144,8 +157,12 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 		return recResult.Text, nil
 	}
 
-	// Fallback: only when the model didn't call write_plan itself.
-	if !slices.Contains(recResult.Tools, "write_plan") {
+	if strings.TrimSpace(res.TaskDescription) == "" && len(res.Plan) == 0 && len(res.Checklist) == 0 {
+		return nil, errors.New("reconcile returned an empty plan — nothing was saved; rerun, or raise the budget")
+	}
+
+	// Fallback: only when the model's write_plan did not save the plan.
+	if !planWritten.Load() {
 		if dst, err := savePlan(ctx, cfg.ProjectRoot, res.Render()); err != nil {
 			eng.Logger().Warn("plan not saved", "err", err)
 		} else {
@@ -287,10 +304,12 @@ func dimensionSchema() map[string]any {
 	}, "dimension", "findings", "steps", "risks")
 }
 
-func finalSchema() map[string]any {
+// finalSchema is the reconcile answer; a checklist item's category is one of
+// the analysis dimensions (whatever totems.task configures) or "general".
+func finalSchema(dims []string) map[string]any {
 	checkItem := schema.Obj(map[string]any{
 		"item":     schema.Str("actionable item"),
-		"category": schema.Enum("the area the item belongs to", "core", "best-practices", "security", "performance", "general"),
+		"category": schema.Enum("the analysis dimension the item comes from, or general", append(slices.Clone(dims), "general")...),
 	}, "item", "category")
 	planStep := schema.Obj(map[string]any{
 		"step":   schema.Str("the step"),

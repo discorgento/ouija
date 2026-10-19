@@ -6,26 +6,38 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var update = flag.Bool("update", false, "update golden files")
 
-func TestStripFence(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"```html\n<html></html>\n```", "<html></html>"},
-		{"```\nplain code\n```", "plain code"},
-		{"```go\npackage main\n```", "package main"},
-		{"no fence here", "no fence here"},
-		{"", ""},
-		{"  spaced  ", "spaced"},
+// The document is taken from <!doctype>/<html> to the last </html>, whatever
+// prose or fence surrounds it; a reply with no </html> (cut off) is refused.
+func TestExtractHTML(t *testing.T) {
+	for in, want := range map[string]string{
+		"```html\n<!DOCTYPE html><html><body>x</body></html>\n```":          "<!DOCTYPE html><html><body>x</body></html>",
+		"Here is the document:\n```html\n<html><p>a</p></html>\n```\nDone.": "<html><p>a</p></html>",
+		"<html><p>no end": "",
+		"just prose":      "",
+	} {
+		got, ok := extractHTML(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("extractHTML(%q) = %q, %v; want %q", in, got, ok, want)
+		}
 	}
-	for _, tc := range tests {
-		got := stripFence(tc.input)
-		if got != tc.want {
-			t.Fatalf("stripFence(%q) = %q, want %q", tc.input, got, tc.want)
+}
+
+// The cover is filled from the sheet, the config and --set, never left as
+// {{…}} for the model to invent.
+func TestFillCover(t *testing.T) {
+	sheet := &factSheet{Title: "Calc & Co", Subtitle: "s", DocType: "manual"}
+	out := fillCover(templateHTML, sheet, Config{Client: "ACME", Author: "Ana"}, map[string]any{"client": "Globex"}, time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC))
+	if placeholderRe.MatchString(out) {
+		t.Fatalf("placeholders left: %v", placeholderRe.FindAllString(out, -1))
+	}
+	for _, want := range []string{"Globex", "Ana", "Calc &amp; Co", "19 October 2026"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cover lacks %q", want)
 		}
 	}
 }

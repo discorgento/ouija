@@ -86,3 +86,29 @@ func TestRunAllPassesFail(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// A write_plan that fails (empty content) does not count as saved: the
+// fallback writes the plan.
+func TestRunFallbackAfterFailedWritePlan(t *testing.T) {
+	root := t.TempDir()
+	p := &enginetest.Provider{Respond: func(req engine.ChatRequest) enginetest.Reply {
+		switch {
+		case strings.HasPrefix(firstUser(req), "PASS"):
+			return enginetest.Submit(map[string]any{"dimension": "d", "findings": []any{}, "steps": []any{}, "risks": []any{}})
+		case strings.HasPrefix(req.System, "You reconcile"):
+			return enginetest.Reply{ToolCalls: []engine.ToolCall{
+				{ID: "w", Name: "write_plan", Input: map[string]any{}}, // fails: no content
+				{ID: "s", Name: engine.SubmitTool, Input: map[string]any{"taskDescription": "Make Avg safe",
+					"checklist": []any{}, "plan": []any{}, "highConfidence": []any{}, "needsHumanDecision": []any{}, "openQuestions": []any{}}},
+			}}
+		}
+		return enginetest.Submit(map[string]any{"summary": "x", "conventions": []any{}, "relevantCoreAreas": []any{},
+			"filesOfInterest": []any{}, "openQuestions": []any{}})
+	}}
+	if _, err := registry.Invoke(context.Background(), enginetest.NewEngine(p, root), &Totem{}, registry.Args{Task: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "docs", "task-plan.md")); err != nil || !strings.Contains(string(b), "Make Avg safe") {
+		t.Fatalf("plan not saved after a failed write_plan: %v", err)
+	}
+}

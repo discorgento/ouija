@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/registry"
@@ -91,15 +93,16 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// 1b) Override factual fields with deterministic data from files.
 	// LLM hallucinates versions and counts; Go reads the actual files.
+	// Validated like the model's values: composer allows "*" or "dev-main".
 	det := detectVersions(cfg.ProjectRoot)
-	if det.platform != "" {
-		score.PlatformVersion = det.platform
+	if v := validVersion(det.platform); v != "" {
+		score.PlatformVersion = v
 	}
-	if det.php != "" {
-		score.PHPVersion = det.php
+	if v := validPHP(det.php); v != "" {
+		score.PHPVersion = v
 	}
-	if det.theme != "" {
-		score.ThemeVersion = det.theme
+	if v := validVersion(det.theme); v != "" {
+		score.ThemeVersion = v
 	}
 	if det.modules > 0 {
 		score.CustomModules = fmt.Sprintf("%d", det.modules)
@@ -230,27 +233,29 @@ func validVersion(v string) string {
 	return ""
 }
 
-// cleanProjectName turns a composer package name or long name into a short
-// display name.
+// cleanProjectName turns a manifest name into a short display name. A path
+// (go.mod's github.com/acme/shop, composer's acme/shop, npm's @acme/shop)
+// gives its last segment — the vendor or the host named every project the
+// same, and the same file name. A long multi-word name keeps its first word
+// when that word says something on its own ("Laravel Framework"), else stays
+// whole for adaptName to shorten ("The Ouija Harness").
 func cleanProjectName(name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
+	if i := strings.LastIndex(name, "/"); i >= 0 && i < len(name)-1 {
+		name = upperFirst(name[i+1:])
 	}
-	// If it contains "/", it's a composer package name. Extract the vendor part.
-	if idx := strings.Index(name, "/"); idx > 0 {
-		vendor := name[:idx]
-		// Capitalize first letter.
-		if len(vendor) > 0 {
-			vendor = strings.ToUpper(vendor[:1]) + vendor[1:]
-		}
-		return vendor
-	}
-	// If it contains spaces, take the first word.
-	if idx := strings.Index(name, " "); idx > 0 {
-		return name[:idx]
+	if words := strings.Fields(name); len(words) > 1 && utf8.RuneCountInString(name) > 9 &&
+		utf8.RuneCountInString(words[0]) >= 4 {
+		return words[0]
 	}
 	return name
+}
+
+// upperFirst upper-cases the first character (a rune: by bytes, "école"
+// became invalid UTF-8 and broke the SVG).
+func upperFirst(s string) string {
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
 }
 
 // --- deterministic version detection (no LLM) ---
@@ -354,6 +359,9 @@ func detectVersions(projectRoot string) detected {
 //	"2.4.7-p10" -> "2.4.7-p10"
 func stripVersionCaret(v string) string {
 	v = strings.TrimSpace(v)
+	if idx := strings.IndexAny(v, "|,"); idx > 0 {
+		v = strings.TrimSpace(v[:idx])
+	}
 	// Strip leading operators.
 	for _, op := range []string{">=", "<=", "^", "~", ">", "<", "!"} {
 		if strings.HasPrefix(v, op) {
@@ -362,8 +370,9 @@ func stripVersionCaret(v string) string {
 			break
 		}
 	}
-	// Strip anything after a space (e.g. "|| 8.3").
-	if idx := strings.Index(v, " "); idx > 0 {
+	// The first alternative of a range ("~8.1.0||~8.2.0", "^1.3 | ^2", "8.1, 8.2"):
+	// they are listed oldest first, and that is the version guaranteed.
+	if idx := strings.IndexAny(v, " |,"); idx > 0 {
 		v = v[:idx]
 	}
 	return v
@@ -433,41 +442,48 @@ func adaptName(name string) (string, string) {
 // Priority: version-specific badges first (platform/PHP/theme), then tech tags.
 // Always returns exactly 6 items — remaining slots get generic labels.
 func buildBadges(d *scoutData) []string {
-	var badges []string
-
-	// 1) Version-specific badges (only when data exists).
+	// Versions go in the wide pills (slots 1, 2, 4, 5): in a narrow one
+	// "Theme 1.3.10" was cut to "Theme...". Labels stay short for the same
+	// reason (M2 is the Magento platform, Hyvä its theme — what composer.json
+	// detection reads).
+	var versions []string
 	if d.PlatformVersion != "" {
-		badges = append(badges, "Platform "+d.PlatformVersion)
+		versions = append(versions, "M2 "+d.PlatformVersion)
 	}
 	if d.PHPVersion != "" {
-		badges = append(badges, "PHP "+d.PHPVersion)
+		versions = append(versions, "PHP "+d.PHPVersion)
 	}
 	if d.ThemeVersion != "" {
-		badges = append(badges, "Theme "+d.ThemeVersion)
+		versions = append(versions, "Hyvä "+d.ThemeVersion)
 	}
 
-	// 2) Fill with tech tags, skipping any that duplicate version labels.
+	badges := make([]string, 6)
+	wide, narrow := []int{0, 1, 3, 4}, []int{2, 5}
+	for i, v := range versions { // at most 3, so a wide slot each
+		badges[wide[i]] = v
+	}
+	// Tech tags fill the free slots in order; one too long for a narrow pill
+	// skips to the next wide one. A PHP tag would repeat the PHP version.
+	isNarrow := func(i int) bool { return slices.Contains(narrow, i) }
 	for _, tag := range d.TechTags {
-		if len(badges) >= 6 {
-			break
-		}
-		tagLower := strings.ToLower(tag)
-		if strings.Contains(tagLower, "php") {
+		if strings.Contains(strings.ToLower(tag), "php") {
 			continue
 		}
-		badges = append(badges, tag)
-	}
-
-	// 3) Remaining slots get generic labels so no badge is ever empty.
-	fallbacks := []string{"Dev", "CLI", "API", "Web", "Stack", "App"}
-	for _, fb := range fallbacks {
-		if len(badges) >= 6 {
-			break
+		for i := range badges {
+			if badges[i] == "" && (!isNarrow(i) || utf8.RuneCountInString(tag) <= 5) {
+				badges[i] = tag
+				break
+			}
 		}
-		badges = append(badges, fb)
 	}
-
-	return badges[:6]
+	// Remaining slots get generic labels so no badge is ever empty.
+	fallbacks := []string{"Dev", "CLI", "API", "Web", "Stack", "App"}
+	for i := range badges {
+		if badges[i] == "" {
+			badges[i], fallbacks = fallbacks[0], fallbacks[1:]
+		}
+	}
+	return badges
 }
 
 // truncate shortens s to at most n characters, appending "..." when cut.

@@ -35,9 +35,9 @@ func TestRunOrchestration(t *testing.T) {
 		prompt := firstUser(req)
 		switch {
 		case strings.HasPrefix(req.System, "You scout") && !strings.Contains(req.System, "SCOUT CONTEXT"):
-			return enginetest.Submit(map[string]any{"summary": "calc"})
+			return enginetest.Submit(map[string]any{"summary": "calc", "configPaths": []any{}, "files": []any{"calc.go"}, "consumers": []any{}})
 		case strings.HasPrefix(prompt, "PASS"):
-			return enginetest.Submit(map[string]any{"facts": []any{}})
+			return enginetest.Submit(map[string]any{"aspect": "behavior", "facts": []any{}})
 		case strings.HasPrefix(req.System, "You reconcile"):
 			return enginetest.Reply{Text: string(sheet)}
 		case strings.HasPrefix(req.System, "You write professional"):
