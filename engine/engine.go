@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
+	"sync"
 )
 
 // SubmitTool is the tool through which a model hands in a structured answer
@@ -23,13 +25,22 @@ type TokenCallback func(text string)
 // Engine runs the agent loop: the model proposes tool calls, the harness
 // validates/executes them, until a final (optionally structured) answer or a
 // budget ceiling. "Model proposes — harness executes."
+//
+// An Engine is safe for concurrent use: totems run several agents on one
+// Engine, and the setters may be called while a run is in progress (the chat
+// switches model mid-session). A run works on a RunEnv snapshotted when it
+// starts, so a setter applies from the next run on.
 type Engine struct {
+	agent  Agent // the loop strategy (ReAct by default); stateless
+	tools  *Tools
+	budget *tracker
+	tracer *Tracer
+
+	// mu guards the fields a setter may change while runs read them: the
+	// provider, the logger, the token callback and cfg's Provider/Model/Tools.
+	mu       sync.RWMutex
 	provider Provider
-	agent    Agent // the loop strategy (ReAct, etc.)
 	cfg      *Config
-	tools    *Tools
-	budget   *tracker
-	tracer   *Tracer
 	logger   *slog.Logger
 	tokenCb  TokenCallback // streaming token callback (e.g. TUI)
 
@@ -48,6 +59,8 @@ type EngineConfig struct {
 	Provider Provider
 	Config   *Config
 	Tracer   *Tracer
+	// Agent is the loop strategy; nil means ReAct.
+	Agent Agent
 }
 
 // New wires a provider, config, tracer and the sandboxed toolset together.
@@ -83,24 +96,7 @@ func New(cfg EngineConfig) *Engine {
 	e.tools.escapeApprover = func(ctx context.Context, toolName, path string) bool {
 		return e.requestEscapeApproval(ctx, toolName, path)
 	}
-	// Logger and callbacks are shared with the agent AFTER they are set
-	// via SetLogger/SetTokenCallback, so ReAct gets a pointer-to-logger
-	// that can be swapped at runtime.
-	e.agent = NewReAct(ReActConfig{
-		Provider: e.provider,
-		ToolReg:  e.tools,
-		Config:   e.cfg,
-		Logger: func() *slog.Logger {
-			if e.logger != nil {
-				return e.logger
-			}
-			return newDefaultLogger()
-		}(),
-		TokenCb: e.tokenCb,
-		Tracer:  e.tracer,
-		Budget:  e.budget,
-		RunTool: e.runner.Run,
-	})
+	e.agent = cmp.Or[Agent](cfg.Agent, NewReAct())
 	if cfg.Config.Tools != nil && cfg.Config.Tools.Bash != nil && len(cfg.Config.Tools.Bash.Allowlist) > 0 {
 		e.allowlist.Set(cfg.Config.Tools.Bash.Allowlist)
 	}
@@ -149,55 +145,63 @@ func newDefaultLogger() *slog.Logger {
 
 // Logger returns the engine's logger. Useful for wiring a component that
 // shares the same log level / output.
-func (e *Engine) Logger() *slog.Logger { return e.logger }
+func (e *Engine) Logger() *slog.Logger {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.logger
+}
 
 // SetLogger replaces the default logger. Useful to silence output (pass a
 // logger that writes to io.Discard) or to inject a structured handler.
+// A nil logger restores the default.
 func (e *Engine) SetLogger(l *slog.Logger) {
-	e.logger = l
-	if r, ok := e.agent.(*ReAct); ok {
-		r.logger = l
-	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.logger = cmp.Or(l, newDefaultLogger())
 }
 
 // SetToolCallback registers a function called before each tool execution.
 // The callback receives the tool name and its input map. Intended for UI
 // progress reporting (e.g. showing "read_file: foo.php" in a chat TUI).
-func (e *Engine) SetToolCallback(fn ToolCallback) { e.gate.toolCb = fn }
+func (e *Engine) SetToolCallback(fn ToolCallback) {
+	e.gate.update(func(g *gateState) { g.toolCb = fn })
+}
 
 // SetTokenCallback registers a function called for each text token yielded
 // by a streaming provider call. Intended for real-time token display in a TUI.
 func (e *Engine) SetTokenCallback(fn TokenCallback) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.tokenCb = fn
-	if r, ok := e.agent.(*ReAct); ok {
-		r.tokenCb = fn
-	}
 }
 
-// SetModel changes the active model name. The loop reads the model on every
-// provider call, so a run already in progress switches on its next turn.
-func (e *Engine) SetModel(name string) { e.cfg.Model = name }
+// SetModel changes the active model name, from the next run on.
+func (e *Engine) SetModel(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.Model = name
+}
 
-// SetProvider replaces the provider instance. The caller is responsible
-// for creating the new Provider (e.g. via app.BuildProvider or
-// providers.NewOpenAI()). The old Provider is discarded.
-// Also updates the agent's provider to keep the loop in sync.
+// SetProvider replaces the provider instance, from the next run on. The
+// caller is responsible for creating the new Provider (e.g. via
+// app.BuildProvider). The old Provider is discarded.
 func (e *Engine) SetProvider(p Provider) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.provider = p
 	e.cfg.Provider = p.Name()
-	if r, ok := e.agent.(*ReAct); ok {
-		r.provider = p
-	}
 }
 
 // SetApprovalManager sets the approval manager used for user-prompted
 // tool approval. When nil (default), Ask-level tools are denied.
-func (e *Engine) SetApprovalManager(am *ApprovalManager) { e.gate.approvalMgr = am }
+func (e *Engine) SetApprovalManager(am *ApprovalManager) {
+	e.gate.update(func(g *gateState) { g.approvalMgr = am })
+}
 
 // ResetApprovals clears the session cache in the approval manager, if set.
 func (e *Engine) ResetApprovals() {
-	if e.gate.approvalMgr != nil {
-		e.gate.approvalMgr.Reset()
+	if am := e.gate.snapshot().approvalMgr; am != nil {
+		am.Reset()
 	}
 }
 
@@ -207,12 +211,13 @@ func (e *Engine) ResetApprovals() {
 // The escaped absolute path is embedded in the session key (after a null
 // byte) so that "Session" approval is per-path, not per-tool.
 func (e *Engine) requestEscapeApproval(ctx context.Context, toolName, escapedAbs string) bool {
-	if e.gate.approvalMgr == nil {
+	am := e.gate.snapshot().approvalMgr
+	if am == nil {
 		return false
 	}
 	// null byte can never appear in a file path, making it a clean separator
 	sessionKey := "escape:" + toolName + "\x00" + escapedAbs
-	result, err := e.gate.approvalMgr.Request(ctx, sessionKey, map[string]any{
+	result, err := am.Request(ctx, sessionKey, map[string]any{
 		"path": escapedAbs,
 	})
 	return err == nil && result.Allowed
@@ -220,24 +225,32 @@ func (e *Engine) requestEscapeApproval(ctx context.Context, toolName, escapedAbs
 
 // SetPermissionConfig sets the per-tool permission level mapping.
 // When nil (default), read-only tools are allowed and write tools are denied.
-func (e *Engine) SetPermissionConfig(cfg *PermissionConfig) { e.gate.permConfig = cfg }
+// Change the levels of a config already in use with its SetTool/SetDefault.
+func (e *Engine) SetPermissionConfig(cfg *PermissionConfig) {
+	e.gate.update(func(g *gateState) { g.permConfig = cfg })
+}
 
 // PermissionConfig returns the current permission config (may be nil).
-func (e *Engine) PermissionConfig() *PermissionConfig { return e.gate.permConfig }
+func (e *Engine) PermissionConfig() *PermissionConfig { return e.gate.snapshot().permConfig }
 
 // EnsurePermissionConfig creates a default config if none exists, for runtime changes.
 func (e *Engine) EnsurePermissionConfig() *PermissionConfig {
-	if e.gate.permConfig == nil {
-		e.gate.permConfig = NewPermissionConfig(Ask)
-	}
-	return e.gate.permConfig
+	var pc *PermissionConfig
+	e.gate.update(func(g *gateState) {
+		if g.permConfig == nil {
+			g.permConfig = NewPermissionConfig(Ask)
+		}
+		pc = g.permConfig
+	})
+	return pc
 }
 
 // Close releases the engine's resources (trace file). Safe to call
 // multiple times — subsequent calls are no-ops.
 func (e *Engine) Close() { e.tracer.Reset() }
 
-// Config exposes the active configuration to totems.
+// Config exposes the active configuration to totems. Treat it as read-only:
+// change the model, provider or allowlist through the Engine's setters.
 func (e *Engine) Config() *Config { return e.cfg }
 
 // Tracer returns the engine's tracer, nil when tracing is disabled.
@@ -267,6 +280,8 @@ func (e *Engine) AddAllowedCommand(cmd string) {
 // struct so that a subsequent SaveConfigAt persists the up-to-date list.
 func (e *Engine) syncAllowlistConfig() {
 	patterns := e.allowlist.Patterns()
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.cfg.Tools == nil {
 		e.cfg.Tools = &ToolsConfig{}
 	}
@@ -283,6 +298,8 @@ func (e *Engine) syncAllowlistConfig() {
 // resolved cfg.APIKey: that one usually comes from the global store, and
 // copying it into a project file (often committed) would leak it.
 func (e *Engine) SaveConfigAt(path string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	origRoot, origKey := e.cfg.ProjectRoot, e.cfg.APIKey
 	e.cfg.ProjectRoot = "."
 	e.cfg.APIKey = apiKeyOnDisk(path)
@@ -327,7 +344,25 @@ type RunRequest struct {
 // several agents concurrently on one Engine.
 func (e *Engine) runAgent(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
 	ctx = withDoomDetector(ctx, &DoomDetector{})
-	return e.agent.Run(ctx, req, msgs)
+	return e.agent.Run(ctx, e.env(), req, msgs)
+}
+
+// env snapshots what one run needs, so setters called during the run cannot
+// change it underneath.
+func (e *Engine) env() RunEnv {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return RunEnv{
+		Provider: e.provider,
+		Model:    e.cfg.Model,
+		Config:   e.cfg,
+		Tools:    e.tools,
+		RunTool:  e.runner.Run,
+		Budget:   e.budget,
+		Tracer:   e.tracer,
+		Logger:   e.logger,
+		OnToken:  e.tokenCb,
+	}
 }
 
 // Run executes the agent loop and returns a RunResult (final text + tool metadata).

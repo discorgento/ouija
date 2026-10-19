@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -21,51 +20,17 @@ type RunToolFn func(ctx context.Context, label string, call ToolCall, extraFns m
 //  2. If the model returns tool calls, execute them and append observations
 //  3. Repeat until the model returns text (or submit_result)
 //  4. Return the final text and the full updated conversation
-type ReAct struct {
-	provider Provider
-	toolReg  ToolRegistry
-	cfg      *Config
-	logger   *slog.Logger
-	tokenCb  TokenCallback
-	tracer   *Tracer
-	budget   *tracker
+//
+// It is stateless: the provider, model, tools, budget and callbacks of a run
+// come from its RunEnv.
+type ReAct struct{}
 
-	// runTool is the Engine's gated tool executor (permissions, approval,
-	// bash allowlist, escape sandbox). Injected at construction to keep
-	// ReAct decoupled from the Engine's permission system.
-	runTool RunToolFn
-}
-
-// ReActConfig groups the dependencies needed to create a ReAct agent.
-// Created by Engine.New() and wired together.
-type ReActConfig struct {
-	Provider Provider
-	ToolReg  ToolRegistry
-	Config   *Config
-	Logger   *slog.Logger
-	TokenCb  TokenCallback
-	Tracer   *Tracer
-	Budget   *tracker
-	RunTool  RunToolFn
-}
-
-// NewReAct creates a ReAct agent with the given dependencies.
-func NewReAct(cfg ReActConfig) *ReAct {
-	return &ReAct{
-		provider: cfg.Provider,
-		toolReg:  cfg.ToolReg,
-		cfg:      cfg.Config,
-		logger:   cfg.Logger,
-		tokenCb:  cfg.TokenCb,
-		tracer:   cfg.Tracer,
-		budget:   cfg.Budget,
-		runTool:  cfg.RunTool,
-	}
-}
+// NewReAct returns the ReAct loop strategy (the Engine's default Agent).
+func NewReAct() *ReAct { return &ReAct{} }
 
 // Run implements Agent.Run. msgs already contain the user's prompt.
 // Doom-loop state reset is handled by Engine before calling Run.
-func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
+func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
 	maxTok := req.MaxTokens
 	if maxTok <= 0 {
 		maxTok = 8192
@@ -86,11 +51,11 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 
 	var toolDefs []ToolDef
 	if req.UseTools {
-		toolDefs = append(toolDefs, a.toolReg.Defs()...)
+		toolDefs = append(toolDefs, env.Tools.Defs()...)
 	}
 	for _, ct := range req.ExtraTools {
-		if a.toolReg.Has(ct.Def.Name) {
-			a.logger.Warn("extra tool shadows built-in", "name", ct.Def.Name)
+		if env.Tools.Has(ct.Def.Name) {
+			env.Logger.Warn("extra tool shadows built-in", "name", ct.Def.Name)
 		}
 		toolDefs = append(toolDefs, ct.Def)
 	}
@@ -98,20 +63,20 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 	// When using structured output, avoid the two-phase slow path for simple
 	// requests: if no tools are needed, skip Phase 1 entirely.
 	if useStructured && len(toolDefs) == 0 {
-		span := a.tracer.Start("chat")
-		resp, err := a.streamChat(ctx, ChatRequest{
+		span := env.Tracer.Start("chat")
+		resp, err := a.streamChat(ctx, env, ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Schema:    req.Schema,
 			MaxTokens: maxTok,
-			Model:     a.cfg.Model,
+			Model:     env.Model,
 		})
 		if err != nil {
 			span.SetError(err.Error())
 			span.End()
 			return nil, msgs, err
 		}
-		if berr := a.budget.add(resp.Usage); berr != nil {
+		if berr := env.Budget.Add(resp.Usage); berr != nil {
 			span.SetError(berr.Error())
 			span.End()
 			return nil, msgs, berr
@@ -142,7 +107,7 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 	}
 
 	if req.Label != "" {
-		a.logger.Info("agent start", "label", req.Label)
+		env.Logger.Info("agent start", "label", req.Label)
 	}
 
 	nudges := 0
@@ -157,26 +122,26 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 		}
 		msgs = compact(msgs)
 
-		chatSpan := a.tracer.Start("chat")
-		resp, err := a.streamChat(ctx, ChatRequest{
+		chatSpan := env.Tracer.Start("chat")
+		resp, err := a.streamChat(ctx, env, ChatRequest{
 			System:    req.System,
 			Messages:  msgs,
 			Tools:     toolDefs,
 			MaxTokens: maxTok,
-			Model:     a.cfg.Model,
+			Model:     env.Model,
 		})
 		if err != nil {
 			chatSpan.SetError(err.Error())
 			chatSpan.End()
 			return nil, msgs, err
 		}
-		if berr := a.budget.add(resp.Usage); berr != nil {
+		if berr := env.Budget.Add(resp.Usage); berr != nil {
 			chatSpan.SetError(berr.Error())
 			chatSpan.End()
 			return nil, msgs, berr
 		}
 		if resp.StopReason == "length" {
-			a.logger.Warn("response truncated", "label", req.Label, "stop_reason", "length")
+			env.Logger.Warn("response truncated", "label", req.Label, "stop_reason", "length")
 		}
 		chatSpan.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
 		chatSpan.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
@@ -223,7 +188,7 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 				for i, call := range parCalls {
 					i, call := i, call
 					go func() {
-						out := a.runTool(toolCtx, req.Label, call, extraFns, extraRisk)
+						out := env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk)
 						ch <- callResult{i, out}
 					}()
 				}
@@ -250,7 +215,7 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 					msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: "submitted"})
 					continue
 				}
-				out := a.runTool(toolCtx, req.Label, call, extraFns, extraRisk)
+				out := env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk)
 				msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: out.String()})
 			}
 			chatSpan.End()
@@ -275,24 +240,24 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 			}
 			msgs = append(msgs, Message{Role: RoleAssistant, Content: cmp.Or(resp.Text, "(no output)")})
 
-			if a.provider.Capabilities().StructuredOutput {
+			if env.Provider.Capabilities().StructuredOutput {
 				// A user turn, not an assistant prefill: newer models reject
 				// a conversation that ends on an assistant message.
 				msgs = append(msgs, Message{Role: RoleUser, Content: "Now give the final answer as the structured object."})
-				phaseSpan := a.tracer.Start("phase2")
-				finalResp, err := a.streamChat(ctx, ChatRequest{
+				phaseSpan := env.Tracer.Start("phase2")
+				finalResp, err := a.streamChat(ctx, env, ChatRequest{
 					System:    req.System,
 					Messages:  msgs,
 					Schema:    req.Schema, // native structured output in the provider
 					MaxTokens: maxTok,
-					Model:     a.cfg.Model,
+					Model:     env.Model,
 				})
 				if err != nil {
 					phaseSpan.SetError(err.Error())
 					phaseSpan.End()
 					return nil, msgs, err
 				}
-				if berr := a.budget.add(finalResp.Usage); berr != nil {
+				if berr := env.Budget.Add(finalResp.Usage); berr != nil {
 					phaseSpan.SetError(berr.Error())
 					phaseSpan.End()
 					return nil, msgs, berr
@@ -307,7 +272,7 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 				msgs = append(msgs, Message{Role: RoleAssistant, Content: cmp.Or(finalResp.Text, "(no output)")})
 			}
 
-			maxNudges := a.cfg.MaxNudges
+			maxNudges := env.Config.MaxNudges
 			if maxNudges <= 0 {
 				maxNudges = 3
 			}
@@ -326,16 +291,16 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 }
 
 // streamChat calls the provider's streaming Chat and accumulates events into
-// a ChatResponse. Text tokens are forwarded to a.tokenCb (if set) in real time.
-func (a *ReAct) streamChat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
-	timeout := time.Duration(a.cfg.StreamTimeoutSec()) * time.Second
+// a ChatResponse. Text tokens are forwarded to env.OnToken (if set) in real time.
+func (a *ReAct) streamChat(ctx context.Context, env RunEnv, req ChatRequest) (ChatResponse, error) {
+	timeout := time.Duration(env.Config.StreamTimeoutSec()) * time.Second
 	chatCtx := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		chatCtx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	resp, err := CollectStream(a.provider.Chat(chatCtx, req), a.tokenCb)
+	resp, err := CollectStream(env.Provider.Chat(chatCtx, req), env.OnToken)
 	if err != nil {
 		return resp, err
 	}

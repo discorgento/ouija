@@ -35,11 +35,19 @@ imports, ~5k lines.
 
 ```go
 type Agent interface {
-    Run(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error)
+    Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Message) (*RunResult, []Message, error)
 }
 ```
 
-`ReAct` is the built-in implementation: a standard plan→act→observe loop.
+An `Agent` holds no per-run state. Everything a run needs — provider, model,
+config, tool definitions, the gated `RunTool`, the shared `Budget`, tracer,
+logger and token callback — arrives in a `RunEnv` the Engine snapshots when the
+run starts. So one Agent serves concurrent runs (a totem's parallel passes),
+and the Engine's setters (`SetModel`, `SetProvider`, `SetLogger`, …) are safe
+while runs are in progress: they apply from the next run on. Pass your own loop
+strategy in `engine.EngineConfig{Agent: …}`.
+
+`ReAct` (the default) is the built-in implementation: a standard plan→act→observe loop.
 The model proposes tool calls; the harness validates, gates (permissions,
 allowlist, doom detection), executes, and injects structured observations back.
 Each loop iteration calls `compact()` which trims old tool-result content and

@@ -91,10 +91,10 @@ func TestToolRiskFailsClosed(t *testing.T) {
 
 func TestBudgetCeilings(t *testing.T) {
 	tr := newTracker(100, 0, 0, 0, 0)
-	if err := tr.add(Usage{InputTokens: 60, OutputTokens: 0}); err != nil {
+	if err := tr.Add(Usage{InputTokens: 60, OutputTokens: 0}); err != nil {
 		t.Fatalf("should not exceed yet: %v", err)
 	}
-	if err := tr.add(Usage{InputTokens: 60, OutputTokens: 0}); err == nil {
+	if err := tr.Add(Usage{InputTokens: 60, OutputTokens: 0}); err == nil {
 		t.Fatal("should exceed the token ceiling")
 	}
 }

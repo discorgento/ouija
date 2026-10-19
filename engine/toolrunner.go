@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"sync"
 )
 
 // gateState is the live permission/approval wiring shared by Engine and
@@ -12,12 +13,33 @@ import (
 // fields by hand ("setters keep both in sync"), which could silently drift
 // (e.g. a stale permConfig letting a tool through un-gated).
 //
-// Setters are expected to be called during wiring (before/independent of a
-// run), matching the previous field-mirroring contract.
+// The Engine's setters may run while a run is executing tools (the chat TUI
+// changes permissions mid-session), so access goes through mu; each tool call
+// reads one consistent snapshot.
 type gateState struct {
+	mu          sync.RWMutex
 	permConfig  *PermissionConfig
 	approvalMgr *ApprovalManager
 	toolCb      ToolCallback
+}
+
+// gateSnapshot is one consistent read of a gateState.
+type gateSnapshot struct {
+	permConfig  *PermissionConfig
+	approvalMgr *ApprovalManager
+	toolCb      ToolCallback
+}
+
+func (g *gateState) snapshot() gateSnapshot {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return gateSnapshot{permConfig: g.permConfig, approvalMgr: g.approvalMgr, toolCb: g.toolCb}
+}
+
+func (g *gateState) update(fn func(g *gateState)) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	fn(g)
 }
 
 // ToolRunner is the gating and execution pipeline for a single tool call.
@@ -68,7 +90,8 @@ func NewToolRunner(cfg ToolRunnerConfig) *ToolRunner {
 // Run gates and executes a tool call. The return value is a ToolResult
 // the agent loop can inspect for structured errors.
 func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extraFns map[string]ToolFn, extraRisk map[string]RiskTier) ToolResult {
-	if cb := r.gate.toolCb; cb != nil {
+	gate := r.gate.snapshot()
+	if cb := gate.toolCb; cb != nil {
 		cb(call.Name, call.Input)
 	}
 
@@ -141,8 +164,8 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	}
 
 	// ── Permission check ──────────────────────────────────────────
-	if r.gate.permConfig != nil {
-		lvl := r.gate.permConfig.Check(call.Name, checkPath)
+	if gate.permConfig != nil {
+		lvl := gate.permConfig.Check(call.Name, checkPath)
 		switch lvl {
 		case Deny:
 			if span != nil {
@@ -165,13 +188,13 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 						approvalInput["_preview"] = preview
 					}
 				}
-				if r.gate.approvalMgr == nil {
+				if gate.approvalMgr == nil {
 					if span != nil {
 						span.SetError("denied (no approval UI)")
 					}
 					return errRejected("tool '" + call.Name + "' requires approval (no approval UI configured)")
 				}
-				result, aerr := r.gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), approvalInput)
+				result, aerr := gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), approvalInput)
 				if aerr != nil {
 					return errRejected(aerr.Error())
 				}

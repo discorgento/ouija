@@ -26,9 +26,9 @@ func newTracker(maxTokens, maxSteps int, maxUSD, inCost, outCost float64) *track
 	}
 }
 
-// add records usage and returns an error if a ceiling is exceeded.
+// Add records usage and returns an error if a ceiling is exceeded (BudgetMeter).
 // Negative token counts are rejected (defense against buggy providers).
-func (t *tracker) add(u Usage) error {
+func (t *tracker) Add(u Usage) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if u.InputTokens < 0 || u.OutputTokens < 0 {

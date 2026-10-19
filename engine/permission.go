@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ─── Permission levels ──────────────────────────────────────────────
@@ -50,9 +52,40 @@ func ParseLevel(s string) Level {
 // PermissionConfig maps tool names to permission levels.
 // The Default level is used for tools not explicitly mapped.
 // Protected paths are always denied regardless of level.
+//
+// Default and Tools may be set directly while building the config. Once it is
+// handed to an Engine, runs read it concurrently: change it only through
+// SetDefault/SetTool and read it through Levels.
 type PermissionConfig struct {
 	Default Level
 	Tools   map[string]Level // tool name → level
+
+	mu sync.RWMutex
+}
+
+// SetDefault changes the level for tools without an override. Safe while runs
+// read the config.
+func (cfg *PermissionConfig) SetDefault(l Level) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	cfg.Default = l
+}
+
+// SetTool overrides the level of one tool. Safe while runs read the config.
+func (cfg *PermissionConfig) SetTool(tool string, l Level) {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+	if cfg.Tools == nil {
+		cfg.Tools = make(map[string]Level)
+	}
+	cfg.Tools[tool] = l
+}
+
+// Levels returns the default level and a copy of the per-tool overrides.
+func (cfg *PermissionConfig) Levels() (Level, map[string]Level) {
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
+	return cfg.Default, maps.Clone(cfg.Tools)
 }
 
 // NewPermissionConfig creates a config with the given default level.
@@ -90,6 +123,8 @@ func (cfg *PermissionConfig) Check(tool, absPath string) Level {
 	if absPath != "" && isProtectedPath(absPath) {
 		return Deny
 	}
+	cfg.mu.RLock()
+	defer cfg.mu.RUnlock()
 	if lvl, ok := cfg.Tools[tool]; ok {
 		return lvl
 	}

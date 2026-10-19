@@ -448,12 +448,13 @@ func (m *model) handlePermit(parts []string) bool {
 		// Show current permission levels.
 		var b strings.Builder
 		b.WriteString("### Permission levels\n\n")
-		b.WriteString(fmt.Sprintf("  default: **%s**\n", pc.Default))
+		def, tools := pc.Levels()
+		b.WriteString(fmt.Sprintf("  default: **%s**\n", def))
 		b.WriteString("\n  per-tool overrides:\n")
 
 		// Show tools in sorted order.
-		toolNames := make([]string, 0, len(pc.Tools))
-		for name := range pc.Tools {
+		toolNames := make([]string, 0, len(tools))
+		for name := range tools {
 			toolNames = append(toolNames, name)
 		}
 		slices.Sort(toolNames)
@@ -461,7 +462,7 @@ func (m *model) handlePermit(parts []string) bool {
 			b.WriteString("    (none)\n")
 		}
 		for _, name := range toolNames {
-			b.WriteString(fmt.Sprintf("    %s → **%s**\n", name, pc.Tools[name]))
+			b.WriteString(fmt.Sprintf("    %s → **%s**\n", name, tools[name]))
 		}
 
 		m.lines = append(m.lines,
@@ -470,7 +471,7 @@ func (m *model) handlePermit(parts []string) bool {
 	} else if len(parts) == 3 {
 		tool := parts[1]
 		level := engine.ParseLevel(parts[2])
-		pc.Tools[tool] = level
+		pc.SetTool(tool, level) // a run may be reading the config right now
 		now := time.Now().Format("15:04")
 		m.lines = append(m.lines,
 			line{role: "assistant", text: fmt.Sprintf("✓ %s → %s", tool, level), ts: now},
