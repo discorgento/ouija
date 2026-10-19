@@ -246,11 +246,15 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 				msgs = append(msgs, Message{Role: RoleUser, Content: "Now give the final answer as the structured object."})
 				phaseSpan := env.Tracer.Start("phase2")
 				finalResp, err := a.streamChat(ctx, env, ChatRequest{
-					System:    req.System,
-					Messages:  msgs,
-					Schema:    req.Schema, // native structured output in the provider
-					MaxTokens: maxTok,
-					Model:     env.Model,
+					System:   req.System,
+					Messages: msgs,
+					// The history holds this run's tool calls, so the tools
+					// stay declared — but this call must answer, not call one.
+					Tools:       toolDefs,
+					NoToolCalls: true,
+					Schema:      req.Schema, // native structured output in the provider
+					MaxTokens:   maxTok,
+					Model:       env.Model,
 				})
 				if err != nil {
 					phaseSpan.SetError(err.Error())

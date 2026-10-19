@@ -54,12 +54,16 @@ type Usage struct {
 
 // ChatRequest is a single provider invocation.
 type ChatRequest struct {
-	System    string
-	Messages  []Message
-	Tools     []ToolDef
-	Schema    map[string]any // when set, the reply must be this JSON object: native structured output, or a forced SubmitTool call
-	MaxTokens int
-	Model     string
+	System   string
+	Messages []Message
+	Tools    []ToolDef
+	Schema   map[string]any // when set, the reply must be this JSON object (native structured output)
+	// NoToolCalls declares Tools without letting this call use them: the
+	// history references them (an API may reject tool calls and results whose
+	// tools are not declared), but the reply must be an answer.
+	NoToolCalls bool
+	MaxTokens   int
+	Model       string
 }
 
 // ChatResponse is a single provider reply (used internally by helpers).

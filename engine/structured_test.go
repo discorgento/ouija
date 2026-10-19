@@ -218,6 +218,11 @@ func TestStructuredPhaseTwoAcceptsSubmitCall(t *testing.T) {
 	if p2.Schema == nil {
 		t.Fatal("phase 2 must request native structured output")
 	}
+	// The history holds tool calls, so the tools stay declared — without
+	// letting this call use them (APIs reject undeclared tool calls in history).
+	if len(p2.Tools) == 0 || !p2.NoToolCalls {
+		t.Fatalf("phase 2 tools=%d noToolCalls=%v; want the tools declared and calls off", len(p2.Tools), p2.NoToolCalls)
+	}
 }
 
 // Prose from phase 2 is not an answer: the loop nudges back to submit_result

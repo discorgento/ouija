@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/discorgento/ouija/engine"
@@ -43,7 +44,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 
 		body := map[string]any{
 			"model":      req.Model,
-			"max_tokens": req.MaxTokens,
+			"max_tokens": max(req.MaxTokens, minMaxTokens),
 			"messages":   antMessages(req.Messages),
 			"stream":     true,
 		}
@@ -62,19 +63,20 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 				"input_schema": t.Schema,
 			})
 		}
-		// Structured output: the answer is the input of a forced submit_result
-		// call, whose input_schema is the requested schema.
-		if req.Schema != nil {
-			tools = append(tools, map[string]any{
-				"name":         engine.SubmitTool,
-				"description":  "Submit the final answer as the structured result object.",
-				"input_schema": req.Schema,
-			})
-			body["tool_choice"] = map[string]any{"type": "tool", "name": engine.SubmitTool}
-		}
 		if len(tools) > 0 {
 			tools[len(tools)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 			body["tools"] = tools
+			// "none", not a forced choice: current models reject forced
+			// tool_choice ("any"/"tool") with a 400.
+			if req.NoToolCalls {
+				body["tool_choice"] = map[string]any{"type": "none"}
+			}
+		}
+		// Structured output: JSON constrained to the schema, as text.
+		if req.Schema != nil {
+			body["output_config"] = map[string]any{
+				"format": map[string]any{"type": "json_schema", "schema": outputSchema(req.Schema)},
+			}
 		}
 
 		raw, _ := json.Marshal(body)
@@ -91,7 +93,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 		}
 		toolBlocks := make(map[int]*antTool)
 		var usage engine.Usage
-		var stopReason string
+		var stopReason, refusal string
 
 		err := a.client.PostSSE(ctx, "https://api.anthropic.com/v1/messages", headers, raw,
 			func(eventType string, data []byte) error {
@@ -193,7 +195,11 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 				case "message_delta":
 					var md struct {
 						Delta struct {
-							StopReason string `json:"stop_reason"`
+							StopReason  string `json:"stop_reason"`
+							StopDetails *struct {
+								Category    string `json:"category"`
+								Explanation string `json:"explanation"`
+							} `json:"stop_details"`
 						} `json:"delta"`
 						Usage struct {
 							OutputTokens        int `json:"output_tokens"`
@@ -202,6 +208,9 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 					}
 					if json.Unmarshal(data, &md) == nil {
 						stopReason = md.Delta.StopReason
+						if d := md.Delta.StopDetails; d != nil {
+							refusal = strings.TrimSpace(d.Category + ": " + d.Explanation)
+						}
 						if md.Usage.OutputTokens > 0 {
 							usage.OutputTokens = md.Usage.OutputTokens
 						}
@@ -224,6 +233,13 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 				return nil
 			},
 		)
+		// A safety decline is HTTP 200 with no usable content; taken as a plain
+		// answer it would read as an empty reply. Checked after the stream, not
+		// in the callback, so it holds however the stream ends.
+		if err == nil && stopReason == "refusal" {
+			err = engine.ErrProvider("anthropic: the model declined the request (" +
+				strings.Trim(refusal, ": ") + ")")
+		}
 		if err != nil {
 			yield(engine.StreamEvent{}, err)
 		}
@@ -268,5 +284,51 @@ func antMessages(msgs []engine.Message) []map[string]any {
 		}
 	}
 	flush()
+	return out
+}
+
+// minMaxTokens is the smallest max_tokens sent. On current models thinking is
+// always on and shares max_tokens with the reply, so the small caps totems
+// ask for (4096) would cut answers short; max_tokens is a ceiling, not spend.
+const minMaxTokens = 16000
+
+// outputSchema adapts a JSON Schema to what structured outputs accept: every
+// object closed with additionalProperties: false (required), and the
+// constraints they reject — numeric bounds, string lengths, array sizes —
+// removed. Property names are never taken for schema keywords.
+func outputSchema(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		if list, ok := v.([]any); ok {
+			out := make([]any, len(list))
+			for i, item := range list {
+				out[i] = outputSchema(item)
+			}
+			return out
+		}
+		return v
+	}
+	out := make(map[string]any, len(m)+1)
+	for k, val := range m {
+		switch k {
+		case "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+			"minLength", "maxLength", "minItems", "maxItems", "uniqueItems":
+			continue
+		case "properties", "$defs", "definitions":
+			// A map of name → schema: recurse into the schemas only.
+			if props, ok := val.(map[string]any); ok {
+				clean := make(map[string]any, len(props))
+				for name, schema := range props {
+					clean[name] = outputSchema(schema)
+				}
+				out[k] = clean
+				continue
+			}
+		}
+		out[k] = outputSchema(val)
+	}
+	if out["type"] == "object" || out["properties"] != nil {
+		out["additionalProperties"] = false
+	}
 	return out
 }

@@ -10,7 +10,8 @@ import (
 )
 
 // SubmitTool is the tool through which a model hands in a structured answer
-// (RunRequest.Schema). Providers without a native JSON mode force a call to it.
+// (RunRequest.Schema) while it still has other tools; its input schema is the
+// run's schema.
 const SubmitTool = "submit_result"
 
 const submitTool = SubmitTool
