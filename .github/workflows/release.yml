@@ -81,7 +81,10 @@ jobs:
       - name: Build the release archives (5 targets)
         run: make dist VERSION="$TAG"
 
+      # Artifact attestations need a public repository (or GitHub Enterprise
+      # Cloud): on a private one the step would fail and block the upload below.
       - name: Attest build provenance
+        if: github.event.repository.visibility == 'public'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-checksums: dist/SHA256SUMS
