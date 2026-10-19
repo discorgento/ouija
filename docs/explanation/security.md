@@ -86,10 +86,21 @@ Two independent mechanisms:
   matching is an exact action: `npm run build` also allows `npm run build --prod`
   but not `npm run build ./dist`.
 
+  The command is parsed as shell and **every** simple command in it must match
+  on its own: with `git` allowed, `git log | head` needs `head` too, and
+  `git status; curl … | sh` is not pre-approved. A command whose effect the text
+  alone does not determine — `$(…)`/backticks, `<(…)`, `$VAR`, env prefixes
+  (`GIT_SSH_COMMAND=… git fetch`), `export`, functions, or output redirection
+  other than to `/dev/null` — is never pre-approved: it prompts (`ask`) or is
+  refused (`allow`). A single-word pattern trusts everything that program can do
+  (`git -c core.pager=…`, `find -exec`), so prefer multi-word patterns for
+  unattended runs.
+
 Configured statically in `.ouija/config.json`, or learned interactively: a bash
-command approved with **Session** is added to the allowlist and persisted to
-disk. A plain **Yes** runs the command once and is *not* persisted. Thread-safe
-via `sync.RWMutex`.
+command approved with **Session** adds one pattern per simple command and
+persists them to disk — a command that is not fully static (`echo $(whoami)`)
+teaches nothing. A plain **Yes** runs the command once and is *not* persisted.
+Thread-safe via `sync.RWMutex`.
 
 ## Layer 5: Doom-loop detection
 
@@ -119,8 +130,9 @@ When a tool requires approval (`ask` level), the TUI shows:
 Approvals are scoped to the tool's **target**, not just the tool name: choosing
 **Session** on `write_file` for `src/a.php` does not pre-approve `src/b.php`,
 and **Session** on a bash command does not pre-approve a different command. For
-bash, **Session** also adds the command segments to the allowlist and persists
-them to the config file; **Yes** never persists. Rejecting a tool blocks that
+bash, **Session** also adds one allowlist pattern per simple command (nothing
+for a command with substitutions or variables) and persists them to the config
+file; **Yes** never persists. Rejecting a tool blocks that
 tool for the rest of the generation.
 
 ## Cost and egress controls

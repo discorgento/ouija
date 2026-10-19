@@ -77,8 +77,11 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 			// the approval to outlive this run.
 			if resp.allowed && resp.forSession && baseTool(tool) == "bash" {
 				if cmd, ok := input["command"].(string); ok {
-					for _, seg := range engine.ExtractCommands(cmd) {
-						eng.AddAllowedCommand(seg)
+					// Only a fully static command is learned, one pattern per
+					// simple command: approving `echo $(whoami)` must not
+					// silently allowlist `whoami`.
+					for _, pat := range engine.AllowlistPatterns(cmd) {
+						eng.AddAllowedCommand(pat)
 					}
 					if configPath != "" {
 						if err := eng.SaveConfigAt(configPath); err != nil {
