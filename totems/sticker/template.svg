@@ -81,15 +81,23 @@
   <!-- Cut margin with dashes -->
   <rect x="30" y="30" width="540" height="540" rx="30" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="8,6"/>
 
-  <!-- === TOP-LEFT: ouija planchette icon === -->
-  <g transform="translate(68, 68)" opacity="0.25">
-    <circle cx="0" cy="0" r="14" fill="none" stroke="#a78bfa" stroke-width="1.5"/>
-    <circle cx="-5" cy="0" r="2.5" fill="#a78bfa"/>
-    <circle cx="5" cy="0" r="2.5" fill="#a78bfa"/>
-    <circle cx="0" cy="-5" r="2.5" fill="#a78bfa"/>
-    <circle cx="0" cy="5" r="2.5" fill="#a78bfa"/>
-    <line x1="-7" y1="7" x2="7" y2="7" stroke="#a78bfa" stroke-width="1.5"/>
-    <line x1="-7" y1="-7" x2="7" y2="-7" stroke="#a78bfa" stroke-width="1.5"/>
+  <!-- === TOP-LEFT: ouija planchette mark (assets/logo.svg, small) === -->
+  <defs>
+    <linearGradient id="plEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5fd7"/>
+      <stop offset=".55" stop-color="#af87ff"/>
+      <stop offset="1" stop-color="#8700ff"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(48.8, 46.9) scale(0.32)" opacity="0.7">
+    <path fill="#1a0b30" stroke="url(#plEdge)" stroke-width="5" stroke-linejoin="round"
+          d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"/>
+    <circle cx="60" cy="58" r="21" fill="#0c0616" stroke="url(#plEdge)" stroke-width="4.5"/>
+    <path d="M51 50 L59 58 L51 66" fill="none" stroke="#ff8ae0" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M62 67 H71" stroke="#c9a9ff" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="38" cy="99" r="6.5" fill="#ff5fd7"/>
+    <circle cx="60" cy="105" r="6.5" fill="#af87ff"/>
+    <circle cx="82" cy="99" r="6.5" fill="#8a5cff"/>
   </g>
 
   <!-- === TOP-RIGHT: decorative dots === -->
