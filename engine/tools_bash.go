@@ -31,6 +31,20 @@ const (
 // Timeout is 30s by default; the model can request longer via the timeout field.
 // Returns the combined output, trimmed to maxToolBytes.
 func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
+	before := gitGuardSnapshot(root)
+	res := execBash(ctx, root, in)
+	if notice := gitGuardNotice(root, before, gitGuardSnapshot(root)); notice != "" {
+		if res.Error != nil {
+			res.Error.Message += "\n" + notice
+		} else {
+			res.Data = strings.TrimSpace(res.Data + "\n\n" + notice)
+		}
+	}
+	return res
+}
+
+// execBash runs the command (see bashTool).
+func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 	command, _ := in["command"].(string)
 	if strings.TrimSpace(command) == "" {
 		return errInvalidInput("bash: command is required")

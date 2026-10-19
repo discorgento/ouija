@@ -134,7 +134,8 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		if err != nil {
 			return nil, msgs, err
 		}
-		if resp.StopReason == "length" || resp.StopReason == "max_tokens" { // OpenAI / Anthropic
+		truncated := resp.StopReason == "length" || resp.StopReason == "max_tokens" // OpenAI / Anthropic
+		if truncated {
 			env.Logger.Warn("response truncated", "label", req.Label, "stop_reason", resp.StopReason)
 		}
 
@@ -156,7 +157,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 
 			// Defer submit_result to last so other tools execute in the same
 			// turn before the agent signals completion.
-			var submitResult string
+			var submitResult, rejected string
 
 			// Collect all tool names for RunResult metadata.
 			for _, call := range resp.ToolCalls {
@@ -190,8 +191,17 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 				}
 				call := batch[0]
 				if call.Name == SubmitTool {
-					chatSpan.SetAttr("submit_result", "true")
 					b, _ := json.Marshal(call.Input)
+					// A cut-off reply arrives as {} or a partial object: taking it
+					// as the answer gave totems an empty result (and task wrote
+					// an empty plan over the real one). Refuse it; the model tries
+					// again, within MaxNudges.
+					if problem := submitProblem(req.Schema, b, truncated); problem != "" {
+						rejected = problem
+						msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: "ERROR: " + problem})
+						continue
+					}
+					chatSpan.SetAttr("submit_result", "true")
 					submitResult = string(b)
 					// Answer the call so the history stays well-formed
 					// (every tool_use has its tool_result) for a later Chat.
@@ -205,6 +215,12 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 			if submitResult != "" {
 				return &RunResult{Text: submitResult, Tools: toolNames}, msgs, nil
 			}
+			if rejected != "" {
+				if nudges >= maxNudgesOf(env) {
+					return nil, msgs, fmt.Errorf("model did not return a complete structured answer after %d attempts: %s", nudges, rejected)
+				}
+				nudges++
+			}
 			continue
 		}
 
@@ -217,7 +233,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		// JSON already in the text → native structured output (one more
 		// call, when the provider supports it) → nudge back to submit_result.
 		if useStructured {
-			if js, ok := extractJSON(resp.Text); ok {
+			if js, ok := extractJSON(resp.Text); ok && submitProblem(req.Schema, []byte(js), truncated) == "" {
 				msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
 				return &RunResult{Text: js, Tools: toolNames}, msgs, nil
 			}
@@ -242,18 +258,15 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 					return nil, msgs, err
 				}
 				phaseSpan.End()
-				if js, ok := structuredAnswer(finalResp); ok {
+				phaseCut := finalResp.StopReason == "length" || finalResp.StopReason == "max_tokens"
+				if js, ok := structuredAnswer(finalResp); ok && submitProblem(req.Schema, []byte(js), phaseCut) == "" {
 					msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
 					return &RunResult{Text: js, Tools: toolNames}, msgs, nil
 				}
 				msgs = append(msgs, Message{Role: RoleAssistant, Content: cmp.Or(finalResp.Text, "(no output)")})
 			}
 
-			maxNudges := env.Config.MaxNudges
-			if maxNudges <= 0 {
-				maxNudges = 3
-			}
-			if nudges >= maxNudges {
+			if nudges >= maxNudgesOf(env) {
 				return nil, msgs, fmt.Errorf("model did not return structured output after %d attempts", nudges)
 			}
 			nudges++
@@ -513,7 +526,8 @@ func compressConversation(msgs []Message) []Message {
 // keeping in a compressed conversation (the chat TUI renders it).
 func isEditResult(m Message) bool {
 	return m.Role == RoleTool && m.ToolCallID != "" &&
-		(strings.HasPrefix(m.Content, "✓ edited") || strings.HasPrefix(m.Content, "✓ wrote"))
+		(strings.HasPrefix(m.Content, "✓ edited") || strings.HasPrefix(m.Content, "✓ wrote") ||
+			strings.Contains(m.Content, GitGuardMarker)) // the user must still see it
 }
 
 // submitToolDef is the tool the model calls to hand in a structured answer.
@@ -539,6 +553,56 @@ func structuredAnswer(resp ChatResponse) (string, bool) {
 		}
 	}
 	return extractJSON(resp.Text)
+}
+
+// maxNudgesOf is how many times a run asks again for the structured answer.
+func maxNudgesOf(env RunEnv) int {
+	if n := env.Config.MaxNudges; n > 0 {
+		return n
+	}
+	return 3
+}
+
+// submitProblem says why js cannot be the run's structured answer, "" when
+// it can: the reply was cut off by the output limit, it is not an object, or
+// it lacks a field the schema requires (a code example in prose, or the {}
+// a provider makes of an unparsable cut-off tool input).
+func submitProblem(schema map[string]any, js []byte, truncated bool) string {
+	if truncated {
+		return "the reply was cut off by the output limit — call " + SubmitTool + " again with the complete object, written more concisely"
+	}
+	var obj map[string]any
+	if json.Unmarshal(js, &obj) != nil || obj == nil {
+		return "the answer must be one JSON object matching the schema"
+	}
+	var missing []string
+	for _, k := range requiredKeys(schema) {
+		if v, ok := obj[k]; !ok || v == nil {
+			missing = append(missing, k)
+		}
+	}
+	if len(missing) > 0 {
+		return "the answer lacks required field(s) " + strings.Join(missing, ", ") + " — call " + SubmitTool + " again with the complete object"
+	}
+	return ""
+}
+
+// requiredKeys reads a schema's top-level "required" list ([]string from the
+// schema package, []any from decoded JSON).
+func requiredKeys(schema map[string]any) []string {
+	switch r := schema["required"].(type) {
+	case []string:
+		return r
+	case []any:
+		var out []string
+		for _, v := range r {
+			if s, ok := v.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // extractJSON pulls the first balanced-looking JSON object out of free text.

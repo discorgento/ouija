@@ -284,3 +284,23 @@ func TestSubmitCallIsAnsweredInHistory(t *testing.T) {
 		t.Fatalf("submit_result call left unanswered; last message = %+v", last)
 	}
 }
+
+// A submit_result cut off by the output limit (it arrives as {}) or missing a
+// required field is refused, and the model's next, complete answer is taken.
+func TestSubmitRejectsIncompleteAnswers(t *testing.T) {
+	schema := map[string]any{"type": "object", "properties": map[string]any{"plan": map[string]any{"type": "string"}}, "required": []string{"plan"}}
+	submit := func(in map[string]any) ToolCall { return ToolCall{ID: "s", Name: SubmitTool, Input: in} }
+	p := &mockProvider{responses: []ChatResponse{
+		{ToolCalls: []ToolCall{submit(map[string]any{})}, StopReason: "max_tokens"},
+		{ToolCalls: []ToolCall{submit(map[string]any{"other": 1})}},
+		{ToolCalls: []ToolCall{submit(map[string]any{"plan": "do it"})}},
+	}}
+	eng := newTestEngine(p, t.TempDir())
+	res, err := eng.Run(context.Background(), RunRequest{Prompt: "x", Schema: schema, UseTools: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != `{"plan":"do it"}` || p.calls != 3 {
+		t.Fatalf("result %q after %d calls; want the complete answer on the third", res.Text, p.calls)
+	}
+}

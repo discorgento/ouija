@@ -317,3 +317,21 @@ func TestReplyIsTerminalSafe(t *testing.T) {
 		}
 	}
 }
+
+// A git-guard notice in the last turn becomes a banner in the transcript.
+func TestGitGuardNoticeShown(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	msgs := []engine.Message{
+		{Role: engine.RoleUser, Content: "run tests"},
+		{Role: engine.RoleTool, ToolCallID: "1", Content: "ok\n\n" + engine.GitGuardMarker + " this command changed .git/hooks/pre-commit — review"},
+		{Role: engine.RoleAssistant, Content: "done"},
+	}
+	m.handleResponse(chatResponse{text: "done", msgs: msgs, gen: m.gen})
+	found := false
+	for _, l := range m.lines {
+		found = found || (l.role == "banner" && strings.Contains(l.text, ".git/hooks/pre-commit"))
+	}
+	if !found {
+		t.Fatalf("no git-guard banner in %+v", m.lines)
+	}
+}

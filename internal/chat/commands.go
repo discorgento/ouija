@@ -303,6 +303,12 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 		m.lines = append(m.lines, line{role: "codeblock", text: termsafe.Clean(diff), lang: "diff", ts: now})
 	}
 
+	// Out of the tool output, where it would be easy to miss: a command
+	// changed what git runs on its own.
+	for _, notice := range turnGitNotices(m.history) {
+		m.lines = append(m.lines, line{role: "banner", text: termsafe.Clean(notice)})
+	}
+
 	if cmd := m.dispatchQueued(); cmd != nil {
 		return m, cmd // re-renders with the status line back
 	}

@@ -106,6 +106,30 @@ func (m *model) say(role, text string) {
 	m.rebuildContent()
 }
 
+// turnGitNotices returns the git-guard notices of the last turn's tool
+// results (engine.GitGuardMarker): a command changed .git/hooks or
+// .git/config, which git would run outside ouija's checks.
+func turnGitNotices(msgs []engine.Message) []string {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == engine.RoleUser {
+			start = i
+			break
+		}
+	}
+	var out []string
+	for _, msg := range msgs[start:] {
+		if msg.Role != engine.RoleTool {
+			continue
+		}
+		if i := strings.Index(msg.Content, engine.GitGuardMarker); i >= 0 {
+			notice, _, _ := strings.Cut(msg.Content[i:], "\n")
+			out = append(out, notice)
+		}
+	}
+	return out
+}
+
 // turnDiffs returns the diffs of the write/edit results of the last turn —
 // the messages from the last user message on — so a diff shown once is never
 // shown again under a later reply.

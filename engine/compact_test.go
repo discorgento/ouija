@@ -289,3 +289,28 @@ func TestCompactKeepsUTF8Valid(t *testing.T) {
 		t.Fatalf("compacted content invalid or untrimmed: valid=%v len=%d", utf8.ValidString(got), len(got))
 	}
 }
+
+// A git-guard notice survives compression, which runs before the chat reads
+// the turn: dropped with the other tool results, the user would never see it.
+func TestCompressKeepsGitGuardNotice(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleUser, Content: "go"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "1", Name: "bash"}, {ID: "2", Name: "read_file"}}},
+		{Role: RoleTool, ToolCallID: "1", Content: "ok\n\n" + GitGuardMarker + " changed .git/config"},
+		{Role: RoleTool, ToolCallID: "2", Content: "a big file"},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	out := compressConversation(msgs)
+	kept := false
+	for _, m := range out {
+		if strings.Contains(m.Content, GitGuardMarker) {
+			kept = true
+		}
+		if m.Content == "a big file" {
+			t.Fatal("an ordinary tool result was kept")
+		}
+	}
+	if !kept {
+		t.Fatalf("the git-guard notice was compressed away: %+v", out)
+	}
+}
