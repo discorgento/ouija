@@ -209,12 +209,29 @@ func resolveProjectRoot(cfg *engine.Config, cfgPath string, explicit bool) {
 	case cfg.ProjectRoot == "" || cfg.ProjectRoot == ".":
 		cfg.ProjectRoot, _ = os.Getwd()
 	case !explicit:
-		if joined, jerr := engine.SafeJoin(base, cfg.ProjectRoot); jerr == nil {
-			cfg.ProjectRoot = joined
-		} else {
-			cfg.ProjectRoot = base
+		cfg.ProjectRoot = containedRoot(base, cfg.ProjectRoot)
+	}
+}
+
+// containedRoot joins rel onto base and keeps the result inside base — also
+// physically: SafeJoin is lexical, and the sandbox root is later resolved
+// through symlinks, so `src -> ../..` would have made it the home directory.
+// Anything that leaves base falls back to base.
+func containedRoot(base, rel string) string {
+	joined, err := engine.SafeJoin(base, rel)
+	if err != nil {
+		return base
+	}
+	canonBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		canonBase = base
+	}
+	if real, err := filepath.EvalSymlinks(joined); err == nil {
+		if r, err := filepath.Rel(canonBase, real); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return base
 		}
 	}
+	return joined
 }
 
 // ValidateConfig checks the merged config against the provider registry.

@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -53,12 +54,12 @@ func Init(args []string) error {
 	var (
 		provider = cfg.Provider
 		model    = cfg.Model
-		apiKey   = cfg.APIKey
+		// Only the project's own override is pre-filled, never a global key:
+		// the masked field kept the starting provider's key after a switch,
+		// sent it to the new provider's API and saved it as its override.
+		apiKey = cfg.APIKey
 	)
-	if apiKey == "" && global.HasKey(provider) {
-		// Pre-fill with global key so user can keep it.
-		apiKey = global.APIKeys[provider]
-	}
+	origProvider, origKey := cfg.Provider, cfg.APIKey
 
 	selProv := huh.NewSelect[string]().
 		Title("Provider").
@@ -68,11 +69,7 @@ func Init(args []string) error {
 	selModel := huh.NewSelect[string]().
 		Title("Model").
 		OptionsFunc(func() []huh.Option[string] {
-			key := apiKey
-			if key == "" {
-				key = global.APIKeys[provider]
-			}
-			return modelOptions(ms, provider, key)
+			return modelOptions(ms, provider, cmp.Or(chosenKey(apiKey, origKey, provider, origProvider), global.APIKeys[provider]))
 		}, &provider).
 		Value(&model)
 
@@ -102,7 +99,7 @@ func Init(args []string) error {
 	cfg.Model = model
 	// Only store the API key if it differs from the global one (or if there
 	// is no global key for this provider).
-	cfg.APIKey = initAPIKey(apiKey, global.APIKeys[provider])
+	cfg.APIKey = initAPIKey(chosenKey(apiKey, origKey, provider, origProvider), global.APIKeys[provider])
 
 	// The user just wrote this file: SaveProjectConfig trusts it, so its
 	// settings apply.
@@ -143,6 +140,16 @@ func seedProjectConfig(path string, global *ouijaconfig.Config) (*engine.Config,
 	cfg.Provider = global.DefaultProvider()
 	cfg.Model = global.DefaultModel()
 	return cfg, false, nil
+}
+
+// chosenKey is the key the form holds for provider: the field's value, except
+// the project's previous override left untouched after switching away from the
+// provider it belongs to ("" then: use the global key).
+func chosenKey(field, origKey, provider, origProvider string) string {
+	if field == origKey && provider != origProvider {
+		return ""
+	}
+	return field
 }
 
 // initAPIKey decides the project-level API-key override: it is stored only when

@@ -85,3 +85,19 @@ func TestSeedProjectConfig_BrokenFileIsAnError(t *testing.T) {
 		t.Fatal("a broken project config was treated as absent")
 	}
 }
+
+// A project's key goes only to its provider: after switching provider in the
+// form, an untouched old key is not the new provider's (it used to be sent to
+// that API and saved as its override).
+func TestChosenKey(t *testing.T) {
+	for _, c := range []struct{ field, origKey, prov, origProv, want string }{
+		{"sk-ant", "sk-ant", "openai", "anthropic", ""},          // untouched, switched: not the new provider's
+		{"sk-ant", "sk-ant", "anthropic", "anthropic", "sk-ant"}, // same provider: keep
+		{"sk-new", "sk-ant", "openai", "anthropic", "sk-new"},    // typed for the new provider
+		{"", "", "openai", "anthropic", ""},
+	} {
+		if got := chosenKey(c.field, c.origKey, c.prov, c.origProv); got != c.want {
+			t.Errorf("chosenKey(%+v) = %q, want %q", c, got, c.want)
+		}
+	}
+}

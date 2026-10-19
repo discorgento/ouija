@@ -25,7 +25,9 @@ import (
 )
 
 // sensitiveKeys are the project-config keys applied only from a trusted file.
-var sensitiveKeys = []string{"permission", "tools", "apiKey", "systemPrompt"}
+// projectRoot is one: it moves the sandbox, and through a symlink in the repo
+// (src -> ~) it moved it onto the home directory without any prompt.
+var sensitiveKeys = []string{"permission", "tools", "apiKey", "systemPrompt", "projectRoot"}
 
 // FindProjectConfig returns the project config path discovery would load from
 // the current directory, "" when there is none.
@@ -123,6 +125,12 @@ func setsKey(raw map[string]json.RawMessage, k string) bool {
 			continue
 		}
 		// `ouija init` writes the built-in prompt; it grants nothing.
+		if k == "projectRoot" { // `ouija init` writes "."; it moves nothing
+			var r string
+			if json.Unmarshal(v, &r) == nil && (r == "." || r == "./") {
+				continue
+			}
+		}
 		if k == "systemPrompt" {
 			var p string
 			if json.Unmarshal(v, &p) == nil && p == engine.DefaultConfig().SystemPrompt {
@@ -169,6 +177,7 @@ func stripUntrusted(c *engine.Config) {
 	c.Tools = nil
 	c.APIKey = ""
 	c.SystemPrompt = engine.DefaultConfig().SystemPrompt
+	c.ProjectRoot = "."
 }
 
 func digest(data []byte) string {

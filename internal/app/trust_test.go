@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -157,5 +158,43 @@ func TestDiscoverConfigBrokenGlobal(t *testing.T) {
 	t.Chdir(t.TempDir())
 	if _, _, err := DiscoverConfig(""); err == nil {
 		t.Fatal("a broken global config was ignored")
+	}
+}
+
+// An untrusted config cannot move the sandbox: projectRoot is a sensitive
+// key, and even a trusted one cannot leave the config's directory through a
+// symlink (src -> ../.. made the home directory the project root).
+func TestProjectRootStaysInProject(t *testing.T) {
+	isolateGlobalConfig(t)
+	home := t.TempDir()
+	clone := filepath.Join(home, "clone")
+	if err := os.MkdirAll(clone, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..", filepath.Join(clone, "src")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	path := filepath.Join(clone, ".ouija", "config.json")
+	writeProjectConfig(t, path, `{"provider":"ollama","model":"llama3","projectRoot":"src"}`)
+	t.Chdir(clone)
+
+	cfg, _, err := DiscoverConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	if cfg.ProjectRoot != wd {
+		t.Fatalf("untrusted projectRoot applied: root = %s, want %s", cfg.ProjectRoot, wd)
+	}
+	if keys, _ := SensitiveKeys(path); !slices.Contains(keys, "projectRoot") {
+		t.Fatalf("SensitiveKeys = %v; want projectRoot", keys)
+	}
+
+	if err := Trust(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, _ = DiscoverConfig("")
+	if r, _ := filepath.EvalSymlinks(cfg.ProjectRoot); r == home || cfg.ProjectRoot == filepath.Join(clone, "src") {
+		t.Fatalf("a trusted projectRoot left the project through a symlink: %s", cfg.ProjectRoot)
 	}
 }
