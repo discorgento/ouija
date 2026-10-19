@@ -11,10 +11,9 @@
 
 # ouija
 
-A multi-totem AI harness that is **generic across projects and across LLMs**. A
-shared engine — provider adapters, sandboxed file tools, budget enforcement,
-tracing, structured logging, automatic provider fallback — reused by every totem
-and by the interactive chat TUI.
+An AI harness for **agents you write in Go** — a shared engine (providers,
+sandbox, budget, tracing, MCP) under **totems** you own: real code with types,
+tests and golden files, not prompt files you hope the model follows.
 
 > **A totem is an agent written in compiled Go code**, not YAML or Markdown. You get types, unit tests and golden files for the flow itself, while the engine enforces the cost budget, traces every step to Perfetto, sandboxes every tool call and exposes the agent over MCP. Reconciliation and retry are ordinary `for` loops — not instructions a model may or may not follow.
 

@@ -117,7 +117,8 @@ Restart the harness afterwards; the totems appear as `ouija_task`,
 | Tune budgets, permissions, allowlists | [Configure](../how-to/configure.md) |
 | Understand the pipeline you just ran | [Architecture](../explanation/architecture.md) |
 | Know exactly what ouija refuses to do and why | [Security](../explanation/security.md) |
-| Add your own workflow | [Adding a totem](../how-to/add-totem.md) |
+| **Write your own agent (totem)** | [Add a totem](../how-to/add-totem.md) |
+| Understand why totems are code, not prompt files | [Totems](../explanation/totems.md) |
 
 ---
 

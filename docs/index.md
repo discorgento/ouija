@@ -47,6 +47,7 @@ accomplish, look up, understand. Every page follows
 
 | Doc | What it covers |
 |---|---|
+| [Totems](explanation/totems.md) | Why a totem is compiled Go, what the engine gives you, when it's the wrong tool |
 | [Architecture](explanation/architecture.md) | Layers, data flow, engine pipeline, gating |
 | [Engine](explanation/engine.md) | ReAct loop, streaming, budget, providers, context limits |
 | [Security](explanation/security.md) | The five layers, denylist, sandbox, accepted risks |
