@@ -56,12 +56,24 @@ func (m *model) openPicker(cmd string) (tea.Model, tea.Cmd) {
 
 // providerModels lists provider's models: its own list from its API (built
 // with the configured key, cached for a day), else the built-in suggestions.
+//
+// The answer is kept for the session: the inline list asks on every
+// keystroke, and a provider whose API is down (not cached on disk) would
+// otherwise stall the UI on every key.
 func (m *model) providerModels(provider string) []models.Model {
+	if list, ok := m.modelLists[provider]; ok {
+		return list
+	}
 	var p engine.Provider
 	if m.buildProvider != nil {
 		p, _ = m.buildProvider(provider)
 	}
-	return models.Load().List(context.Background(), provider, p)
+	list := models.Load().List(context.Background(), provider, p)
+	if m.modelLists == nil {
+		m.modelLists = make(map[string][]models.Model)
+	}
+	m.modelLists[provider] = list
+	return list
 }
 
 // modelPickerLabel heads the model list; selectCompletion keys on it.
@@ -136,19 +148,11 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.input.SetHeight(1)
 
-	now := time.Now().Format("15:04")
-
 	// ── If already waiting, enqueue instead of sending ──────────────
 	if m.waiting {
 		m.pendingQueue = append(m.pendingQueue, input)
-		m.lines = append(m.lines,
-			line{role: "user", text: input, ts: now},
-		)
 		m.msgCount++
-		m.rebuildContent()
-		if m.autoScroll {
-			m.vp.GotoBottom()
-		}
+		m.say("user", input)
 		return m, nil
 	}
 
@@ -162,21 +166,9 @@ func (m *model) handleSend() (tea.Model, tea.Cmd) {
 	m.inputHistIdx = -1
 	m.inputSaved = ""
 
-	m.lines = append(m.lines,
-		line{role: "user", text: input, ts: now},
-	)
+	m.lines = append(m.lines, line{role: "user", text: input, ts: time.Now().Format("15:04")})
 	m.msgCount++
-	m.waiting = true
-	m.setViewportSize() // make room for persistent status line
-	m.responseStart = time.Now()
-	m.partialText = ""
-	m.streamingTokens = 0
-	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
-	}
-
-	return m, tea.Batch(m.startChat(input), m.spinner.Tick)
+	return m, m.beginGeneration(input) // re-renders with the status line
 }
 
 // ─── Response handling ────────────────────────────────────────────────
@@ -202,7 +194,7 @@ func (m *model) startChat(input string) tea.Cmd {
 			Prompt:   input,
 			Messages: msgs,
 			UseTools: true,
-			System:   m.eng.Config().SystemPrompt,
+			System:   m.system,
 		})
 		if err != nil {
 			return chatResponse{text: "", msgs: updated, err: err, gen: gen}
@@ -230,13 +222,7 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 
 	// ── Handle error ────────────────────────────────────────────────
 	if msg.err != nil {
-		m.lines = append(m.lines,
-			line{role: "assistant", text: fmt.Sprintf("error: %v", msg.err), ts: now},
-		)
-		m.rebuildContent()
-		if m.autoScroll {
-			m.vp.GotoBottom()
-		}
+		m.say("assistant", fmt.Sprintf("error: %v", msg.err))
 		return m, nil
 	}
 
@@ -259,49 +245,15 @@ func (m *model) handleResponse(msg chatResponse) (tea.Model, tea.Cmd) {
 		m.eng.Tracer().Reset()
 	}
 
-	// ── Show tool diffs as code blocks ───────────────────────────
-	// Scan the last few history messages for write/edit_file results
-	// containing diffs, and render them as readable diff code blocks.
-	start := 0
-	if len(m.history) > 20 {
-		start = len(m.history) - 20
-	}
-	for i := start; i < len(m.history); i++ {
-		if m.history[i].Role != engine.RoleTool {
-			continue
-		}
-		content := m.history[i].Content
-		if !strings.HasPrefix(content, "✓ edited") && !strings.HasPrefix(content, "✓ wrote") {
-			continue
-		}
-		if idx := strings.IndexByte(content, '\n'); idx > 0 {
-			diffText := content[idx+1:]
-			if strings.TrimSpace(diffText) != "" {
-				m.lines = append(m.lines,
-					line{role: "codeblock", text: diffText, lang: "diff", ts: now},
-				)
-			}
-		}
+	// ── Show this turn's write/edit diffs as code blocks ────────────
+	for _, diff := range turnDiffs(m.history) {
+		m.lines = append(m.lines, line{role: "codeblock", text: diff, lang: "diff", ts: now})
 	}
 
-	// ── Process pending queue ───────────────────────────────────────
-	if len(m.pendingQueue) > 0 {
-		next := m.pendingQueue[0]
-		m.pendingQueue = m.pendingQueue[1:]
-		m.waiting = true
-		m.setViewportSize() // make room for persistent status line
-		m.responseStart = time.Now()
-		m.partialText = ""
-		if m.autoScroll {
-			m.vp.GotoBottom()
-		}
-		return m, tea.Batch(m.startChat(next), m.spinner.Tick)
+	if cmd := m.dispatchQueued(); cmd != nil {
+		return m, cmd // re-renders with the status line back
 	}
-
 	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
-	}
 	return m, nil
 }
 
@@ -317,6 +269,14 @@ func (m *model) handleSlash(input string) bool {
 
 	switch cmd {
 	case "/clear":
+		// A response still in flight would write the old conversation back
+		// into m.history: cancel it (and drop the queue) first.
+		if m.waiting {
+			m.cancelGeneration()
+		}
+		m.pendingQueue = nil
+		m.toolCallN = 0
+		m.streamingTokens = 0
 		m.lines = nil
 		m.history = nil
 		m.msgCount = 0
@@ -326,9 +286,6 @@ func (m *model) handleSlash(input string) bool {
 		m.rejectedTools = make(map[string]bool)
 		m.generationCancelled = false
 		m.eng.ResetApprovals()
-		if m.autoScroll {
-			m.vp.GotoBottom()
-		}
 		m.rebuildContent()
 		return true
 
@@ -340,86 +297,50 @@ func (m *model) handleSlash(input string) bool {
 		level := engine.LogLevel()
 		if level == slog.LevelDebug {
 			engine.SetLogLevel(slog.LevelInfo)
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: "debug logging: off", ts: now},
-			)
+			m.say("assistant", "debug logging: off")
 		} else {
 			engine.SetLogLevel(slog.LevelDebug)
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: "debug logging: on", ts: now},
-			)
+			m.say("assistant", "debug logging: on")
 		}
-		m.rebuildContent()
 		return true
 
 	case "/model":
 		if len(parts) < 2 {
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: fmt.Sprintf("current model: %s", m.eng.Config().Model), ts: now},
-			)
+			m.say("assistant", fmt.Sprintf("current model: %s", m.eng.Config().Model))
 		} else {
 			newModel := parts[1]
 			old := m.eng.Config().Model
 			m.eng.SetModel(newModel)
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: fmt.Sprintf("✓ model changed: %s → %s", old, newModel), ts: now},
-			)
+			m.say("assistant", fmt.Sprintf("✓ model changed: %s → %s", old, newModel))
 			m.persistConfig()
-		}
-		m.rebuildContent()
-		if m.autoScroll {
-			m.vp.GotoBottom()
 		}
 		return true
 
 	case "/provider":
 		if len(parts) < 2 {
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: fmt.Sprintf("current provider: %s", m.eng.Config().Provider), ts: now},
-			)
+			m.say("assistant", fmt.Sprintf("current provider: %s", m.eng.Config().Provider))
 		} else if len(parts) < 3 {
 			// The developer picks the model; ouija never chooses one for them.
 			// (A provider with catalog models gets a picker before this.)
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines, line{role: "assistant",
-				text: fmt.Sprintf("usage: /provider %s <model>", parts[1]), ts: now})
+			m.say("assistant", fmt.Sprintf("usage: /provider %s <model>", parts[1]))
 		} else {
 			newProv, newModel := parts[1], parts[2]
 			p, err := m.buildProvider(newProv)
 			if err != nil {
-				now := time.Now().Format("15:04")
-				m.lines = append(m.lines,
-					line{role: "assistant", text: fmt.Sprintf("error: %v", err), ts: now},
-				)
+				m.say("assistant", fmt.Sprintf("error: %v", err))
 			} else {
 				old := m.eng.Config().Provider
 				m.eng.SetProvider(p)
 				m.eng.SetModel(newModel)
-				now := time.Now().Format("15:04")
-				m.lines = append(m.lines,
-					line{role: "assistant", text: fmt.Sprintf("✓ provider changed: %s → %s  (model: %s)", old, newProv, m.eng.Config().Model), ts: now},
-				)
+				m.say("assistant", fmt.Sprintf("✓ provider changed: %s → %s  (model: %s)", old, newProv, m.eng.Config().Model))
 				m.persistConfig()
 			}
-		}
-		m.rebuildContent()
-		if m.autoScroll {
-			m.vp.GotoBottom()
 		}
 		return true
 
 	case "/permit":
 		if m.eng == nil {
-			now := time.Now().Format("15:04")
-			m.lines = append(m.lines,
-				line{role: "assistant", text: "engine not initialized", ts: now},
-			)
-			m.rebuildContent()
+			m.say("assistant", "engine not initialized")
 			return true
 		}
 		return m.handlePermit(parts)
@@ -459,14 +380,7 @@ func (m *model) showHelp() bool {
 	b.WriteString("| `Esc` | Cancel generation / clear pending queue |\n")
 	b.WriteString("| `Ctrl+C` / `Ctrl+D` | Quit |\n")
 
-	now := time.Now().Format("15:04")
-	m.lines = append(m.lines,
-		line{role: "assistant", text: b.String(), ts: now},
-	)
-	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
-	}
+	m.say("assistant", b.String())
 	return true
 }
 
@@ -487,7 +401,6 @@ func (m *model) persistConfig() {
 // handlePermit processes the /permit command.
 func (m *model) handlePermit(parts []string) bool {
 	pc := m.eng.PermissionConfig()
-	now := time.Now().Format("15:04")
 
 	if len(parts) == 1 {
 		// Show current permission levels.
@@ -510,25 +423,14 @@ func (m *model) handlePermit(parts []string) bool {
 			b.WriteString(fmt.Sprintf("    %s → **%s**\n", name, tools[name]))
 		}
 
-		m.lines = append(m.lines,
-			line{role: "assistant", text: b.String(), ts: now},
-		)
+		m.say("assistant", b.String())
 	} else if len(parts) == 3 {
 		tool := parts[1]
 		level := engine.ParseLevel(parts[2])
 		pc.SetTool(tool, level) // a run may be reading the config right now
-		now := time.Now().Format("15:04")
-		m.lines = append(m.lines,
-			line{role: "assistant", text: fmt.Sprintf("✓ %s → %s", tool, level), ts: now},
-		)
+		m.say("assistant", fmt.Sprintf("✓ %s → %s", tool, level))
 	} else {
-		m.lines = append(m.lines,
-			line{role: "assistant", text: "usage: /permit [tool] [allow|ask|deny]", ts: now},
-		)
-	}
-	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
+		m.say("assistant", "usage: /permit [tool] [allow|ask|deny]")
 	}
 	return true
 }
@@ -552,27 +454,13 @@ func (m *model) handleSave(filename string) bool {
 			b.WriteString(fmt.Sprintf("**user** (%s): %s\n\n", l.ts, l.text))
 		case "assistant":
 			b.WriteString(fmt.Sprintf("**ouija** (%s): %s\n\n", l.ts, l.text))
-		case "sep":
-			b.WriteString("---\n\n")
-		case "system":
-			b.WriteString(fmt.Sprintf("_system_ (%s): %s\n\n", l.ts, l.text))
 		}
 	}
 
 	if err := os.WriteFile(filename, []byte(b.String()), 0o644); err != nil {
-		now := time.Now().Format("15:04")
-		m.lines = append(m.lines,
-			line{role: "assistant", text: fmt.Sprintf("error saving: %v", err), ts: now},
-		)
+		m.say("assistant", fmt.Sprintf("error saving: %v", err))
 	} else {
-		now := time.Now().Format("15:04")
-		m.lines = append(m.lines,
-			line{role: "assistant", text: fmt.Sprintf("✓ saved to `%s`", filename), ts: now},
-		)
-	}
-	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
+		m.say("assistant", fmt.Sprintf("✓ saved to `%s`", filename))
 	}
 	return true
 }

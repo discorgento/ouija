@@ -11,6 +11,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/art"
+	"github.com/discorgento/ouija/internal/models"
 )
 
 // line is one rendered chat entry.
@@ -26,7 +27,7 @@ type line struct {
 type model struct {
 	// Engine dependencies.
 	eng           EngineAPI
-	buildProvider ProviderFactory // /provider — injected by Run, keeps chat free of package app
+	buildProvider ProviderFactory // /provider — injected by Run (a stub in tests)
 	system        string
 	ctx           context.Context // root context — never replaced, cancelled only on exit
 	cancel        context.CancelFunc
@@ -89,8 +90,9 @@ type model struct {
 	configPath string
 
 	// Render cache — caches are valid as long as the viewport width hasn't changed.
-	cacheWidth  int
-	lastRebuild time.Time // throttles rebuildContent during streaming (~30fps)
+	cacheWidth  int                       // width the lines' cached renders are for
+	modelLists  map[string][]models.Model // provider → models, resolved once per session
+	lastRebuild time.Time                 // throttles rebuildContent during streaming (~30fps)
 
 	// Slash command autocomplete.
 	showCmdList bool    // true when showing the slash command list (7 items, small)

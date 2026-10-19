@@ -14,9 +14,11 @@ type switchEngine struct {
 	cfg      *engine.Config
 	provider string
 	model    string
+	lastReq  engine.RunRequest
 }
 
-func (f *switchEngine) Chat(context.Context, engine.RunRequest) (string, []engine.Message, error) {
+func (f *switchEngine) Chat(_ context.Context, req engine.RunRequest) (string, []engine.Message, error) {
+	f.lastReq = req
 	return "", nil, nil
 }
 func (f *switchEngine) Config() *engine.Config                     { return f.cfg }

@@ -28,7 +28,7 @@ type tokenMsg struct {
 	text string
 }
 
-// tickMsg fires every 200ms for the welcome animation.
+// tickMsg fires every 500ms for the welcome animation.
 type tickMsg struct{}
 
 // approvalRequestMsg is sent from the engine goroutine to the TUI event
@@ -83,7 +83,7 @@ func friendlyArg(name string, input map[string]any) string {
 		if p, ok := input["pattern"]; ok {
 			if s, ok := p.(string); ok {
 				if len(s) > 60 {
-					s = s[:57] + "..."
+					s = strings.ToValidUTF8(s[:57], "") + "..."
 				}
 				return s
 			}
@@ -92,7 +92,7 @@ func friendlyArg(name string, input map[string]any) string {
 		if c, ok := input["command"]; ok {
 			if s, ok := c.(string); ok {
 				if len(s) > 60 {
-					s = s[:57] + "..."
+					s = strings.ToValidUTF8(s[:57], "") + "..."
 				}
 				return s
 			}

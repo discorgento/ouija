@@ -2,7 +2,6 @@ package chat
 
 import (
 	"cmp"
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -105,33 +104,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// NB: msg.String() returns "esc" (not "escape") in bubbletea v2.
 	if key == "esc" || key == "escape" {
 		if m.waiting {
-			// Cancel current response — only the per-generation context.
-			m.generationCancelled = true
-			m.chatCancel()
-			m.chatCtx, m.chatCancel = context.WithCancel(m.ctx)
-			m.waiting = false
-			m.setViewportSize() // restore viewport height when status line disappears
-			m.partialText = ""
-			m.currentTool = ""
-			m.gen++ // invalidate stale in-flight response
-
-			m.lines = append(m.lines,
-				line{role: "banner", text: "✕ cancelled"},
-			)
-			m.rebuildContent()
-			if m.autoScroll {
-				m.vp.GotoBottom()
-			}
-
-			// Auto-dispatch next queued message if any.
-			if len(m.pendingQueue) > 0 {
-				next := m.pendingQueue[0]
-				m.pendingQueue = m.pendingQueue[1:]
-				m.waiting = true
-				m.setViewportSize() // make room for persistent status line
-				return m, m.startChat(next)
-			}
-			return m, nil
+			m.cancelGeneration()
+			return m, m.dispatchQueued()
 		}
 		if len(m.pendingQueue) > 0 {
 			// Clear queue.
@@ -270,30 +244,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // approvalCancel handles escape during the approval prompt:
 // cancels the current generation and restores the normal input.
 func (m *model) approvalCancel() (tea.Model, tea.Cmd) {
-	m.generationCancelled = true
-	m.chatCancel()
-	m.chatCtx, m.chatCancel = context.WithCancel(m.ctx)
-	m.waiting = false
-	m.setViewportSize() // restore viewport height when status line disappears
-	m.partialText = ""
-	m.currentTool = ""
 	m.approvalReq.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
 	m.approvalReq = nil
-	m.gen++
-	m.lines = append(m.lines,
-		line{role: "banner", text: "✕ cancelled"},
-	)
-	m.rebuildContent()
-	if m.autoScroll {
-		m.vp.GotoBottom()
-	}
-	// Auto-dispatch next queued message if any.
-	if len(m.pendingQueue) > 0 {
-		next := m.pendingQueue[0]
-		m.pendingQueue = m.pendingQueue[1:]
-		return m, m.startChat(next)
-	}
-	return m, nil
+	m.cancelGeneration()
+	return m, m.dispatchQueued()
 }
 
 // handleApprovalEdit opens the proposed file in $EDITOR for manual editing.

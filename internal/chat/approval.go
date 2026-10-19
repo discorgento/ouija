@@ -14,31 +14,30 @@ import (
 
 // approvalOpt is one selectable option in the approval prompt.
 type approvalOpt struct {
-	key     string // single-key shortcut
-	label   string // display label
-	color   color.Color
-	bgColor color.Color
-	resp    approvalResponseMsg
+	key   string // single-key shortcut
+	label string // display label
+	color color.Color
+	resp  approvalResponseMsg
 }
 
 // approvalOptions is the full set of actions for a tool approval prompt.
 // Order matches the arrow-key navigation order. For delete_file, the first
 // option becomes "Delete" (key: d) instead of "Yes" (key: y).
 var approvalOptions = []approvalOpt{
-	{key: "y", label: "Yes", color: lipgloss.Color("71"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: true}},
-	{key: "n", label: "No", color: lipgloss.Color("131"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
-	{key: "s", label: "Session", color: lipgloss.Color("99"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: true, forSession: true}},
-	{key: "e", label: "Edit", color: lipgloss.Color("208"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: true}},
-	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), bgColor: lipgloss.Color("233"), resp: approvalResponseMsg{allowed: false}},
+	{key: "y", label: "Yes", color: lipgloss.Color("71"), resp: approvalResponseMsg{allowed: true}},
+	{key: "n", label: "No", color: lipgloss.Color("131"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
+	{key: "s", label: "Session", color: lipgloss.Color("99"), resp: approvalResponseMsg{allowed: true, forSession: true}},
+	{key: "e", label: "Edit", color: lipgloss.Color("208"), resp: approvalResponseMsg{allowed: true}},
+	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), resp: approvalResponseMsg{allowed: false}},
 }
 
 // deleteFileOptions replaces the "Yes" button with "Delete" (key: d, red)
 // as an extra confirmation layer for destructive delete operations.
 var deleteFileOptions = []approvalOpt{
-	{key: "d", label: "Delete", color: lipgloss.Color("196"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: true}},
-	{key: "n", label: "No", color: lipgloss.Color("131"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
-	{key: "e", label: "Edit", color: lipgloss.Color("208"), bgColor: lipgloss.Color("234"), resp: approvalResponseMsg{allowed: true}},
-	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), bgColor: lipgloss.Color("233"), resp: approvalResponseMsg{allowed: false}},
+	{key: "d", label: "Delete", color: lipgloss.Color("196"), resp: approvalResponseMsg{allowed: true}},
+	{key: "n", label: "No", color: lipgloss.Color("131"), resp: approvalResponseMsg{allowed: false, cancelled: false}},
+	{key: "e", label: "Edit", color: lipgloss.Color("208"), resp: approvalResponseMsg{allowed: true}},
+	{key: "esc", label: "Cancel", color: lipgloss.Color("243"), resp: approvalResponseMsg{allowed: false}},
 }
 
 // baseTool strips the composite session-key suffix ("tool\x00target") the
@@ -206,7 +205,7 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx int) stri
 		v := req.input[k]
 		val := fmt.Sprintf("%v", v)
 		if len(val) > 80 {
-			val = val[:77] + "..."
+			val = strings.ToValidUTF8(val[:77], "") + "..."
 		}
 		argLine := lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Render(fmt.Sprintf("  %s: %s", k, val))
 		inner.WriteString("  ")

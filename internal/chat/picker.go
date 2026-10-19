@@ -145,11 +145,6 @@ func (p *Picker) SelectedValue() string {
 	return p.Items[p.selected]
 }
 
-// SelectedIndex returns the currently selected index.
-func (p *Picker) SelectedIndex() int {
-	return p.selected
-}
-
 // Height returns the number of terminal lines the picker occupies,
 // including the label, visible items, "… and N more" line, and card
 // padding. Used for viewport size calculation.

@@ -370,11 +370,14 @@ func (m *model) rebuildContent() {
 		vpW = 10
 	}
 
-	// Always invalidate all caches so every message re-renders.
-	for i := range m.lines {
-		m.lines[i].cached = ""
+	// A line's rendering depends only on its content and the width, and lines
+	// are never edited after they are appended: re-render only on resize.
+	if vpW != m.cacheWidth {
+		for i := range m.lines {
+			m.lines[i].cached = ""
+		}
+		m.cacheWidth = vpW
 	}
-	m.cacheWidth = vpW
 
 	var buf strings.Builder
 
