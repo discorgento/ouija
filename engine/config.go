@@ -72,6 +72,11 @@ type Config struct {
 	// provider during a streamed call: an idle timeout, so an answer that keeps
 	// streaming is never cut. Zero or negative means the 120s default.
 	StreamTimeout int `json:"streamTimeout,omitempty"`
+
+	// ContextWindow is the model's context size in tokens. Tool results and
+	// the conversation are kept within it; 0 means unknown (ouija then fills
+	// it from the model catalog at startup, 4096 for Ollama's default).
+	ContextWindow int `json:"contextWindow,omitempty"`
 }
 
 // ToolsConfig holds per-tool configuration that the user can set in config.json.

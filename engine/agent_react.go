@@ -121,7 +121,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		if err := ctx.Err(); err != nil {
 			return nil, msgs, err
 		}
-		msgs = compact(msgs)
+		msgs = fitContext(compact(msgs), req.System, env.ContextWindow)
 
 		// The span stays open over the turn: its tool calls become children.
 		resp, chatSpan, err := a.callModel(ctx, env, "chat", req.Label, ChatRequest{
@@ -185,7 +185,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 					wg.Wait()
 					// Results in call order, so the model sees a deterministic history.
 					for i, call := range batch {
-						msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: results[i].String()})
+						msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: clampResult(results[i].String(), env.ContextWindow)})
 					}
 					continue
 				}
@@ -209,7 +209,7 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 					continue
 				}
 				out := env.RunTool(toolCtx, req.Label, call, extraFns, extraRisk)
-				msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: out.String()})
+				msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: clampResult(out.String(), env.ContextWindow)})
 			}
 			chatSpan.End()
 			if submitResult != "" {
@@ -440,8 +440,11 @@ func lastAssistant(msgs []Message) int {
 //   - when the window opens on an assistant turn, the first message (the
 //     user's task) is pinned in front, so the conversation still starts with
 //     a user turn and keeps its goal.
-func slideWindow(msgs []Message) []Message {
-	start := len(msgs) - compactMaxMsgs
+func slideWindow(msgs []Message) []Message { return slideWindowN(msgs, compactMaxMsgs) }
+
+// slideWindowN is slideWindow keeping at most n messages.
+func slideWindowN(msgs []Message, n int) []Message {
+	start := len(msgs) - n
 	skipToolResults := func() {
 		for start < len(msgs) && msgs[start].Role == RoleTool {
 			start++

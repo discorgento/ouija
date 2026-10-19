@@ -185,6 +185,14 @@ func (e *Engine) SetModel(name string) {
 	e.cfg.Model = name
 }
 
+// SetContextWindow sets the model's context size in tokens (0 = unknown),
+// from the next run on — call it with SetModel when the window is known.
+func (e *Engine) SetContextWindow(tokens int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg.ContextWindow = tokens
+}
+
 // SetProvider replaces the provider instance, from the next run on. The
 // caller is responsible for creating the new Provider (e.g. via
 // app.BuildProvider). The old Provider is discarded.
@@ -376,6 +384,8 @@ func (e *Engine) env() RunEnv {
 		Logger:   e.logger,
 		OnToken:  e.tokenCb,
 		MayRun:   e.runner.MayRun,
+		// The window of the model in use: SetContextWindow keeps it current.
+		ContextWindow: e.cfg.ContextWindow,
 	}
 }
 

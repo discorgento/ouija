@@ -32,6 +32,9 @@ type RunEnv struct {
 	Tracer   *Tracer       // nil-safe
 	Logger   *slog.Logger  // never nil
 	OnToken  TokenCallback // optional: streamed text tokens (e.g. a TUI)
+	// ContextWindow is the model's context size in tokens, 0 when unknown:
+	// tool results and history are kept within it (see fitContext).
+	ContextWindow int
 	// MayRun reports whether RunTool could ever run a call to the tool (extra
 	// = a RunRequest.ExtraTools tool), so the agent offers the model only
 	// those. nil means every tool may run.
