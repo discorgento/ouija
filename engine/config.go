@@ -66,9 +66,9 @@ type Config struct {
 	CostPer1MInput  float64 `json:"costPer1MInput"`
 	CostPer1MOutput float64 `json:"costPer1MOutput"`
 
-	// StreamTimeoutSeconds is the maximum time to wait for the next token from
-	// the provider before giving up. Zero or negative means no timeout.
-	// Default: 120s.
+	// StreamTimeout is the longest silence, in seconds, allowed from the
+	// provider during a streamed call: an idle timeout, so an answer that keeps
+	// streaming is never cut. Zero or negative means the 120s default.
 	StreamTimeout int `json:"streamTimeout,omitempty"`
 }
 

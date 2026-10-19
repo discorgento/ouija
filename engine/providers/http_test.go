@@ -38,3 +38,15 @@ func TestRetryAfterParsing(t *testing.T) {
 		t.Fatalf("nil response = %v, want 0", got)
 	}
 }
+
+// The client bounds the wait for headers, never the whole stream.
+func TestNewClientHasNoTotalTimeout(t *testing.T) {
+	c := NewClient(time.Minute)
+	if c.HTTP.Timeout != 0 {
+		t.Fatalf("http.Client.Timeout = %v; a total timeout cuts long streams", c.HTTP.Timeout)
+	}
+	tr, ok := c.HTTP.Transport.(*http.Transport)
+	if !ok || tr.ResponseHeaderTimeout != time.Minute {
+		t.Fatalf("transport = %#v; want ResponseHeaderTimeout = 1m", c.HTTP.Transport)
+	}
+}

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/discorgento/ouija/engine"
 )
 
 // Client wraps HTTP transport + circuit breaker for all providers.
@@ -18,10 +20,16 @@ type Client struct {
 	Circuit *CircuitBreaker // nil = no circuit breaking
 }
 
-// NewClient creates a Client with the given timeout and a fresh circuit breaker.
+// NewClient creates a Client and a fresh circuit breaker. timeout bounds the
+// wait for the response to start (its headers), not the whole response: a
+// stream may last as long as the provider keeps sending, and the engine's
+// idle timeout (streamTimeout) stops one that goes silent. A total
+// http.Client timeout would cut every long answer at that mark.
 func NewClient(timeout time.Duration) *Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = timeout
 	return &Client{
-		HTTP:    &http.Client{Timeout: timeout},
+		HTTP:    &http.Client{Transport: tr},
 		Circuit: NewCircuitBreaker(),
 	}
 }
@@ -71,6 +79,9 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 
 	for {
 		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			engine.NotifyActivity(ctx) // the stream is alive, even if this is a keep-alive
+		}
 		if err != nil {
 			if err == io.EOF {
 				if dataBuf.Len() > 0 {

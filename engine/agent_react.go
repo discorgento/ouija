@@ -297,16 +297,70 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 // streamChat calls the provider's streaming Chat and accumulates events into
 // a ChatResponse. Text tokens are forwarded to env.OnToken (if set) in real time.
 func (a *ReAct) streamChat(ctx context.Context, env RunEnv, req ChatRequest) (ChatResponse, error) {
-	timeout := time.Duration(env.Config.StreamTimeoutSec()) * time.Second
-	chatCtx := ctx
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		chatCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+	for attempt := 1; ; attempt++ {
+		resp, shown, err := a.streamOnce(ctx, env, req)
+		if err == nil {
+			return resp, nil
+		}
+		// A stream that broke mid-way is retried, so one dropped connection
+		// does not throw away a whole multi-agent run — unless the text was
+		// already on screen (a retry would show it twice).
+		if attempt == maxStreamAttempts || shown || !retryableStreamError(ctx, err) {
+			return resp, err
+		}
+		env.Logger.Warn("provider stream failed, retrying", "attempt", attempt, "error", err)
+		select {
+		case <-time.After(time.Duration(attempt) * streamRetryDelay):
+		case <-ctx.Done():
+			return resp, ctx.Err()
+		}
 	}
-	resp, err := CollectStream(env.Provider.Chat(chatCtx, req), env.OnToken)
+}
+
+// maxStreamAttempts bounds the calls streamChat makes for one request.
+const maxStreamAttempts = 3
+
+// streamRetryDelay is the wait before the first retry; it grows linearly.
+// A variable so tests can shorten it.
+var streamRetryDelay = time.Second
+
+// retryableStreamError reports whether a failed provider call is worth
+// repeating: a transport failure mid-stream (a dropped connection, the idle
+// timeout). Never a cancelled run, an error with a code other than NETWORK
+// (auth, config, budget, a refusal), or an HTTP status — the client already
+// retried those that can pass.
+func retryableStreamError(ctx context.Context, err error) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if code, ok := Code(err); ok {
+		return code == ErrCodeNetwork
+	}
+	return !strings.Contains(err.Error(), "HTTP ")
+}
+
+// streamOnce makes one provider call. shown reports whether text already
+// reached env.OnToken (a TUI), which makes a retry unsafe.
+func (a *ReAct) streamOnce(ctx context.Context, env RunEnv, req ChatRequest) (ChatResponse, bool, error) {
+	// An idle timeout, not a deadline: a long answer that keeps streaming is
+	// never cut; only a provider that goes silent for streamTimeout is.
+	timeout := time.Duration(env.Config.StreamTimeoutSec()) * time.Second
+	chatCtx, idled, stop := idleWatchdog(ctx, timeout)
+	defer stop()
+	shown := false
+	var onToken TokenCallback
+	if env.OnToken != nil {
+		onToken = func(t string) {
+			shown = true
+			env.OnToken(t)
+		}
+	}
+	resp, err := CollectStream(withActivity(chatCtx, env.Provider.Chat(chatCtx, req)), onToken)
 	if err != nil {
-		return resp, err
+		if idled() && ctx.Err() == nil {
+			return resp, shown, errStreamIdle(timeout)
+		}
+		return resp, shown, err
 	}
 	if resp.Usage.InputTokens == 0 && resp.Usage.OutputTokens == 0 && resp.Text != "" {
 		resp.Usage.OutputTokens = estimateTokens(resp.Text)
@@ -324,7 +378,7 @@ func (a *ReAct) streamChat(ctx context.Context, env RunEnv, req ChatRequest) (Ch
 			resp.Usage.InputTokens = n
 		}
 	}
-	return resp, nil
+	return resp, shown, nil
 }
 
 // compactKeepRecent keeps the N most recent messages verbatim; older tool

@@ -129,7 +129,7 @@ those sections exist, and the next save writes the new layout.
 | `budget.maxUSD` | `float64` | `null` | Hard cost ceiling (null = unlimited) |
 | `costPer1MInput` | `float64` | `0` | Input price per 1M tokens (set it to make maxUSD effective) |
 | `costPer1MOutput` | `float64` | `0` | Output price per 1M tokens (set it to make maxUSD effective) |
-| `streamTimeout` | `int` | `120` | Streaming response timeout in seconds |
+| `streamTimeout` | `int` | `120` | Longest silence, in seconds, allowed from the provider during a streamed call (an idle timeout, not a deadline: an answer that keeps streaming is never cut) |
 | `tools.bash.allowlist` | `[]string` | `null` | Pre-approved bash commands (no prompt); guard rail when `bash` level is `allow` (see below) |
 | `modelSuggestions` | `map[string][]string` | `null` | Suggested models per provider for the TUI picker autocomplete |
 | `permission` | `PermissionRule` | `null` | Permission defaults (see below) |
