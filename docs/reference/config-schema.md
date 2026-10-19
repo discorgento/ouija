@@ -189,14 +189,23 @@ system dirs `/etc/*` and `/var/lib/*`; the files `.env*`, `.gitconfig`, `.netrc`
 }
 ```
 
-Every bash command runs confined by the kernel (Linux, Landlock ABI v3+ —
-Linux 6.2): it writes only inside the project and the temp dir and reads only
+Every bash command runs confined by the kernel (Linux, Landlock ABI v9+, so
+Unix sockets and signals outside the sandbox are confined too): it writes only
+inside the project and the temp dir and reads only
 the system directories (`/usr`, `/etc`, `/lib`, …), the project and the paths
 listed in `read` / `write` (`~/` is your home; relative paths are relative to
 the project). The rest of `$HOME` — `~/.ssh`, `~/.aws`, ouija's own config —
 is unreachable, whatever the command, its subprocesses, or a path built at
 run time. Off by default because build tools keep caches under `$HOME`: list
-them. A protected location in `read`/`write` is refused. Where the OS cannot
+them (e.g. `~/.cache/go-build`, `~/go/pkg/mod`; `/dev/shm` for Python
+multiprocessing or browser-based tests). A protected location in
+`read`/`write` — or one that contains a credential directory, like `~` or
+`~/.config` — is refused, and so is running with such a project root.
+`~/.gitconfig` is protected, so git inside the sandbox runs without your
+global identity; put it in `~/.config/git/config` and list that, or set it in
+the repository. The project itself (its `.env` and `.git` included) stays
+readable and writable — see
+[what the sandbox does not cover](../explanation/security.md#os-sandbox-opt-in). Where the OS cannot
 enforce the sandbox (macOS, Windows, an older kernel), bash refuses to run
 instead of running unconfined. Network access is not restricted.
 
@@ -222,6 +231,9 @@ Semantics:
   it is refused (`allow` means unattended, so nothing else would check it).
 - An **empty list means "no restriction configured"**: at `ask` level every
   command still prompts; at `allow` level every command runs.
+- A multi-word entry is an exact action, extended only with bare switches
+  (`--prod`, `-v`): never with operands, valued flags (`--out=x`) or anything
+  after `--`.
 - A **Session** approval of a command in the TUI adds it here and persists the
   file. A plain **Yes** runs that one command and is not persisted.
 

@@ -35,7 +35,9 @@ choice).
 A project config found by walking up from the working directory
 (`.ouija/config.json`, `.ouija.json`, `ouija.json`) may come from a repository
 someone else wrote. Its security-sensitive keys — `permission`, `tools` (the
-bash allowlist), `apiKey` and a non-default `systemPrompt` — are **ignored**,
+bash allowlist), `apiKey`, a non-default `systemPrompt` and a `projectRoot`
+other than `.` (it moves the sandbox) — are **ignored**, whatever their
+capitalization (`"Permission"` applies like `"permission"`),
 with a warning, until you run `ouija trust` in the project. Trust is the file's
 SHA-256, stored in the global config (a protected path), so any change to the
 file lapses it; `ouija trust --revoke` forgets it. Files ouija writes itself
@@ -68,7 +70,13 @@ symlink (`cat notes.txt` with `notes.txt → .env`) is refused too. The bash
 scan accepts occasional false positives (e.g. a commit message that literally
 contains `.env`) — it fails closed, never open. An explicit sandbox-escape
 approval still outranks the policy: that is a per-path user consent shown in
-full.
+full. On macOS and Windows, whose filesystems ignore case, every spelling of a
+protected name (`.ENV`, `.SSH/`) is protected too.
+
+The bash scan judges the words of the command as text; a path built while the
+command runs (`cat "$(printf ~/.ss)h/id_rsa"`) cannot be read from the text.
+Under `ask` the human sees that command in full; the boundary that holds
+whatever the command computes is the [OS sandbox](#os-sandbox-opt-in).
 
 ## Layer 3: Permission config
 
@@ -101,8 +109,10 @@ Two independent mechanisms:
   (unattended runs) the allowlist is the guard rail — a command outside it is
   refused. An empty allowlist means "nothing pre-approved yet", not "everything
   approved": at `ask` level every command still prompts. A multi-word pattern
-  matching is an exact action: `npm run build` also allows `npm run build --prod`
-  but not `npm run build ./dist`.
+  is an exact action, extended only with bare switches: `npm run build` also
+  allows `npm run build --prod -v`, but not `npm run build ./dist`,
+  `--out=x`, or anything after `--` — so a pattern learned from one harmless
+  `find . -name '*.go'` never pre-approves `find . -name '*.go' -exec …`.
 
   The command is parsed as shell and **every** simple command in it must match
   on its own: with `git` allowed, `git log | head` needs `head` too, and
@@ -131,11 +141,26 @@ with Linux Landlock — write only inside the project and the temp dir, read
 only system directories, the project and the paths the config lists — and then
 execs the shell; every process it starts inherits the confinement, which cannot
 be lifted. `/proc` (other processes' environments) and `/run` (ssh-agent and
-docker sockets) are left out on purpose, and on kernels that support it
-connecting to Unix sockets is confined too. If the sandbox is enabled but
-cannot be enforced (not Linux, or Landlock older than ABI v3), bash refuses to
-run. Network access is not restricted. See
-[`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
+docker sockets) are left out on purpose; connecting to a Unix socket outside
+the granted paths (an ssh-agent or tmux socket under `/tmp`), connecting to
+abstract Unix sockets (an X11 display) and signalling processes outside the
+sandbox are confined too. That needs Landlock ABI v9: on an older kernel those
+sockets would stay reachable, so if the sandbox is enabled but cannot be
+enforced (not Linux, or Landlock older than ABI v9), bash refuses to run.
+A grant that would cover a credential directory — the home directory,
+`~/.config`, `/`, or a project root there — is refused. Network access is not
+restricted. See [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
+
+What the sandbox does **not** cover, by design of a project-scoped boundary:
+
+- **The project itself is readable and writable**, its `.env` files included —
+  the protected-path checks above still refuse naming them, but code that
+  builds the path at run time can read them. Keep real secrets out of the
+  repository, or out of the sandbox's reach.
+- **`.git` is writable**, so a command can plant a hook or a `core.fsmonitor`
+  that runs, unconfined, the next time *you* run git there. Review `.git/hooks`
+  and `.git/config` after letting untrusted code run (Landlock cannot carve a
+  read-only subtree out of a writable one).
 
 ## Layer 5: Doom-loop detection
 

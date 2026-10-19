@@ -83,8 +83,8 @@ are omitted when unset.
 
 `init` also trusts the file it wrote. A project config you did not write —
 committed by a teammate, or in a repository you cloned — applies its
-`permission`, `tools`, `apiKey` and `systemPrompt` keys only after you review
-and trust it:
+`permission`, `tools`, `apiKey`, `systemPrompt` and `projectRoot` keys only
+after you review and trust it:
 
 ```sh
 ouija trust          # prints what the config grants, then trusts it
