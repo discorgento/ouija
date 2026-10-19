@@ -70,7 +70,7 @@ the last message again; `/changes` lists the files changed this session;
 commands are not covered). `@path` in a message attaches that file: typing `@`
 opens a picker of the project's files. Every totem runs right here as a slash
 command — `/task <description>`, `/doc`, `/sticker`, yours — its passes drawn
-live, then its result; the welcome lists them. `/learn <fact>` teaches ouija
+live, then its result; `/help` lists them. `/learn <fact>` teaches ouija
 about the project (`docs/knowledge.md`), for every later chat and `/task`.
 Paths in tool lines, diffs and approvals are links (OSC 8): a click opens the
 file. Each conversation is saved; `ouija chat -c` (or `/sessions`) resumes one.

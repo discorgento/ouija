@@ -237,13 +237,20 @@ func TestFormatElapsedAndTokens(t *testing.T) {
 
 // The welcome screen shows what the session runs with, read from the config.
 func TestWelcomeShowsTheSession(t *testing.T) {
-	usd := 2.0
-	cfg := &engine.Config{Provider: "anthropic", Model: "claude-x", ContextWindow: 200_000, Budget: engine.Budget{MaxUSD: &usd}}
-	out := ansi.Strip(renderWelcomeBanner(0, 100, -1, cfg, welcomeInfo{branch: "main", facts: 3}))
-	for _, want := range []string{"claude-x", "anthropic", "200k tokens", "$2.00", "3 facts", "⎇ main", "/help"} {
+	out := ansi.Strip(renderWelcomeBanner(0, 100, -1, welcomeInfo{branch: "main", facts: 3}))
+	for _, want := range []string{"the board is listening", "@file", "/task", "/learn", "/help", "3 facts remembered"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("welcome lacks %q:\n%s", want, out)
 		}
+	}
+	// What the header already says is not repeated.
+	for _, dup := range []string{"⎇", "model", "provider", "budget"} {
+		if strings.Contains(out, dup) {
+			t.Errorf("welcome repeats %q:\n%s", dup, out)
+		}
+	}
+	if out := ansi.Strip(renderWelcomeBanner(0, 100, -1, welcomeInfo{})); strings.Contains(out, "remembered") {
+		t.Errorf("a note with nothing remembered:\n%s", out)
 	}
 }
 
@@ -355,13 +362,13 @@ func TestUnseenLinesPill(t *testing.T) {
 func TestWelcomeCompactsAfterTheFirstMessage(t *testing.T) {
 	m := newModel(&switchEngine{cfg: &engine.Config{Model: "m", Provider: "p"}}, nil, "", "")
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
-	if !strings.Contains(ansi.Strip(m.vp.GetContent()), "◆ session") {
+	if !strings.Contains(ansi.Strip(m.vp.GetContent()), "@file") {
 		t.Fatal("the full welcome is missing")
 	}
 	m.msgCount = 1
 	m.rebuildContent()
 	out := ansi.Strip(m.vp.GetContent())
-	if strings.Contains(out, "◆ session") || !strings.Contains(out, "the board is listening") {
+	if strings.Contains(out, "@file") || !strings.Contains(out, "the board is listening") {
 		t.Fatalf("welcome did not compact:\n%s", out)
 	}
 }
@@ -393,15 +400,14 @@ func TestPickerMarksCurrent(t *testing.T) {
 
 // The intro spells the name under a moving planchette, then the logo is whole.
 func TestWelcomeIntro(t *testing.T) {
-	cfg := &engine.Config{Model: "m", Provider: "p"}
-	early := ansi.Strip(renderWelcomeBanner(0, 100, introReveal(2), cfg, welcomeInfo{}))
+	early := ansi.Strip(renderWelcomeBanner(0, 100, introReveal(2), welcomeInfo{}))
 	if !strings.Contains(early, "◉") || strings.Contains(early, "the board is listening") {
 		t.Fatalf("intro frame:\n%s", early)
 	}
 	if introReveal(introTicks) != -1 {
 		t.Fatal("the intro does not end")
 	}
-	done := ansi.Strip(renderWelcomeBanner(0, 100, introReveal(introTicks), cfg, welcomeInfo{}))
+	done := ansi.Strip(renderWelcomeBanner(0, 100, introReveal(introTicks), welcomeInfo{}))
 	if strings.Contains(done, "◉") || !strings.Contains(done, "the board is listening") {
 		t.Fatalf("after the intro:\n%s", done)
 	}

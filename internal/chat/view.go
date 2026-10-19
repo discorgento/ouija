@@ -512,6 +512,11 @@ func (m *model) renderStatusBar(width int) string {
 	default:
 		shortcuts = "  " + ftScope.Render("tip ") + ftDim.Render(currentTip(time.Since(m.startTime))+" · /help")
 	}
+	// An empty conversation has nothing to count: only the hint.
+	if len(m.lines) == 0 && displayTokens == 0 && !m.waiting && !m.selectMode {
+		left, right = "", strings.TrimLeft(shortcuts, " ")
+		shortcuts = ""
+	}
 	if lipgloss.Width(left)+lipgloss.Width(right)+lipgloss.Width(shortcuts)+1 <= width {
 		right += shortcuts
 	} else if m.toastText != "" {
@@ -524,8 +529,8 @@ func (m *model) renderStatusBar(width int) string {
 
 // tips teach the keys and commands one at a time, in the status bar.
 var tips = []string{
-	"@ attaches a file to the message",
 	"Ctrl+F searches the conversation",
+	"@ attaches a file to the message",
 	"/undo takes the last file change back",
 	"/task plans with several independent passes",
 	"/learn <fact> teaches ouija about this project",
@@ -600,7 +605,7 @@ func (m *model) rebuildContent() {
 		case compact:
 			m.welcomeBanner = WelcomeCard.WithPadding(0, 1).Render(renderWelcomeLine(m.hueShift, vpW-2), vpW)
 		default:
-			banner := renderWelcomeBanner(m.hueShift, vpW-2, introReveal(m.tickCount), cfg, m.welcome)
+			banner := renderWelcomeBanner(m.hueShift, vpW-2, introReveal(m.tickCount), m.welcome)
 			if alone {
 				banner = lipgloss.PlaceVertical(max(m.vp.Height()-2, lipgloss.Height(banner)), lipgloss.Center, banner)
 			}

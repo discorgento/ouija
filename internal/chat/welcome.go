@@ -86,7 +86,7 @@ var (
 // reveal is the intro: while it is ≥ 0, only the logo's first reveal columns
 // show, a planchette (◉) moves under them, and the letters it passed are
 // spelled out — the board spelling its name. Below 0 the logo is whole.
-func renderWelcomeBanner(shift, width, reveal int, cfg *engine.Config, info welcomeInfo) string {
+func renderWelcomeBanner(shift, width, reveal int, info welcomeInfo) string {
 	center := func(s string) string { return lipgloss.PlaceHorizontal(width, lipgloss.Center, s) }
 
 	var b strings.Builder
@@ -105,16 +105,10 @@ func renderWelcomeBanner(shift, width, reveal int, cfg *engine.Config, info welc
 		b.WriteString(center(spark+"  "+tagline+"  "+spark) + "\n\n")
 	}
 	b.WriteString(panelHint.Width(width).Align(lipgloss.Center).
-		Render("ask about this project — ouija reads and searches it, and edits only with your approval") + "\n\n")
-
-	session, start := sessionPanel(cfg, info), startPanel()
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, session, "  ", start)
-	if lipgloss.Width(panels) > width {
-		panels = lipgloss.JoinVertical(lipgloss.Left, session, start)
-	}
-	b.WriteString(center(panels))
-	if totems := totemsPanel(min(width, max(lipgloss.Width(panels), 60))); totems != "" {
-		b.WriteString("\n" + center(totems))
+		Render("ask about this project — ouija edits only with your approval") + "\n\n")
+	b.WriteString(center(startGrid(width)) + "\n")
+	if note := sessionNote(info); note != "" {
+		b.WriteString("\n" + center(note))
 	}
 	return b.String()
 }
@@ -185,73 +179,39 @@ func introReveal(tick int) int {
 	return tick * logoWidth() / introTicks
 }
 
-// sessionPanel lists what this session runs with.
-func sessionPanel(cfg *engine.Config, info welcomeInfo) string {
-	project := "—"
-	if cfg.ProjectRoot != "" {
-		project = ansi.Truncate(displayPath(cfg.ProjectRoot), 34, "…")
-	}
-	if info.branch != "" {
-		project += panelKey.Render("  ⎇ ") + panelVal.Render(info.branch)
-	}
-
-	window := "unknown"
-	if cfg.ContextWindow > 0 {
-		window = formatTokens(cfg.ContextWindow) + " tokens"
-	}
-
-	budget := "no limit"
-	var limits []string
-	if usd := cfg.MaxUSD(); usd > 0 {
-		limits = append(limits, fmt.Sprintf("$%.2f", usd))
-	}
-	if cfg.Budget.MaxTokens > 0 {
-		limits = append(limits, formatTokens(cfg.Budget.MaxTokens)+" tok")
-	}
-	if len(limits) > 0 {
-		budget = strings.Join(limits, " · ")
-	}
-
-	memory := panelHint.Render("none yet — /learn <fact>")
-	switch {
-	case info.facts == 1:
-		memory = panelVal.Render("1 fact")
-	case info.facts > 1:
-		memory = panelVal.Render(fmt.Sprintf("%d facts", info.facts))
-	}
-
+// startGrid is where to start: four entries, the rest is in /help. /task
+// stands for the totems — several independent passes, one answer.
+func startGrid(width int) string {
 	rows := [][2]string{
-		{"project", panelVal.Render(project)},
-		{"model", panelVal.Render(cfg.Model)},
-		{"provider", panelVal.Render(cfg.Provider)},
-		{"context", panelVal.Render(window)},
-		{"budget", panelVal.Render(budget)},
-		{"memory", memory},
+		{"@file", "attach a file"},
+		{"/task", "plan it with several passes"},
+		{"/learn", "teach ouija a fact"},
+		{"/help", "every command and totem"},
 	}
-	var body strings.Builder
-	body.WriteString(panelTitle.Render("◆ session"))
-	for _, r := range rows {
-		fmt.Fprintf(&body, "\n%s %s", panelKey.Render(fmt.Sprintf("%-8s", r[0])), r[1])
+	cell := func(r [2]string) string {
+		return panelCmd.Render(fmt.Sprintf("%-6s", r[0])) + "  " + panelKey.Render(r[1])
 	}
-	return panelBorder.Render(body.String())
+	cols := []string{
+		lipgloss.JoinVertical(lipgloss.Left, cell(rows[0]), cell(rows[2])),
+		lipgloss.JoinVertical(lipgloss.Left, cell(rows[1]), cell(rows[3])),
+	}
+	grid := lipgloss.JoinHorizontal(lipgloss.Top, cols[0], "     ", cols[1])
+	if lipgloss.Width(grid) > width { // narrow: one column
+		grid = lipgloss.JoinVertical(lipgloss.Left, cell(rows[0]), cell(rows[1]), cell(rows[2]), cell(rows[3]))
+	}
+	return grid
 }
 
-// startPanel lists the commands and keys worth knowing first.
-func startPanel() string {
-	rows := [][2]string{
-		{"@file", "attach a file to your message"},
-		{"/learn", "teach ouija a fact"},
-		{"/model", "switch the model"},
-		{"/theme", "change the colors"},
-		{"Ctrl+F", "search the conversation"},
-		{"/help", "every command and key"},
+// sessionNote is what neither the header nor the status bar says: what
+// ouija remembers about the project ("" when nothing).
+func sessionNote(info welcomeInfo) string {
+	switch {
+	case info.facts == 1:
+		return panelKey.Render("1 fact remembered about this project")
+	case info.facts > 1:
+		return panelKey.Render(fmt.Sprintf("%d facts remembered about this project", info.facts))
 	}
-	var body strings.Builder
-	body.WriteString(panelTitle.Render("◆ start here"))
-	for _, r := range rows {
-		fmt.Fprintf(&body, "\n%s %s", panelCmd.Render(fmt.Sprintf("%-7s", r[0])), panelKey.Render(r[1]))
-	}
-	return panelBorder.Render(body.String())
+	return ""
 }
 
 // renderWelcomeLine is the welcome once the conversation has started: the

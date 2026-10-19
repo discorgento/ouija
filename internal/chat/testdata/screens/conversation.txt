@@ -37,4 +37,4 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ ❯ Ask about the project… (/ for commands)                                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- 1 msg  4 steps  0m0s                 $0.03  7.6k tok  tip @ attaches a file to the message · /help
+ 1 msg  4 steps  0m0s                 $0.03  7.6k tok  tip Ctrl+F searches the conversation · /help

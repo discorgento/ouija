@@ -1,18 +1,18 @@
  ● ouija 0.0.0 │ ⎇ main │ /proj                       claude-sonnet-5-5 · anthropic │ ctx ▱▱▱▱▱▱ 0%
  ──────────────────────────────────────────────────────────────────────────────────────────────────
-             │ project  /proj  ⎇ main     │  │ @file   attach a file to your message │
-             │ model    claude-sonnet-5-5 │  │ /learn  teach ouija a fact            │
-             │ provider anthropic         │  │ /model  switch the model              │
-             │ context  200k tokens       │  │ /theme  change the colors             │
-             │ budget   no limit          │  │ Ctrl+F  search the conversation       │
-             │ memory   2 facts           │  │ /help   every command and key         │
-             ╰────────────────────────────╯  ╰───────────────────────────────────────╯
-             ╭───────────────────────────────────────────────────────────────────────╮
-             │ ◆ totems  agents in Go: several hands on the board, one answer        │
-             │ /doc      Generate a code-verified client document: scout → verify →… │
-             │ /sticker  Generate a laptop sticker with real project metrics         │
-             │ /task     Analyze a task: scout → N passes x dimensions → reconcile … │
-             ╰───────────────────────────────────────────────────────────────────────╯
+                                      ____  __  ______    _____
+                                     / __ \/ / / /  _/   / /   |
+                                    / / / / / / // /__  / / /| |
+                                   / /_/ / /_/ // // /_/ / ___ |
+                                   \____/\____/___/\____/_/  |_|
+                                    ◆  the board is listening  ◆
+
+                    ask about this project — ouija edits only with your approval
+
+                 @file   attach a file          /task   plan it with several passes
+                 /learn  teach ouija a fact     /help   every command and totem
+
+                               2 facts remembered about this project
 
 
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -27,4 +27,4 @@
 │   ← → choose · Enter confirm · y / n / s / esc                                                   │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
- 0 msg  0m0s                                                                                  0 tok
+
