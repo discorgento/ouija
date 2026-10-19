@@ -50,7 +50,7 @@ func TestGlobStaysInSandbox(t *testing.T) {
 	}
 	res := globTool(context.Background(), root, map[string]any{"pattern": "../*"})
 	if res.Error != nil {
-		t.Fatal(res.Error)
+		return // refused outright: fine
 	}
 	if strings.Contains(res.Data, "outside.txt") || strings.Contains(res.Data, "..") {
 		t.Fatalf("glob escaped the sandbox: %q", res.Data)

@@ -404,8 +404,14 @@ func compact(msgs []Message) []Message {
 		return msgs
 	}
 	out := slices.Clone(msgs)
-	// 1. Trim content of older tool-result messages.
-	for i := range len(out) - compactKeepRecent {
+	// 1. Trim content of older tool-result messages — never the newest turn's:
+	// counted in messages, a batch of 8 parallel reads had its first results
+	// cut before the model ever saw them (and it re-read them in a loop).
+	cut := len(out) - compactKeepRecent
+	if last := lastAssistant(out); last >= 0 && last < cut {
+		cut = last
+	}
+	for i := range cut {
 		if out[i].Role == RoleTool && len(out[i].Content) > compactTrimAt {
 			out[i].Content = strings.ToValidUTF8(out[i].Content[:compactTrimAt], "") + "…[compacted]"
 		}
@@ -415,6 +421,16 @@ func compact(msgs []Message) []Message {
 		return slideWindow(out)
 	}
 	return out
+}
+
+// lastAssistant is the index of the last assistant message, -1 when none.
+func lastAssistant(msgs []Message) int {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleAssistant {
+			return i
+		}
+	}
+	return -1
 }
 
 // slideWindow keeps at most compactMaxMsgs of the most recent messages, cut

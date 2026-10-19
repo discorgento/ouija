@@ -4,10 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/discorgento/ouija/schema"
-	"io/fs"
-	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -17,8 +14,8 @@ const maxToolBytes = 40000
 
 const maxGrepMatches = 200
 
-// maxFileBytes skips reading very large files during grep (minified/generated
-// blobs) — bounds memory and time, and they are never useful to read line-by-line.
+// maxFileBytes is the size above which grep streams a file line by line
+// instead of reading it whole.
 const maxFileBytes = 2_000_000
 
 type toolEntry struct {
@@ -159,9 +156,11 @@ func defaultTools() []toolEntry {
 		{
 			def: ToolDef{
 				Name:        "read_file",
-				Description: "Read a file.",
+				Description: "Read a text file. Long files come in parts: pass offset and limit (lines) to read further.",
 				Schema: schema.Obj(map[string]any{
-					"path": schema.Str("file path"),
+					"path":   schema.Str("file path"),
+					"offset": map[string]any{"type": "integer", "description": "first line to read (1-based); default 1"},
+					"limit":  map[string]any{"type": "integer", "description": "how many lines to read; default as many as fit"},
 				}, "path"),
 			},
 			fn: readFileTool,
@@ -169,7 +168,7 @@ func defaultTools() []toolEntry {
 		{
 			def: ToolDef{
 				Name:        "grep",
-				Description: "Search regex in files.",
+				Description: "Search a regex in the project's files (.git and node_modules skipped unless path points inside them).",
 				Schema: schema.Obj(map[string]any{
 					"pattern": schema.Str("regex"),
 					"path":    schema.Str("subdir"),
@@ -180,9 +179,9 @@ func defaultTools() []toolEntry {
 		{
 			def: ToolDef{
 				Name:        "glob",
-				Description: "List files matching a glob.",
+				Description: "List files matching a glob; ** matches any number of directories.",
 				Schema: schema.Obj(map[string]any{
-					"pattern": schema.Str("glob, e.g. **/*.py"),
+					"pattern": schema.Str("glob relative to the project root, e.g. **/*.py or src/**/test_*.go"),
 				}, "pattern"),
 			},
 			fn: globTool,
@@ -208,138 +207,10 @@ func defaultTools() []toolEntry {
 	}
 }
 
-func readFileTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	p, _ := in["path"].(string)
-	full, err := resolve(ctx, root, p)
-	if err != nil {
-		return errInvalidInput(err.Error())
-	}
-	b, err := os.ReadFile(full)
-	if err != nil {
-		return errNotFound(err.Error())
-	}
-	return ToolResult{Data: trim(string(b))}
-}
-
-func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	pattern, _ := in["pattern"].(string)
-	sub, _ := in["path"].(string)
-	if sub == "" {
-		sub = "."
-	}
-	// Go regexps are RE2: matching is linear in the input, with no
-	// catastrophic backtracking, so a model-supplied pattern is safe to run.
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return errInvalidInput(err.Error())
-	}
-	base, err := resolve(ctx, root, sub)
-	if err != nil {
-		return errInvalidInput(err.Error())
-	}
-	rootAbs, _ := filepath.Abs(root)
-	var out strings.Builder
-	matches := 0
-	walkErr := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil // never follow symlinks out of the sandbox
-		}
-		if matches >= maxGrepMatches {
-			return filepath.SkipAll
-		}
-		if skipPath(path) {
-			return nil
-		}
-		if isProtectedPath(path) {
-			return nil // credentials/system files are unreadable even via grep
-		}
-		if info, ierr := d.Info(); ierr == nil && info.Size() > maxFileBytes {
-			return nil // skip huge files (minified/generated)
-		}
-		b, rerr := os.ReadFile(path)
-		if rerr != nil {
-			return nil
-		}
-		rel, _ := filepath.Rel(rootAbs, path)
-		for i, line := range strings.Split(string(b), "\n") {
-			if re.MatchString(line) {
-				fmt.Fprintf(&out, "%s:%d: %s\n", rel, i+1, strings.TrimSpace(line))
-				matches++
-				if matches >= maxGrepMatches {
-					break
-				}
-			}
-		}
-		return nil
-	})
-	if matches == 0 {
-		if walkErr != nil {
-			return errInternal("grep: " + walkErr.Error())
-		}
-		return ToolResult{Data: "no matches"}
-	}
-	if walkErr != nil {
-		out.WriteString(fmt.Sprintf("\n[walk error during search: %v]\n", walkErr))
-	}
-	if matches >= maxGrepMatches {
-		out.WriteString(fmt.Sprintf("\n[match limit %d reached]\n", maxGrepMatches))
-	}
-	return ToolResult{Data: trim(out.String())}
-}
-
-func globTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	pattern, _ := in["pattern"].(string)
-	rootAbs, _ := canonRoot(root)
-	matches, err := filepath.Glob(filepath.Join(rootAbs, pattern))
-	if err != nil {
-		return errInvalidInput(err.Error())
-	}
-	var out strings.Builder
-	for _, m := range matches {
-		if !within(rootAbs, m) {
-			continue // pattern escaped the sandbox (e.g. ../../*) — drop it
-		}
-		rel, _ := filepath.Rel(rootAbs, m)
-		out.WriteString(rel + "\n")
-	}
-	if out.Len() == 0 {
-		return ToolResult{Data: "no matches"}
-	}
-	return ToolResult{Data: trim(out.String())}
-}
-
-func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	sub, _ := in["path"].(string)
-	if sub == "" {
-		sub = "."
-	}
-	full, err := resolve(ctx, root, sub)
-	if err != nil {
-		return errInvalidInput(err.Error())
-	}
-	entries, err := os.ReadDir(full)
-	if err != nil {
-		return errNotFound(err.Error())
-	}
-	var out strings.Builder
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() {
-			name += "/"
-		}
-		out.WriteString(name + "\n")
-	}
-	return ToolResult{Data: trim(out.String())}
-}
-
+// skipPath reports a file grep does not search, by its extension: images,
+// archives, fonts, lock files, source maps, minified bundles. (Directories —
+// .git, node_modules — are skipped by the walk, below the searched path.)
 func skipPath(p string) bool {
-	if strings.Contains(p, string(filepath.Separator)+".git"+string(filepath.Separator)) ||
-		strings.Contains(p, string(filepath.Separator)+"node_modules"+string(filepath.Separator)) {
-		return true
-	}
 	switch strings.ToLower(filepath.Ext(p)) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".svg", ".pdf", ".zip", ".gz", ".tar",
 		".woff", ".woff2", ".ttf", ".ico", ".mp4", ".lock", ".map":

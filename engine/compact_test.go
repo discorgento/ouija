@@ -314,3 +314,23 @@ func TestCompressKeepsGitGuardNotice(t *testing.T) {
 		t.Fatalf("the git-guard notice was compressed away: %+v", out)
 	}
 }
+
+// The newest turn's results are never trimmed, however many parallel calls
+// it made.
+func TestCompactKeepsTheNewestTurnWhole(t *testing.T) {
+	big := strings.Repeat("x", compactTrimAt*3)
+	msgs := []Message{{Role: RoleUser, Content: "read them"}}
+	var calls []ToolCall
+	for i := range 8 {
+		calls = append(calls, ToolCall{ID: fmt.Sprint(i), Name: "read_file"})
+	}
+	msgs = append(msgs, Message{Role: RoleAssistant, ToolCalls: calls})
+	for i := range 8 {
+		msgs = append(msgs, Message{Role: RoleTool, ToolCallID: fmt.Sprint(i), Content: big})
+	}
+	for i, m := range compact(msgs) {
+		if m.Role == RoleTool && m.Content != big {
+			t.Fatalf("result %d of the newest turn was trimmed", i)
+		}
+	}
+}
