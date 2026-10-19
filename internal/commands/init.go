@@ -111,15 +111,13 @@ func Init(args []string) error {
 	if existing {
 		verb = "updated"
 	}
-	fmt.Printf("\n✓ Project config %s (%s)\n", verb, path)
-	fmt.Printf("  Provider: %s\n", provider)
-	fmt.Printf("  Model:    %s\n", model)
+	rows := [][2]string{{"file", path}, {"provider", provider}, {"model", model}, {"API key", "(using global)"}}
+	var warnings []string
 	if cfg.APIKey != "" {
-		fmt.Println("  API key:   (project override)")
-		fmt.Println("  ⚠ the key is in " + path + " — keep that file out of git (.gitignore)")
-	} else {
-		fmt.Println("  API key:   (using global)")
+		rows[3][1] = "(project override)"
+		warnings = append(warnings, "the key is in "+path+" — keep that file out of git (.gitignore)")
 	}
+	printDone("Project config "+verb, rows, warnings, "`ouija chat` here")
 	return nil
 }
 

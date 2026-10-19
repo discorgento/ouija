@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io"
 	"os"
 	"os/exec"
@@ -11,12 +12,16 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/mcp"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/internal/termsafe"
+	"github.com/discorgento/ouija/internal/theme"
 	"github.com/discorgento/ouija/internal/version"
 	"github.com/discorgento/ouija/registry"
 )
@@ -30,18 +35,40 @@ import (
 // key, a harness that is not connected) are reported but do not fail, so a
 // working-but-imperfect setup still exits 0.
 func Doctor(w io.Writer) error {
+	// Colors only where the output can show them (stripped when piped).
+	w = colorprofile.NewWriter(w, os.Environ())
 	r := &report{w: w}
 
-	fmt.Fprintln(w, "🔮  ouija doctor")
 	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  "+theme.GradientText("ouija doctor", 0)+docDim.Render("  ·  is everything in place?"))
 
+	r.section("install")
 	r.binary()
+	r.section("config")
 	r.configFiles()
+	r.section("provider")
 	r.provider()
+	r.section("totems")
 	r.totems()
+	r.section("harnesses")
 	r.harnesses()
 
 	return r.finish()
+}
+
+var (
+	docOK      = lipgloss.NewStyle().Bold(true).Foreground(theme.Green)
+	docWarn    = lipgloss.NewStyle().Bold(true).Foreground(theme.Amber)
+	docFail    = lipgloss.NewStyle().Bold(true).Foreground(theme.Red)
+	docDim     = lipgloss.NewStyle().Foreground(theme.Muted)
+	docLabel   = lipgloss.NewStyle().Foreground(theme.Lavender)
+	docSection = lipgloss.NewStyle().Bold(true).Foreground(theme.Pink)
+	docText    = lipgloss.NewStyle().Foreground(theme.Text)
+)
+
+// section starts a group of checks under a heading.
+func (r *report) section(title string) {
+	fmt.Fprintf(r.w, "\n  %s\n", docSection.Render("◆ "+title))
 }
 
 // labelWidth keeps the report in one aligned column.
@@ -55,13 +82,24 @@ type report struct {
 
 // line prints "  <mark> <label>  <text>".
 func (r *report) line(mark, label, text string) {
+	style := map[string]lipgloss.Style{"✓": docOK, "!": docWarn, "✗": docFail}[mark]
+	if mark == "·" {
+		style = docDim
+	}
+	textStyle := docText
+	switch mark {
+	case "!":
+		textStyle = docWarn.UnsetBold()
+	case "✗":
+		textStyle = docFail.UnsetBold()
+	}
 	// text holds config values and errors from a repository or a server.
-	fmt.Fprintf(r.w, "  %s %-*s %s\n", mark, labelWidth, label, termsafe.Clean(text))
+	fmt.Fprintf(r.w, "  %s %s %s\n", style.Render(mark), docLabel.Render(fmt.Sprintf("%-*s", labelWidth, label)), textStyle.Render(termsafe.Clean(text)))
 }
 
 // detail prints a continuation line aligned under the label column.
 func (r *report) detail(text string) {
-	fmt.Fprintf(r.w, "    %-*s %s\n", labelWidth, "", termsafe.Clean(text))
+	fmt.Fprintf(r.w, "    %-*s %s\n", labelWidth, "", docDim.Render(termsafe.Clean(text)))
 }
 
 func (r *report) ok(label, text string)   { r.line("✓", label, text) }
@@ -219,9 +257,6 @@ func (r *report) totems() {
 }
 
 func (r *report) harnesses() {
-	fmt.Fprintln(r.w)
-	fmt.Fprintln(r.w, "  harnesses")
-
 	states := mcp.Check()
 	if len(states) == 0 {
 		r.detail("could not determine (no home directory)")
@@ -243,16 +278,19 @@ func (r *report) harnesses() {
 
 func (r *report) finish() error {
 	fmt.Fprintln(r.w)
+	pill := func(bg color.Color, text string) string {
+		return lipgloss.NewStyle().Bold(true).Foreground(theme.Surface).Background(bg).Render(" " + text + " ")
+	}
 
 	switch {
 	case len(r.problems) > 0:
-		fmt.Fprintf(r.w, "  %d problem(s) found\n", len(r.problems))
+		fmt.Fprintf(r.w, "  %s  %s\n", pill(theme.Red, fmt.Sprintf("%d problem(s) found", len(r.problems))), docDim.Render("fix the ✗ lines above"))
 		return fmt.Errorf("%d problem(s) found", len(r.problems))
 	case len(r.warnings) > 0:
-		fmt.Fprintf(r.w, "  no problems · %d warning(s)\n", len(r.warnings))
+		fmt.Fprintf(r.w, "  %s  %s\n", pill(theme.Amber, fmt.Sprintf("no problems · %d warning(s)", len(r.warnings))), docDim.Render("ouija works; the ! lines say what could be better"))
 		return nil
 	default:
-		fmt.Fprintln(r.w, "  all good")
+		fmt.Fprintf(r.w, "  %s  %s\n", pill(theme.Green, "all good"), docDim.Render("run `ouija chat` in a project"))
 		return nil
 	}
 }

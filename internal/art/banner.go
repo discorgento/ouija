@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/discorgento/ouija/internal/theme"
 )
 
 // OuijaArt is the figlet rendering of "OUIJA", shared between the CLI wizard
@@ -19,9 +21,6 @@ var OuijaArt = []string{
 	`\____/\____/___/\____/_/  |_|`,
 }
 
-// bannerColors matches the chat TUI palette exactly.
-var bannerColors = []string{"213", "141", "99", "93", "140", "225"}
-
 // renderArt builds the colored logo lines for a given time-based shift.
 func renderArt(shift int, subtitle string) []string {
 	var out []string
@@ -30,8 +29,8 @@ func renderArt(shift int, subtitle string) []string {
 		ci := shift
 		for _, r := range line {
 			if r != ' ' {
-				c := bannerColors[ci%len(bannerColors)]
-				s := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(c))
+				c := theme.Rainbow[ci%len(theme.Rainbow)]
+				s := lipgloss.NewStyle().Bold(true).Foreground(c)
 				b.WriteString(s.Render(string(r)))
 				ci++
 			} else {
@@ -41,7 +40,7 @@ func renderArt(shift int, subtitle string) []string {
 		out = append(out, b.String())
 	}
 	if subtitle != "" {
-		s := lipgloss.NewStyle().Foreground(lipgloss.Color("60"))
+		s := lipgloss.NewStyle().Foreground(theme.Muted)
 		out = append(out, "", s.Render("  "+subtitle))
 	}
 	return out
@@ -49,7 +48,7 @@ func renderArt(shift int, subtitle string) []string {
 
 // Print renders the ouija logo once with a time-based rainbow gradient.
 func Print(subtitle string) {
-	shift := int(time.Now().UnixMilli()/200) % len(bannerColors)
+	shift := int(time.Now().UnixMilli()/200) % len(theme.Rainbow)
 	fmt.Println()
 	for _, l := range renderArt(shift, subtitle) {
 		fmt.Println(l)
@@ -65,7 +64,7 @@ func Animate(subtitle string) {
 	total := 1 + len(art) + 1 // blank + art lines + blank
 
 	for frame := 0; frame < 8; frame++ {
-		shift := frame % len(bannerColors)
+		shift := frame % len(theme.Rainbow)
 		lines := renderArt(shift, subtitle)
 
 		if frame == 0 {

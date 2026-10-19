@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
+	"strings"
 
 	"charm.land/huh/v2"
 	"github.com/discorgento/ouija/engine"
@@ -112,19 +114,25 @@ func Setup(args []string) error {
 	if existing != nil {
 		verb = "updated"
 	}
-	fmt.Printf("\n✓ Config %s (%s)\n", verb, ouijaconfig.Path())
-	fmt.Printf("  Default provider: %s\n", defProv)
-	fmt.Printf("  Default model:    %s\n", defModel)
-	configured := 0
+	rows := [][2]string{
+		{"file", ouijaconfig.Path()},
+		{"provider", defProv},
+		{"model", defModel},
+	}
+	var keyed []string
 	for name, key := range cfg.APIKeys {
 		if key != "" {
-			configured++
-			fmt.Printf("  %s key: ✓\n", name)
+			keyed = append(keyed, name)
 		}
 	}
-	if configured == 0 && !providers.Keyless(defProv) {
-		fmt.Println("  (no API keys configured — run `ouija setup` again)")
+	sort.Strings(keyed)
+	var warnings []string
+	if len(keyed) > 0 {
+		rows = append(rows, [2]string{"keys", strings.Join(keyed, ", ")})
+	} else if !providers.Keyless(defProv) {
+		warnings = append(warnings, "no API keys configured — run `ouija setup` again")
 	}
+	printDone("Config "+verb, rows, warnings, "cd into a project and run `ouija chat` (or `ouija doctor` to check)")
 	return nil
 }
 

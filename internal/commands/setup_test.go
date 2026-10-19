@@ -1,7 +1,11 @@
 package commands
 
 import (
+	"bytes"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 )
@@ -61,5 +65,17 @@ func TestBuildGlobalConfig_KeepsWhatTheFormDoesNotShow(t *testing.T) {
 	}
 	if existing.APIKeys["anthropic"] != "sk-old" {
 		t.Error("buildGlobalConfig modified the existing config in place")
+	}
+}
+
+// The wizard's closing card lists its rows, warnings and the next step.
+func TestWriteDone(t *testing.T) {
+	var buf bytes.Buffer
+	writeDone(&buf, "Config saved", [][2]string{{"provider", "anthropic"}, {"model", "claude-x"}}, []string{"no API keys"}, "`ouija chat`")
+	out := ansi.Strip(buf.String())
+	for _, want := range []string{"✓ Config saved", "provider  anthropic", "model     claude-x", "⚠ no API keys", "next → `ouija chat`"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("card lacks %q:\n%s", want, out)
+		}
 	}
 }

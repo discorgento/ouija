@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/discorgento/ouija/engine"
+	"github.com/charmbracelet/x/ansi"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 
 	_ "github.com/discorgento/ouija/totems" // doctor reports the registered totems
@@ -25,7 +26,7 @@ func TestReport_Counters(t *testing.T) {
 	if len(r.warnings) != 1 || len(r.problems) != 1 {
 		t.Fatalf("warnings = %d, problems = %d; want 1 and 1", len(r.warnings), len(r.problems))
 	}
-	out := buf.String()
+	out := ansi.Strip(buf.String())
 	for _, want := range []string{"✓ a", "! b", "✗ c"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)

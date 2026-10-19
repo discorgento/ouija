@@ -1,8 +1,16 @@
 package commands
 
 import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+
+	"github.com/discorgento/ouija/internal/theme"
 )
 
 // ouijaTheme implements huh.Theme with a bold neon-on-dark look.
@@ -12,11 +20,11 @@ func (ouijaTheme) Theme(_ bool) *huh.Styles {
 	t := huh.ThemeBase(true)
 
 	var (
-		purple  = lipgloss.Color("141") // same as chat bannerGrad
-		hotPink = lipgloss.Color("213") // same as chat bannerColors[0]
-		dim     = lipgloss.Color("140") // same as chat bannerColors[4]
-		gray    = lipgloss.Color("60")
-		white   = lipgloss.Color("225") // same as chat boldStyle
+		purple  = theme.Lavender
+		hotPink = theme.Pink
+		dim     = theme.Mauve
+		gray    = theme.Muted
+		white   = theme.Blush
 	)
 
 	// ─── Focused ─────────────────────────────────────────────────────
@@ -109,4 +117,30 @@ func (ouijaTheme) Theme(_ bool) *huh.Styles {
 		Italic(true)
 
 	return t
+}
+
+// printDone prints the card that ends a wizard: a ✓ title, label/value rows,
+// warnings (⚠) and the next step. To stdout, in color where it shows.
+func printDone(title string, rows [][2]string, warnings []string, next string) {
+	writeDone(colorprofile.NewWriter(os.Stdout, os.Environ()), title, rows, warnings, next)
+}
+
+func writeDone(w io.Writer, title string, rows [][2]string, warnings []string, next string) {
+	keyW := 0
+	for _, r := range rows {
+		keyW = max(keyW, len(r[0]))
+	}
+	var b strings.Builder
+	b.WriteString(docOK.Render("✓ ") + lipgloss.NewStyle().Bold(true).Foreground(theme.Text).Render(title))
+	for _, r := range rows {
+		fmt.Fprintf(&b, "\n%s  %s", docLabel.Render(fmt.Sprintf("%-*s", keyW, r[0])), docText.Render(r[1]))
+	}
+	for _, warn := range warnings {
+		b.WriteString("\n" + docWarn.UnsetBold().Render("⚠ "+warn))
+	}
+	if next != "" {
+		b.WriteString("\n\n" + docDim.Render("next → ") + lipgloss.NewStyle().Bold(true).Foreground(theme.Pink).Render(next))
+	}
+	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(theme.Lavender).Padding(0, 1).Render(b.String())
+	fmt.Fprintln(w, "\n"+card)
 }
