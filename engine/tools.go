@@ -146,9 +146,8 @@ func (t *Tools) escapedAbs(call ToolCall) string {
 		return abs
 	}
 	// Symlink escape: path is lexically inside root but a symlink
-	// component resolves to outside
-	real, realErr := filepath.EvalSymlinks(abs)
-	if realErr == nil && !within(rootAbs, real) {
+	// component (dangling ones included) resolves to outside.
+	if real := physicalPath(abs); !within(rootAbs, real) {
 		return real // approve the symlink target
 	}
 	return ""

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -92,11 +93,10 @@ func resolveSymlinkEscape(ctx context.Context, root, full string) (string, error
 	current := rootAbs
 	for _, part := range parts {
 		current = filepath.Join(current, part)
-		real, realErr := filepath.EvalSymlinks(current)
-		if realErr != nil {
-			continue // component does not exist yet — skip
-		}
-		if !within(rootAbs, real) {
+		// physicalPath, not EvalSymlinks: a dangling symlink (out →
+		// ~/.ssh/authorized_keys, not created yet) fails EvalSymlinks yet a
+		// write through it lands outside the root.
+		if real := physicalPath(current); !within(rootAbs, real) {
 			// Symlink escape — check for pre-approved escape in context
 			if escaped, _ := ctx.Value(escapeKey{}).(string); escaped != "" {
 				return escaped, nil
@@ -107,14 +107,28 @@ func resolveSymlinkEscape(ctx context.Context, root, full string) (string, error
 	return "", nil
 }
 
-// physicalPath resolves every symlink of p that exists on disk. Trailing
-// components that do not exist yet (a file about to be written) are kept as
-// they are, appended to the resolved parent.
-func physicalPath(p string) string {
+// physicalPath resolves every symlink of p that exists on disk, including a
+// dangling one (followed to its missing target, where a write through it
+// would land). Trailing components that do not exist yet (a file about to be
+// written) are kept as they are, appended to the resolved parent.
+func physicalPath(p string) string { return physicalPathDepth(p, 0) }
+
+// maxLinkHops bounds dangling-link chains (and loops), like the kernel's 40.
+const maxLinkHops = 40
+
+func physicalPathDepth(p string, hops int) string {
 	existing, rest := p, ""
 	for {
 		if real, err := filepath.EvalSymlinks(existing); err == nil {
 			return filepath.Join(real, rest)
+		}
+		if fi, err := os.Lstat(existing); err == nil && fi.Mode()&os.ModeSymlink != 0 && hops < maxLinkHops {
+			if target, err := os.Readlink(existing); err == nil {
+				if !filepath.IsAbs(target) {
+					target = filepath.Join(filepath.Dir(existing), target)
+				}
+				return physicalPathDepth(filepath.Join(target, rest), hops+1)
+			}
 		}
 		parent := filepath.Dir(existing)
 		if parent == existing {

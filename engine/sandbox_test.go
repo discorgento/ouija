@@ -182,3 +182,34 @@ func TestSkipPath(t *testing.T) {
 		}
 	}
 }
+
+// A dangling symlink (its target outside the root does not exist yet) must
+// not let a write land outside: EvalSymlinks fails on it, and the walk used to
+// take that for "not created yet".
+func TestResolveRejectsDanglingSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root, outside := t.TempDir(), t.TempDir()
+	target := filepath.Join(outside, "authorized_keys") // does not exist
+	if err := os.Symlink(target, filepath.Join(root, "out")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve(context.Background(), root, "out"); err == nil {
+		t.Fatal("resolve accepted a dangling symlink pointing outside the root")
+	}
+	res := writeFileTool(context.Background(), root, map[string]any{"path": "out", "content": "x"})
+	if res.Error == nil {
+		t.Fatal("write_file wrote through a dangling symlink")
+	}
+	if _, err := os.Stat(target); err == nil {
+		t.Fatal("a file was created outside the root")
+	}
+	// A dangling link that stays inside the root is still writable.
+	if err := os.Symlink(filepath.Join(root, "new.txt"), filepath.Join(root, "in")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolve(context.Background(), root, "in"); err != nil {
+		t.Fatalf("in-root dangling link rejected: %v", err)
+	}
+}

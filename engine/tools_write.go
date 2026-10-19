@@ -99,8 +99,13 @@ func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolRes
 		return errPermissionDenied(err.Error())
 	}
 
-	// Never delete the project root.
-	rootAbs, _ := filepath.Abs(root)
+	// Never delete the project root. canonRoot, like resolve: with a symlink
+	// in the root's own path (macOS /tmp → /private/tmp) an Abs root never
+	// matched, and every delete was refused as a sandbox escape.
+	rootAbs, err := canonRoot(root)
+	if err != nil {
+		return errInternal(err.Error())
+	}
 	if full == rootAbs {
 		return errInvalidInput("refusing to delete project root")
 	}

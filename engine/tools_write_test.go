@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -340,5 +341,27 @@ func TestDeleteFilePreviewNotExist(t *testing.T) {
 	})
 	if !strings.Contains(preview, "not found") {
 		t.Fatalf("preview should note file not found, got %q", preview)
+	}
+}
+
+// A project root reached through a symlink (macOS /tmp → /private/tmp) still
+// allows deleting its files, and still refuses deleting the root itself.
+func TestDeleteFileUnderSymlinkedRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "proj")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "a.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if res := deleteFileTool(context.Background(), link, map[string]any{"path": "a.txt"}); res.Error != nil {
+		t.Fatalf("delete a.txt under a symlinked root: %v", res.Error.Message)
+	}
+	if res := deleteFileTool(context.Background(), link, map[string]any{"path": "."}); res.Error == nil {
+		t.Fatal("deleted the project root")
 	}
 }
