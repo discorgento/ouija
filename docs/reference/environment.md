@@ -13,6 +13,7 @@ below only tune behaviour.
 | Variable | Read by | Purpose |
 |---|---|---|
 | `OUIJA_LOG_LEVEL` | engine | Log verbosity: `debug`, `info` (default), `warn`, `error` |
+| `OUIJA_NO_ANIMATION` | chat, CLI | Any value stops the animations (the intro, the flowing colors, the shimmer) for a still screen |
 | `OUIJA_THEME` | chat, CLI | Color theme for this run (`ouija`, `catppuccin`, `dracula`, `mono`), over the config's `theme` |
 | `XDG_CACHE_HOME` | chat TUI | Where conversations are saved: `$XDG_CACHE_HOME/ouija/sessions/` (default `~/.cache`) |
 | `XDG_CONFIG_HOME` | config discovery | Where the global config lives: `$XDG_CONFIG_HOME/ouija/config.json` (default `~/.config`) |

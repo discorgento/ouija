@@ -200,7 +200,11 @@ func (b *Board) redraw() {
 // render builds the frame's lines at width.
 func (b *Board) render(width int) []string {
 	elapsed := time.Since(b.start)
-	head := "  " + theme.GradientText("ouija "+b.title, b.frame) + styleDim.Render("  ·  ") + styleMeta.Render(fmtDuration(elapsed))
+	shift := b.frame
+	if theme.NoMotion {
+		shift = 0
+	}
+	head := "  " + theme.GradientText("ouija "+b.title, shift) + styleDim.Render("  ·  ") + styleMeta.Render(fmtDuration(elapsed))
 	if b.eng != nil {
 		tokens, _, usd := b.eng.Spent()
 		if tokens > 0 {

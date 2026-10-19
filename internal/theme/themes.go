@@ -52,6 +52,10 @@ var themes = map[string]palette{
 // Current is the theme in use.
 var Current = "ouija"
 
+// NoMotion stops the animations (the intro, the flowing gradients, the
+// shimmer): OUIJA_NO_ANIMATION=1, for a still screen or a screen reader.
+var NoMotion = os.Getenv("OUIJA_NO_ANIMATION") != ""
+
 // Names lists the themes, ouija first.
 func Names() []string {
 	names := make([]string, 0, len(themes))
