@@ -22,7 +22,7 @@ Verify:
 
 ```sh
 ouija version
-# ouija 0.0.1
+# ouija 1.0.0
 ```
 
 Not on your `PATH` yet? [Install](../how-to/install.md) explains where the

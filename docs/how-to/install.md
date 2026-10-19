@@ -28,8 +28,7 @@ sha256sum -c SHA256SUMS --ignore-missing   # macOS: shasum -a 256 -c
 tar -xzf ouija-linux-amd64.tar.gz          # ouija + ouija-mcp inside
 ```
 
-Put both binaries on your `PATH` (see the last step below). While the major is
-`0` the releases are flagged as *pre-release* on GitHub.
+Put both binaries on your `PATH` (see the last step below).
 
 ## Install the CLI
 
@@ -66,7 +65,7 @@ go install ./cmd/ouija-mcp
 
 ```sh
 ouija version
-# ouija 0.0.1
+# ouija 1.0.0
 ```
 
 ---

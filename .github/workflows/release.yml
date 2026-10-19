@@ -58,14 +58,8 @@ jobs:
       - name: Build the release archives (5 targets)
         run: make dist VERSION=${{ needs.release-please.outputs.tag }}
 
-      - name: Attach artifacts and flag 0.x as pre-release
+      - name: Attach artifacts to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag }}
-        run: |
-          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber
-          # While the major is 0 the project is in beta: flag the release as
-          # a pre-release. Drop this block when 1.0.0 lands.
-          case "$TAG" in
-            v0.*) gh release edit "$TAG" --prerelease ;;
-          esac
+        run: gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber

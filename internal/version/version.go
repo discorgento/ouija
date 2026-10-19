@@ -2,7 +2,7 @@
 //
 // Version is a var, not a const, so release builds can inject it at link time:
 //
-//	make build VERSION=v0.0.1     # the Makefile strips the "v" → 0.0.1
+//	make build VERSION=v1.0.0     # the Makefile strips the "v" → 1.0.0
 //
 // Resolution order:
 //

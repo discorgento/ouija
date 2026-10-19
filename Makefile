@@ -17,7 +17,7 @@ PACKAGES  = ./...
 ARGS     ?=
 
 VERSION  ?= $(shell git describe --tags --dirty 2>/dev/null)
-# Tags are `vX.Y.Z`; the binary prints the bare semver (`0.0.1`). The `v`
+# Tags are `vX.Y.Z`; the binary prints the bare semver (`1.0.0`). The `v`
 # prefix is stripped both for a git tag and for `VERSION=vX.Y.Z` passed on the
 # command line.
 VERSION_BARE = $(patsubst v%,%,$(VERSION))

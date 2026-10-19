@@ -206,8 +206,10 @@ There is **no version to edit anywhere** — the git tag is the version:
 4. The same workflow cross-compiles `make dist` and attaches the archives.
 
 The workflow lives in `.github/workflows/release.yml`; config in
-`release-please-config.json` + `.release-please-manifest.json`. While the major
-is `0` (beta), releases are flagged as pre-releases on GitHub.
+`release-please-config.json` + `.release-please-manifest.json`. The manifest
+starts at `0.0.0`, which release-please treats as *no release yet* — so the
+first release takes the tool's default (`1.0.0`); every release after that is
+a SemVer bump of the previous tag.
 
 ## Documentation
 

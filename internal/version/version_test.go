@@ -12,6 +12,6 @@ var semver = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 
 func TestVersion_DefaultLooksLikeSemver(t *testing.T) {
 	if !semver.MatchString(Version) {
-		t.Fatalf("Version = %q, want a semver-looking default (e.g. 0.0.1)", Version)
+		t.Fatalf("Version = %q, want a semver-looking default (e.g. 1.0.0)", Version)
 	}
 }

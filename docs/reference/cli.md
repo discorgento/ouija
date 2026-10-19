@@ -16,7 +16,7 @@ Prints the totem list and usage summary.
 ### `ouija version`
 
 ```
-ouija 0.0.1
+ouija 1.0.0
 ```
 
 `ouija -v` / `ouija --version` are aliases.
