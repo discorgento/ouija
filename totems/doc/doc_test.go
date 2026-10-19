@@ -131,3 +131,28 @@ func TestWithCSP(t *testing.T) {
 		t.Error("docCSP must not allow scripts")
 	}
 }
+
+// A model-chosen title never replaces a file the user wrote; a previous doc
+// run's trio is regenerated in place.
+func TestFreeSlug(t *testing.T) {
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs")
+	if err := os.MkdirAll(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := freeSlug(root, "fresh"); got != "fresh" {
+		t.Fatalf("free name: got %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "architecture.md"), []byte("# mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := freeSlug(root, "architecture"); got != "architecture-2" {
+		t.Fatalf("user file: got %q, want architecture-2", got)
+	}
+	if err := os.WriteFile(filepath.Join(docs, "manual.html"), []byte(withCSP("<html><head></head></html>")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := freeSlug(root, "manual"); got != "manual" {
+		t.Fatalf("own trio: got %q, want manual (regenerate)", got)
+	}
+}

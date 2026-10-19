@@ -1,6 +1,7 @@
 package sticker
 
 import (
+	"encoding/xml"
 	"flag"
 	"os"
 	"path/filepath"
@@ -286,5 +287,23 @@ func TestStripVersionCaret(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("stripVersionCaret(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+// Values are XML-escaped: "&" or "<" in a tagline or tag used to produce a
+// sticker no browser could open.
+func TestFillTemplateEscapes(t *testing.T) {
+	svg := fillTemplate(&scoutData{ProjectName: "A&B", Tagline: "Fast & <simple>", TechTags: []string{"R&D"}})
+	if strings.Contains(svg, "Fast & ") || strings.Contains(svg, "<simple>") || !strings.Contains(svg, "Fast &amp; &lt;simple&gt;") {
+		t.Fatalf("unescaped values in the SVG")
+	}
+	if err := xml.Unmarshal([]byte(svg), new(struct{})); err != nil {
+		t.Fatalf("SVG is not well-formed XML: %v", err)
+	}
+}
+
+func TestSlugFromNonASCII(t *testing.T) {
+	if got := slugFrom(&scoutData{ProjectName: "日本語ツール"}); got != "project-sticker" {
+		t.Fatalf("slugFrom = %q, want the fallback (not a hidden file)", got)
 	}
 }

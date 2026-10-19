@@ -4,15 +4,19 @@
 package doc
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/registry"
@@ -153,10 +157,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	// sandbox (symlink-aware): `scope` is attacker-influenceable (CLI flag /
 	// MCP arg), and a docs/ or <slug>.* symlink planted in the repo must not
 	// redirect a write outside the project.
-	slug := seance.Slugify(sheet.Title)
-	if slug == "" {
-		slug = "document"
-	}
+	slug := freeSlug(cfg.ProjectRoot, cmp.Or(seance.Slugify(sheet.Title), "document"))
 	res := &docResult{}
 	var pdfPath string
 	for _, out := range []struct {
@@ -179,9 +180,41 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 	if err := os.WriteFile(res.MD, []byte(technicalMD(&sheet)), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write md: %w", err)
 	}
-	res.PDF, res.PDFNote = renderPDF(res.HTML, pdfPath)
+	res.PDF, res.PDFNote = renderPDF(ctx, res.HTML, pdfPath)
 	res.OpenQuestions = sheet.OpenQuestions
 	return res, nil
+}
+
+// freeSlug returns slug, or slug-2, slug-3… when docs/ already holds a file
+// of that name that a previous doc run did not write: the title comes from
+// the model, and "Architecture" must not replace a hand-written
+// docs/architecture.md (or "Knowledge" the `ouija learn` store). A trio this
+// totem wrote — its HTML carries docCSP — is regenerated in place.
+func freeSlug(root, slug string) string {
+	for i := 1; ; i++ {
+		s := slug
+		if i > 1 {
+			s = fmt.Sprintf("%s-%d", slug, i)
+		}
+		if ownsSlug(root, s) || i > 99 {
+			return s
+		}
+	}
+}
+
+// ownsSlug reports whether docs/<s>.* is free to write: no such files, or
+// ones a previous doc run produced.
+func ownsSlug(root, s string) bool {
+	base := filepath.Join(root, "docs", s)
+	if b, err := os.ReadFile(base + ".html"); err == nil {
+		return strings.Contains(string(b), docCSP)
+	}
+	for _, ext := range []string{".md", ".pdf"} {
+		if _, err := os.Lstat(base + ext); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // --- PDF: headless Chrome print-to-pdf ---
@@ -210,8 +243,12 @@ func withCSP(html string) string {
 	return "<head>" + meta + "</head>" + html
 }
 
-func renderPDF(htmlPath, pdf string) (string, string) {
-	chrome := findChrome()
+// pdfTimeout bounds the headless print: a Chrome that hangs (it happens, e.g.
+// on a first-run dialog) would otherwise hold the totem forever.
+const pdfTimeout = 2 * time.Minute
+
+func renderPDF(ctx context.Context, htmlPath, pdf string) (string, string) {
+	chrome := lookChrome()
 	if chrome == "" {
 		return "", "Chrome/Chromium not found — open the HTML and print to PDF: " + htmlPath
 	}
@@ -222,17 +259,58 @@ func renderPDF(htmlPath, pdf string) (string, string) {
 		defer os.RemoveAll(profile)
 		flags = append(flags, "--user-data-dir="+profile)
 	}
-	flags = append(flags, "--print-to-pdf="+pdf, "file://"+abs)
-	if err := exec.Command(chrome, flags...).Run(); err != nil {
+	flags = append(flags, "--print-to-pdf="+pdf, fileURL(abs))
+	ctx, cancel := context.WithTimeout(ctx, pdfTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, chrome, flags...).Run(); err != nil {
 		return "", "PDF render failed (" + err.Error() + ") — open the HTML and print to PDF: " + htmlPath
 	}
 	return pdf, ""
 }
 
+// fileURL is the file:// URL of an absolute path, escaped (a space in the
+// project path broke the old "file://"+path) and with Windows' drive letter
+// after a slash (file:///C:/…).
+func fileURL(abs string) string {
+	p := filepath.ToSlash(abs)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
+}
+
+// lookChrome finds a Chromium-family browser; a variable so tests never
+// launch one.
+var lookChrome = findChrome
+
+// findChrome looks on PATH, then where macOS and Windows install the browsers
+// (neither puts them on PATH, so the PDF was never rendered there).
 func findChrome() string {
-	for _, c := range []string{"google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome"} {
+	for _, c := range []string{"google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome", "msedge"} {
 		if p, err := exec.LookPath(c); err == nil {
 			return p
+		}
+	}
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+		}
+	case "windows":
+		for _, base := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)"), os.Getenv("LocalAppData")} {
+			if base != "" {
+				candidates = append(candidates,
+					filepath.Join(base, "Google", "Chrome", "Application", "chrome.exe"),
+					filepath.Join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+			}
+		}
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return c
 		}
 	}
 	return ""

@@ -7,13 +7,17 @@
 package sticker
 
 import (
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/discorgento/ouija/engine"
@@ -288,14 +292,21 @@ func detectVersions(projectRoot string) detected {
 		return d
 	}
 
-	d.platform = stripVersionCaret(root.Require["magento/product-community-edition"])
+	d.platform = stripVersionCaret(cmp.Or(root.Require["magento/product-community-edition"],
+		root.Require["magento/product-enterprise-edition"])) // Open Source or Commerce
 	d.php = stripVersionCaret(root.Require["php"])
 
-	// Check any hyva-themes/* package.
-	for pkg, ver := range root.Require {
-		if strings.HasPrefix(pkg, "hyva-themes/") || strings.HasPrefix(pkg, "hyva-themes ") {
-			d.theme = stripVersionCaret(ver)
-			break
+	// The Hyvä theme version: the default theme package when required, else
+	// the first hyva-themes/* package by name — not the first a map happens
+	// to yield, which changed the sticker from run to run.
+	if v := root.Require["hyva-themes/magento2-default-theme"]; v != "" {
+		d.theme = stripVersionCaret(v)
+	} else {
+		for _, pkg := range slices.Sorted(maps.Keys(root.Require)) {
+			if strings.HasPrefix(pkg, "hyva-themes/") {
+				d.theme = stripVersionCaret(root.Require[pkg])
+				break
+			}
 		}
 	}
 
@@ -360,25 +371,30 @@ func stripVersionCaret(v string) string {
 
 // --- template filling ---
 
-// fillTemplate substitutes {{PLACEHOLDERS}} in the embedded SVG with real data.
+// fillTemplate substitutes {{PLACEHOLDERS}} in the embedded SVG with real
+// data, XML-escaped: a tagline "Fast & simple" or a tag "R&D" would otherwise
+// break the document, and text from the repo must not become markup. One
+// pass, so a value holding "{{TAGLINE}}" is never substituted again.
 func fillTemplate(d *scoutData) string {
-	sv := templateSVG
+	esc := html.EscapeString
 
 	// Project name: truncate and adapt font-size to prevent overflow.
 	name, size := adaptName(d.ProjectName)
-	sv = strings.ReplaceAll(sv, "{{PROJECT_NAME}}", name)
-	sv = strings.ReplaceAll(sv, "{{NAME_SIZE}}", size)
-
-	// Tagline: truncate to fit ~44 chars at 16px.
-	sv = strings.ReplaceAll(sv, "{{TAGLINE}}", truncate(d.Tagline, 44))
 
 	// Bottom row: module count + platform version (show only when meaningful).
 	modulesText := ""
 	if d.CustomModules != "" && d.CustomModules != "0" {
 		modulesText = "Modules: " + d.CustomModules
 	}
-	sv = strings.ReplaceAll(sv, "{{BOTTOM_LEFT}}", modulesText)
-	sv = strings.ReplaceAll(sv, "{{BOTTOM_RIGHT}}", d.PlatformVersion)
+
+	pairs := []string{
+		"{{PROJECT_NAME}}", esc(name),
+		"{{NAME_SIZE}}", size,
+		// Tagline: truncate to fit ~44 chars at 16px.
+		"{{TAGLINE}}", esc(truncate(d.Tagline, 44)),
+		"{{BOTTOM_LEFT}}", esc(modulesText),
+		"{{BOTTOM_RIGHT}}", esc(d.PlatformVersion),
+	}
 
 	// Build badge values and truncate each to fit its pill slot.
 	// Wide pills (cols 1,2,4,5): 204px at 16px font ~ 13 chars → max 12 + "..."
@@ -386,11 +402,9 @@ func fillTemplate(d *scoutData) string {
 	pills := buildBadges(d)
 	limits := []int{12, 12, 5, 12, 12, 5}
 	for i := 0; i < 6 && i < len(pills); i++ {
-		key := fmt.Sprintf("{{BADGE_%d}}", i+1)
-		sv = strings.ReplaceAll(sv, key, truncate(pills[i], limits[i]))
+		pairs = append(pairs, fmt.Sprintf("{{BADGE_%d}}", i+1), esc(truncate(pills[i], limits[i])))
 	}
-
-	return sv
+	return strings.NewReplacer(pairs...).Replace(templateSVG)
 }
 
 // adaptName truncates the project name and calculates the right font-size.
@@ -482,11 +496,9 @@ func (r *stickerResult) Render() string {
 // --- helpers ---
 
 func slugFrom(d *scoutData) string {
-	name := strings.TrimSpace(d.ProjectName)
-	if name != "" {
-		return seance.Slugify(name)
-	}
-	return "project-sticker"
+	// A name with no ASCII letters or digits slugs to "": that would write
+	// a hidden ".sticker.svg".
+	return cmp.Or(seance.Slugify(d.ProjectName), "project-sticker")
 }
 
 // --- schemas ---
