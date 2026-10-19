@@ -109,6 +109,7 @@ func Init(args []string) error {
 	fmt.Printf("  Model:    %s\n", model)
 	if cfg.APIKey != "" {
 		fmt.Println("  API key:   (project override)")
+		fmt.Println("  ⚠ the key is in " + path + " — keep that file out of git (.gitignore)")
 	} else {
 		fmt.Println("  API key:   (using global)")
 	}

@@ -317,7 +317,9 @@ Config comes from the shared ouija config — run `+"`ouija setup`"+` once, or
 drop a `+"`.ouija/config.json`"+` in the project you run from.
 `, name, bin),
 
-		".gitignore": bin + "\n",
+		// Anchored: a bare `<bin>` pattern would also ignore cmd/<bin>/,
+		// the host's source directory.
+		".gitignore": "/" + bin + "\n/dist/\n",
 	}
 
 	for rel, content := range files {

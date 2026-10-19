@@ -41,6 +41,11 @@ ouija.json
 # about what is intentionally kept.
 docs/*.html
 docs/*.pdf
+# `ouija task` rewrites its plan on every run.
+docs/task-plan.md
+
+# Temp files of an atomic write interrupted by a crash (internal/atomicfile).
+.*.tmp-*
 
 # --- secrets / local env ---
 .env

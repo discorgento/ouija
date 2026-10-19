@@ -45,6 +45,18 @@ func TestWriteExternalModule(t *testing.T) {
 		t.Errorf("external totem should not be a TODO stub:\n%s", totem)
 	}
 
+	// The binary is ignored only at the root: a bare pattern would also hide
+	// cmd/my-agent/, the host's source.
+	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	for _, line := range strings.Split(strings.TrimSpace(string(gi)), "\n") {
+		if line == "my-agent" {
+			t.Errorf(".gitignore has the bare pattern %q, which ignores cmd/my-agent/", line)
+		}
+	}
+	if !strings.Contains(string(gi), "/my-agent") {
+		t.Errorf(".gitignore does not ignore the built binary:\n%s", gi)
+	}
+
 	host, _ := os.ReadFile(filepath.Join(dir, "cmd", "my-agent", "main.go"))
 	for _, want := range []string{
 		"bootstrap.Main",
