@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -247,7 +248,46 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	if res.Error != nil && entry >= 0 {
 		r.journal.discard(entry)
 	}
+	if call.Name == "bash" {
+		recordBashResult(span, res)
+	}
 	return res
+}
+
+// bashExit matches the status bash appends to the output of a command that
+// failed ("[exit status 1]").
+var bashExit = regexp.MustCompile(`\[exit status (\d+)\]\s*$`)
+
+// maxSpanOutput bounds the output tail a bash span keeps for a UI.
+const (
+	maxSpanOutputLines = 12
+	maxSpanOutputBytes = 2000
+)
+
+// recordBashResult puts a bash call's outcome on its span: a non-zero exit
+// marks it failed (it is data for the model, not a tool error, so the span
+// showed a failing `go test` as a success), and the output's last lines are
+// kept for a UI to show under the call.
+func recordBashResult(span *Span, res ToolResult) {
+	if res.Error != nil {
+		return
+	}
+	out := res.Data
+	if m := bashExit.FindStringSubmatchIndex(out); m != nil {
+		span.SetError("exit status " + out[m[2]:m[3]])
+		out = out[:m[0]]
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) > maxSpanOutputLines {
+		lines = lines[len(lines)-maxSpanOutputLines:]
+	}
+	tail := strings.Join(lines, "\n")
+	if len(tail) > maxSpanOutputBytes {
+		tail = strings.ToValidUTF8(tail[len(tail)-maxSpanOutputBytes:], "")
+	}
+	if strings.TrimSpace(tail) != "" && tail != "(no output)" {
+		span.SetAttr("output", tail)
+	}
 }
 
 // MayRun reports whether a call to the tool could run at all under the

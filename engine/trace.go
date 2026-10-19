@@ -255,6 +255,7 @@ type TurnTool struct {
 	Target   string        // its path, pattern or command; "" when none
 	Duration time.Duration // 0 while it runs
 	Error    string        // why it failed or was refused; "" on success
+	Output   string        // bash: the last lines it printed ("" for the others)
 }
 
 // TurnSummary is what the current turn did: its tool calls in the order they
@@ -290,7 +291,7 @@ func (t *Tracer) LastTurn() TurnSummary {
 						target = v
 					}
 				}
-				sum.Tools = append(sum.Tools, TurnTool{Name: tool, Target: target, Duration: s.Duration(), Error: errText})
+				sum.Tools = append(sum.Tools, TurnTool{Name: tool, Target: target, Duration: s.Duration(), Error: errText, Output: attrs["output"]})
 			}
 			if n, err := strconv.Atoi(attrs["input_tokens"]); err == nil {
 				sum.InputTokens += n
