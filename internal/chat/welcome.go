@@ -107,6 +107,9 @@ func renderWelcomeBanner(shift, width, reveal int, info welcomeInfo) string {
 	b.WriteString(panelHint.Width(width).Align(lipgloss.Center).
 		Render("ask about this project — ouija edits only with your approval") + "\n\n")
 	b.WriteString(center(startGrid(width)) + "\n")
+	if line := totemsLine(width); line != "" {
+		b.WriteString("\n" + center(line) + "\n")
+	}
 	if note := sessionNote(info); note != "" {
 		b.WriteString("\n" + center(note))
 	}
@@ -200,6 +203,25 @@ func startGrid(width int) string {
 		grid = lipgloss.JoinVertical(lipgloss.Left, cell(rows[0]), cell(rows[1]), cell(rows[2]), cell(rows[3]))
 	}
 	return grid
+}
+
+// totemsLine names the registered totems on one line — the agents in Go that
+// run several independent passes and reconcile them — each a slash command
+// here ("" when none is registered).
+func totemsLine(width int) string {
+	totems := listTotems()
+	if len(totems) == 0 {
+		return ""
+	}
+	names := make([]string, len(totems))
+	for i, t := range totems {
+		names[i] = panelCmd.Render("/" + t.name)
+	}
+	line := panelTitle.Render("totems") + "  " + strings.Join(names, panelKey.Render(" · "))
+	if full := line + panelHint.Render(" — agents in Go: several hands, one answer"); lipgloss.Width(full) <= width {
+		return full
+	}
+	return ansi.Truncate(line, width, "…")
 }
 
 // sessionNote is what neither the header nor the status bar says: what

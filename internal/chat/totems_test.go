@@ -22,9 +22,13 @@ func TestTotemsAreOffered(t *testing.T) {
 			t.Errorf("no %q command in %v", name, cmds)
 		}
 	}
-	// The welcome points at /task; /help lists every totem.
-	if out := ansi.Strip(renderWelcomeBanner(0, 120, -1, welcomeInfo{})); !strings.Contains(out, "/task") {
-		t.Errorf("welcome lacks /task:\n%s", out)
+	// The welcome names every totem on one line; /help says what each does.
+	out := ansi.Strip(renderWelcomeBanner(0, 120, -1, welcomeInfo{}))
+	if !strings.Contains(out, "totems  /doc · /sticker · /task — agents in Go: several hands, one answer") {
+		t.Errorf("welcome lacks the totems line:\n%s", out)
+	}
+	if narrow := ansi.Strip(renderWelcomeBanner(0, 40, -1, welcomeInfo{})); !strings.Contains(narrow, "/doc") {
+		t.Errorf("narrow welcome lacks the totems:\n%s", narrow)
 	}
 	help := ansi.Strip(renderHelp(slashCommands(), 160))
 	for _, want := range []string{"/task", "/doc", "/sticker"} {

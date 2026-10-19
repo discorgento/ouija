@@ -1,7 +1,5 @@
  ● ouija 0.0.0 │ ⎇ main │ /proj                       claude-sonnet-5-5 · anthropic │ ctx ▱▱▱▱▱▱ 0%
  ──────────────────────────────────────────────────────────────────────────────────────────────────
-                                      ____  __  ______    _____
-                                     / __ \/ / / /  _/   / /   |
                                     / / / / / / // /__  / / /| |
                                    / /_/ / /_/ // // /_/ / ___ |
                                    \____/\____/___/\____/_/  |_|
@@ -11,6 +9,8 @@
 
                  @file   attach a file          /task   plan it with several passes
                  /learn  teach ouija a fact     /help   every command and totem
+
+             totems  /doc · /sticker · /task — agents in Go: several hands, one answer
 
                                2 facts remembered about this project
 
