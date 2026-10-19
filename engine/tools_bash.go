@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -627,7 +629,8 @@ func stripShellQuotes(s string) string {
 
 // pathTokenTrim strips shell punctuation around a word so that `.env)`,
 // `$(cat` or `"~/.ssh/id_rsa"` reduce to a path-like candidate.
-const pathTokenTrim = "'\"`" + "(){}[],;:&|<>!?*$"
+// Glob metacharacters (`*`, `?`) are kept: globMatches needs the pattern.
+const pathTokenTrim = "'\"`" + "(){}[],;:&|<>!$"
 
 // commandRefsProtectedPath reports the first word token of cmd that names a
 // protected path (credential or system location). bash has no `path` argument
@@ -654,8 +657,45 @@ func commandRefsProtectedPathIn(root, cmd string) (string, bool) {
 				return c, true
 			}
 		}
+		// The shell globs what the scan would otherwise judge by its spelling:
+		// `cat ~/.ss?/id_rsa` and `cat .en?` open the files their patterns
+		// match, so every existing match is checked.
+		for _, m := range globMatches(root, c) {
+			if isProtectedPath(m) || isProtectedPath(physicalPath(m)) {
+				return c, true
+			}
+		}
 	}
 	return "", false
+}
+
+// globMatches returns the existing paths a glob word expands to, resolved like
+// physicalCandidate (`~` → home, relative → root). It returns nil for a word
+// without glob metacharacters, a relative glob with no root, or a malformed
+// pattern. filepath.Glob also matches dotfiles with `*`, which only makes the
+// check stricter than the shell.
+func globMatches(root, word string) []string {
+	if !strings.ContainsAny(word, "*?[") {
+		return nil
+	}
+	switch {
+	case word == "~" || strings.HasPrefix(word, "~/"):
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		word = filepath.Join(home, word[1:])
+	case !filepath.IsAbs(word):
+		if root == "" {
+			return nil
+		}
+		word = filepath.Join(root, word)
+	}
+	matches, err := filepath.Glob(word)
+	if err != nil {
+		return nil
+	}
+	return matches
 }
 
 // protectedPathCandidates lists the path-like words of cmd: the raw tokens of
@@ -689,8 +729,24 @@ func protectedPathCandidates(cmd string) []string {
 	return out
 }
 
+// errNotStatic is what staticExpandConfig's substitution hooks return: the
+// word needs a real execution to expand, so it has no static value.
+var errNotStatic = errors.New("word needs execution to expand")
+
+// staticExpandConfig expands shell words without running anything: command
+// and process substitutions fail with errNotStatic (a nil hook would panic),
+// globbing is off (no ReadDir), and the environment holds only env.
+func staticExpandConfig(env ...string) *expand.Config {
+	return &expand.Config{
+		Env:       expand.ListEnviron(env...),
+		CmdSubst:  func(io.Writer, *syntax.CmdSubst) error { return errNotStatic },
+		ProcSubst: func(*syntax.ProcSubst) (string, error) { return "", errNotStatic },
+	}
+}
+
 // shellWordValues returns the value every word of cmd has after quote removal,
-// as the shell would pass it (`.e""nv`, `'.e'nv` and `.e\nv` are all `.env`).
+// as the shell would pass it (`.e""nv`, `'.e'nv` and `.e\nv` are all `.env`),
+// with $HOME expanded so `$HOME/.ssh` is judged as the home path it is.
 // Nothing is executed: a word needing a real expansion (command substitution)
 // is skipped, while the words inside the substitution are still visited.
 func shellWordValues(cmd string) []string {
@@ -698,12 +754,17 @@ func shellWordValues(cmd string) []string {
 	if err != nil {
 		return nil
 	}
+	var env []string
+	if home, err := os.UserHomeDir(); err == nil {
+		env = append(env, "HOME="+home)
+	}
+	cfg := staticExpandConfig(env...)
 	var out []string
 	syntax.Walk(f, func(n syntax.Node) bool {
 		if w, ok := n.(*syntax.Word); ok {
 			// Fields, not Literal: argument semantics, so an unquoted
-			// backslash is removed too. A nil config never globs or runs.
-			if vs, err := expand.Fields(nil, w); err == nil {
+			// backslash is removed too.
+			if vs, err := expand.Fields(cfg, w); err == nil {
 				out = append(out, vs...)
 			}
 		}

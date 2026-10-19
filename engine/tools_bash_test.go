@@ -557,3 +557,53 @@ func TestBashProtectedPathRefsThroughSymlinks(t *testing.T) {
 		t.Fatalf("bash read .env through a symlink: %+v", res)
 	}
 }
+
+// Process and command substitution must never crash the gate: expanding them
+// with a nil expand config used to panic and take the whole process down.
+func TestBashGatesSurviveSubstitutions(t *testing.T) {
+	w := NewBashAllowlist([]string{"diff"})
+	for _, c := range []string{`diff <(ls) x`, `cat >(tee x)`, `echo $(id) ${X:-y} $((1+2))`} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%q panicked: %v", c, r)
+				}
+			}()
+			commandRefsProtectedPathIn(t.TempDir(), c)
+			w.IsAllowed(c)
+		}()
+	}
+}
+
+// The shell globs and expands $HOME; the scan must judge the files a word
+// really opens, not its spelling.
+func TestBashProtectedPathRefsSurviveGlobs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := t.TempDir()
+	for _, p := range []string{filepath.Join(home, ".ssh", "id_rsa"), filepath.Join(root, ".env"), filepath.Join(root, "main.go")} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range []string{
+		"cat ~/.ss?/id_rsa",
+		"cat ~/.s*h/id_rsa",
+		`cat $HOME/.s*h/id_rsa`,
+		`cat "${HOME}"/.ss[h]/id_rsa`,
+		"cat .en?",
+		"cat ./.e*",
+	} {
+		if _, found := commandRefsProtectedPathIn(root, c); !found {
+			t.Errorf("%q reached a protected file through a glob", c)
+		}
+	}
+	for _, c := range []string{"cat *.go", "ls ~/Down*", "grep -rn TODO ."} {
+		if ref, found := commandRefsProtectedPathIn(root, c); found {
+			t.Errorf("%q refused (%q); want allowed", c, ref)
+		}
+	}
+}
