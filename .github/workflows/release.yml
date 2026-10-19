@@ -11,8 +11,10 @@
 #
 # Artifacts run in the SAME workflow on purpose: releases created with the
 # default GITHUB_TOKEN do not trigger other workflows (`on: release` would
-# never fire). For the same reason the release PR gets no CI run of its own;
-# step 4's gate is what stops a broken tag from shipping binaries.
+# never fire). For the same reason a push to the release PR starts no CI —
+# and main's ruleset requires CI's checks — so this workflow dispatches CI on
+# the release branch itself (workflow_dispatch is the one event the
+# GITHUB_TOKEN may start). Step 4 still gates the tag before any upload.
 #
 # Repo settings needed once: Settings → Actions → General →
 #   "Allow GitHub Actions to create and approve pull requests".
@@ -39,6 +41,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write # release-please labels its PR
+      actions: write # dispatch CI on the release PR (below)
     outputs:
       created: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
@@ -49,6 +52,23 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The release PR needs CI's required checks on its head commit, and
+      # GitHub runs no workflow for a push the GITHUB_TOKEN made: without this
+      # the PR could never be merged. No release PR (or the release itself
+      # being cut): nothing to run.
+      - name: Run CI on the release PR
+        if: steps.release.outputs.release_created != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: release-please--branches--main--components--ouija
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" --silent 2>/dev/null; then
+            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+            echo "CI dispatched on $BRANCH"
+          else
+            echo "no release PR open"
+          fi
 
   artifacts:
     name: gate + cross-compile + attest + attach binaries
@@ -80,6 +100,24 @@ jobs:
 
       - name: Build the release archives (5 targets)
         run: make dist VERSION="$TAG"
+
+      # What ships must run and say the tag's version, and match its
+      # checksums: a broken ldflags or archive stops here, before any upload.
+      - name: Smoke-test the archives
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          tar -xzf dist/ouija-linux-amd64.tar.gz -C "$RUNNER_TEMP"
+          got="$("$RUNNER_TEMP/ouija-linux-amd64/ouija" version)"
+          want="ouija ${TAG#v}"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the binary says '$got', want '$want'"
+            exit 1
+          fi
+          # grep without -q reads the whole listing: -q stops early, tar gets
+          # SIGPIPE and pipefail (on in Actions) fails a good archive.
+          for a in linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
+            tar -tzf "dist/ouija-$a.tar.gz" | grep "ouija-$a/ouija" >/dev/null || { echo "::error::$a archive has no ouija binary"; exit 1; }
+          done
 
       # Artifact attestations need a public repository (or GitHub Enterprise
       # Cloud): on a private one the step would fail and block the upload below.
