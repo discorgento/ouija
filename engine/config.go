@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/discorgento/ouija/internal/atomicfile"
 )
 
 // Budget holds the hard ceilings for an Engine run.
@@ -219,7 +221,7 @@ func (c *Config) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := os.WriteFile(path, b, 0o600); err != nil {
+	if err := atomicfile.Write(path, b, 0o600, false); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/discorgento/ouija/internal/atomicfile"
 )
 
 const (
@@ -115,7 +117,7 @@ func Save(cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	if err := os.WriteFile(p, b, filePerm); err != nil {
+	if err := atomicfile.Write(p, b, filePerm, false); err != nil {
 		return fmt.Errorf("write %s: %w", p, err)
 	}
 	return nil

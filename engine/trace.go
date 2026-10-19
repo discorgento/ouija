@@ -372,7 +372,8 @@ func (t *Tracer) WritePerfettoFile(path string) error {
 	if t == nil || !t.active {
 		return nil
 	}
-	f, err := os.Create(path)
+	// 0600: a trace holds prompts and the file contents the tools read.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

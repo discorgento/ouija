@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/discorgento/ouija/internal/atomicfile"
 )
 
 // binName is the command harnesses launch; serverArgs is the subcommand that
@@ -279,7 +281,9 @@ func jsonAddServer(path, container, name string, entry map[string]any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, pretty.Bytes(), 0o644)
+	// Atomic, keeping the file's mode: this is another tool's config (often a
+	// large one, like ~/.claude.json), and a crash mid-write must not corrupt it.
+	return atomicfile.Write(path, pretty.Bytes(), 0o644, true)
 }
 
 // jsonHasServer reports whether name is present in the container object of the
