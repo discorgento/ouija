@@ -87,6 +87,7 @@ package sentinel
 
 import (
     "context"
+
     "github.com/discorgento/ouija/engine"
     "github.com/discorgento/ouija/registry"
 )
@@ -106,49 +107,29 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 func init() { registry.Register(&Totem{}) }
 ```
 
-`bootstrap.Setup` hands it the same config the ouija CLI uses —
-`~/.config/ouija/config.json` (keys, provider, budget, rules) applies unchanged:
+`bootstrap.Main` is the whole host — the command line, the MCP server, and the
+same config the ouija CLI uses (`~/.config/ouija/config.json`: keys, provider,
+budget, rules):
 
 ```go
-// github.com/you/your-agents/cmd/totem/main.go — the whole host
+// github.com/you/your-agents/cmd/my-totem/main.go — the whole host
 package main
 
 import (
-    "context"
-    "fmt"
     "os"
 
     "github.com/discorgento/ouija/bootstrap"
-    "github.com/discorgento/ouija/registry"
     _ "github.com/you/your-agents/totems/sentinel"
 )
 
-func main() {
-    ctx := context.Background()
-    if len(os.Args) < 2 {
-        fmt.Println(registry.Help())
-        return
-    }
-    if os.Args[1] == "mcp" { // `my-totem mcp` serves MCP for your totems
-        app, err := bootstrap.Setup(ctx, bootstrap.WithName("my-totem"))
-        if err != nil {
-            fmt.Fprintln(os.Stderr, "error:", err)
-            os.Exit(1)
-        }
-        if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
-            fmt.Fprintln(os.Stderr, "error:", err)
-            os.Exit(1)
-        }
-        return
-    }
-    // ... registry.Invoke(ctx, app.Engine, totem, registry.Args{Task: …})
-}
+func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
 ```
 
 ```sh
-go build -o my-totem ./cmd/totem   # standalone binary, full engine behind it
-my-totem mcp                       # your totems as my-totem_<name> tools in
-                                   # Claude Code, Cursor or OpenCode
+go build -o my-totem ./cmd/my-totem   # standalone binary, full engine behind it
+my-totem sentinel "audit the auth flow" --set depth=2   # typed inputs, see InputSchema
+my-totem mcp                          # your totems as my-totem_<name> tools in
+                                      # Claude Code, Cursor or OpenCode
 ```
 
 Walkthrough: [Add a totem](docs/how-to/add-totem.md) · Design rationale:

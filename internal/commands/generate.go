@@ -278,74 +278,17 @@ func (r *result) Render() string {
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"flag"
-	"fmt"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 
 	"github.com/discorgento/ouija/bootstrap"
-	"github.com/discorgento/ouija/registry"
 
 	_ "%[2]s/totems/%[3]s"
 )
 
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if len(os.Args) < 2 {
-		fmt.Print(registry.Help())
-		fmt.Printf("\n  usage: %%s <totem> [task] · %%s mcp\n", os.Args[0], os.Args[0])
-		os.Exit(0)
-	}
-
-	// Same config the ouija CLI uses (~/.config/ouija/config.json).
-	app, err := bootstrap.Setup(ctx, bootstrap.WithName(%[1]q))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %%v\n", err)
-		os.Exit(1)
-	}
-	defer app.Engine.Close()
-
-	if os.Args[1] == "mcp" { // %[1]s_<totem> tools for Claude Code / Cursor / OpenCode
-		if err := app.ServeMCP(ctx, os.Stdin, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %%v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	t, ok := registry.Get(os.Args[1])
-	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown totem: %%s\n\n%%s", os.Args[1], registry.Help())
-		os.Exit(1)
-	}
-
-	fs := flag.NewFlagSet(os.Args[1], flag.ContinueOnError)
-	jsonOut := fs.Bool("json", false, "print the raw JSON result")
-	if err := fs.Parse(os.Args[2:]); err != nil {
-		os.Exit(2)
-	}
-
-	out, runErr := registry.Invoke(ctx, app.Engine, t, registry.Args{Task: strings.Join(fs.Args(), " ")})
-	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "error: %%v\n", runErr)
-		os.Exit(1)
-	}
-
-	if r, ok := out.(registry.Renderer); ok && !*jsonOut {
-		fmt.Println(r.Render())
-	} else {
-		b, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Println(string(b))
-	}
-	tokens, steps, usd := app.Engine.Spent()
-	fmt.Fprintf(os.Stderr, "\n%%s · %%d tokens · %%d steps · $%%.2f\n", app.Config.Model, tokens, steps, usd)
-}
+// bootstrap.Main is the whole command line: list the totems, run one
+// (%[1]s <totem> [task] [--set key=value]… [--json]), or serve them all over
+// MCP (%[1]s mcp). Same config as the ouija CLI (~/.config/ouija/config.json).
+func main() { os.Exit(bootstrap.Main(bootstrap.WithName(%[1]q))) }
 `, bin, module, name),
 
 		"README.md": fmt.Sprintf(`# %[1]s
@@ -365,7 +308,8 @@ go build -o %[2]s ./cmd/%[2]s
 `+"```sh"+`
 ./%[2]s              # list totems
 ./%[2]s %[1]s "task description"
-./%[2]s %[1]s --json # raw JSON out
+./%[2]s %[1]s "task" --set key=value  # named inputs (see InputSchema)
+./%[2]s %[1]s "task" --json           # raw JSON out
 ./%[2]s mcp          # %[2]s_%[1]s tools for Claude Code / Cursor / OpenCode
 `+"```"+`
 

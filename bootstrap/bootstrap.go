@@ -12,6 +12,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
@@ -69,6 +71,9 @@ func Setup(ctx context.Context, opts ...Option) (*App, error) {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.name == "" {
+		o.name = filepath.Base(os.Args[0]) // WithName's documented default
 	}
 
 	out, err := app.SetupEngine(ctx, o.configPath, o.trace)

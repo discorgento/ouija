@@ -47,8 +47,8 @@ func TestWriteExternalModule(t *testing.T) {
 
 	host, _ := os.ReadFile(filepath.Join(dir, "cmd", "my-agent", "main.go"))
 	for _, want := range []string{
-		"bootstrap.Setup",
-		"ServeMCP",
+		"bootstrap.Main",
+		`bootstrap.WithName("my-agent")`,
 		`_ "github.com/you/my-agent/totems/my-agent"`,
 	} {
 		if !strings.Contains(string(host), want) {
