@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"charm.land/huh/v2"
 	"github.com/discorgento/ouija/engine"
@@ -70,7 +71,7 @@ func Setup(args []string) error {
 		Title("Default model").
 		OptionsFunc(func() []huh.Option[string] {
 			key := ""
-			if k, ok := keys[defProv]; ok && k != nil {
+			if k, ok := keys[defProv]; ok {
 				key = *k
 			}
 			return modelOptions(ms, defProv, key)
@@ -97,7 +98,7 @@ func Setup(args []string) error {
 		return fmt.Errorf("setup: %w", err)
 	}
 
-	cfg := buildGlobalConfig(keys, defProv, defModel)
+	cfg := buildGlobalConfig(existing, keys, defProv, defModel)
 
 	if err := ouijaconfig.Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
@@ -123,18 +124,29 @@ func Setup(args []string) error {
 	return nil
 }
 
-// buildGlobalConfig assembles the config the wizard saves: only non-empty keys
-// are stored, so re-running setup cannot blank a key the user already had.
-func buildGlobalConfig(keys map[string]*string, provider, model string) *ouijaconfig.Config {
-	cfg := &ouijaconfig.Config{
-		APIKeys:  map[string]string{},
-		Defaults: &ouijaconfig.Defaults{Provider: provider, Model: model},
+// buildGlobalConfig assembles the config the wizard saves. It starts from the
+// existing config, so what the wizard does not show survives — the trusted
+// projects (`ouija trust`) and keys of providers not in the form — and only
+// replaces the keys it showed (a blank one is removed) and the defaults.
+func buildGlobalConfig(existing *ouijaconfig.Config, keys map[string]*string, provider, model string) *ouijaconfig.Config {
+	cfg := &ouijaconfig.Config{}
+	if existing != nil {
+		*cfg = *existing
+		cfg.APIKeys = maps.Clone(existing.APIKeys)
+		cfg.TrustedProjects = maps.Clone(existing.TrustedProjects)
+	}
+	if cfg.APIKeys == nil {
+		cfg.APIKeys = map[string]string{}
 	}
 	for name, key := range keys {
 		if *key != "" {
 			cfg.APIKeys[name] = *key
+		} else {
+			delete(cfg.APIKeys, name)
 		}
 	}
+	cfg.Defaults = &ouijaconfig.Defaults{Provider: provider, Model: model}
+	cfg.Provider, cfg.Model = "", "" // legacy top-level defaults, superseded
 	return cfg
 }
 

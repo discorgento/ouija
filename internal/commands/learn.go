@@ -12,8 +12,12 @@ import (
 
 // Learn manages project knowledge (show or save).
 func Learn(args []string) error {
-	fs := flag.NewFlagSet("learn", flag.ExitOnError)
-	fs.Parse(args)
+	// ContinueOnError: a bad flag is returned like any other error instead of
+	// exiting the process from inside a library function.
+	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	rest := fs.Args()
 
 	if len(rest) == 0 {

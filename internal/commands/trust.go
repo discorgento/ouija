@@ -84,7 +84,7 @@ func describeSensitive(key string, cfg *engine.Config) string {
 	case "systemPrompt":
 		p := strings.Join(strings.Fields(cfg.SystemPrompt), " ")
 		if len(p) > 70 {
-			p = p[:70] + "…"
+			p = strings.ToValidUTF8(p[:70], "") + "…"
 		}
 		return fmt.Sprintf("%q", p)
 	}
