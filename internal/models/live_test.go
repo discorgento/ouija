@@ -45,7 +45,7 @@ func liveTestStore() *Store {
 // The provider's own list wins, the catalog fills in what it leaves out, and
 // the answer is reused from the cache for a day.
 func TestListUsesTheProvidersOwnList(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateCache(t)
 	s := liveTestStore()
 	p := &listerProvider{models: []engine.ModelInfo{{ID: "claude-new", Label: "New"}, {ID: "claude-old"}}}
 
@@ -62,8 +62,7 @@ func TestListUsesTheProvidersOwnList(t *testing.T) {
 // Without a usable list — no lister, an error, an expired cache with the API
 // down — the built-in suggestions are the fallback.
 func TestListFallsBackToTheCatalog(t *testing.T) {
-	cache := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cache)
+	isolateCache(t)
 	s := liveTestStore()
 
 	if got := s.List(context.Background(), "anthropic", nil); len(got) != 1 || got[0].ID != "claude-old" {
@@ -75,11 +74,35 @@ func TestListFallsBackToTheCatalog(t *testing.T) {
 
 	// Freshness comes from fetchedAt inside the cache file.
 	writeLiveCache("anthropic", "k", []Model{{ID: "claude-stale"}})
-	writeStaleCache(t, filepath.Join(cache, "ouija", "models", "anthropic-k.json"), -2*liveTTL)
+	writeStaleCache(t, cachePath(t, "anthropic", "k"), -2*liveTTL)
 	fresh := &listerProvider{models: []engine.ModelInfo{{ID: "claude-fresh"}}}
 	if got := s.List(context.Background(), "anthropic", fresh); len(got) != 1 || got[0].ID != "claude-fresh" || fresh.calls != 1 {
 		t.Fatalf("an expired cache must be refetched: %+v (calls %d)", got, fresh.calls)
 	}
+}
+
+// isolateCache points the user cache dir at a temp dir on every OS
+// (os.UserCacheDir: XDG_CACHE_HOME, ~/Library/Caches, %LocalAppData%).
+func isolateCache(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	t.Setenv("HOME", dir)
+	t.Setenv("LocalAppData", dir)
+	return dir
+}
+
+// cachePath is where a provider's list is cached, its directory created.
+func cachePath(t *testing.T, provider, key string) string {
+	t.Helper()
+	p, ok := liveCachePath(provider, key)
+	if !ok {
+		t.Fatal("no user cache dir")
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func writeStaleCache(t *testing.T, path string, offset time.Duration) {
@@ -94,8 +117,7 @@ func writeStaleCache(t *testing.T, path string, offset time.Duration) {
 // asks for no caching (Ollama) is fetched every time; a timestamp from the
 // future does not keep a cache fresh.
 func TestListCacheScope(t *testing.T) {
-	cache := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cache)
+	isolateCache(t)
 	s := liveTestStore()
 	keyA, keyB, none := "a", "b", ""
 	s.List(context.Background(), "anthropic", &listerProvider{models: []engine.ModelInfo{{ID: "via-a"}}, cacheKey: &keyA})
@@ -112,7 +134,7 @@ func TestListCacheScope(t *testing.T) {
 		t.Fatalf("an uncached list was fetched %d times, want 2", local.calls)
 	}
 
-	writeStaleCache(t, filepath.Join(cache, "ouija", "models", "anthropic-a.json"), 365*24*time.Hour)
+	writeStaleCache(t, cachePath(t, "anthropic", "a"), 365*24*time.Hour)
 	fresh := &listerProvider{models: []engine.ModelInfo{{ID: "now"}}, cacheKey: &keyA}
 	if got := s.List(context.Background(), "anthropic", fresh); got[0].ID != "now" {
 		t.Fatalf("a future-dated cache was trusted: %+v", got)

@@ -47,6 +47,7 @@ func TestParseLevel(t *testing.T) {
 }
 
 func TestPermissionConfigCheck(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	cfg := NewPermissionConfig(Ask)
 	cfg.Tools["read_file"] = Allow
 	cfg.Tools["delete_all"] = Deny
@@ -75,6 +76,7 @@ func TestPermissionConfigCheck(t *testing.T) {
 }
 
 func TestIsProtectedPath(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	tests := []struct {
 		path string
 		want bool
@@ -144,15 +146,21 @@ func TestIsProtectedPath(t *testing.T) {
 // (every provider's API key) and the project config files the model could
 // otherwise rewrite to grant itself permissions.
 func TestOuijaConfigsAreProtected(t *testing.T) {
-	cfgHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home) // Linux
+	t.Setenv("HOME", home)            // macOS: ~/Library/Application Support
+	t.Setenv("AppData", home)         // Windows
+	cfgHome, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range []string{
-		"/home/u/.config/ouija/config.json",
+		filepath.FromSlash("/home/u/.config/ouija/config.json"),
 		filepath.Join(cfgHome, "ouija", "config.json"),
 		filepath.Join(cfgHome, "ouija"),
-		"/proj/.ouija.json",
-		"/proj/ouija.json",
-		"/proj/.ouija/config.json",
+		filepath.FromSlash("/proj/.ouija.json"),
+		filepath.FromSlash("/proj/ouija.json"),
+		filepath.FromSlash("/proj/.ouija/config.json"),
 	} {
 		if !isProtectedPath(p) {
 			t.Errorf("isProtectedPath(%q) = false; want protected", p)

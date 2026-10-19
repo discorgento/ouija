@@ -51,6 +51,7 @@ func runBash(t *testing.T, eng *Engine, command string) ToolResult {
 // The session cache used to be keyed by tool name alone: one "Session" click
 // on any bash command whitelisted every later command for the whole run.
 func TestBashSessionApprovalScopedToCommand(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	eng, prompts := askBashEngine(t, nil) // empty allowlist pre-approves nothing
 
 	if r := runBash(t, eng, "echo one"); r.Error != nil {
@@ -81,6 +82,7 @@ func TestBashSessionApprovalScopedToCommand(t *testing.T) {
 // The static gates are hard rules: they must reject before the user is asked,
 // so approving can never authorise a denylisted or protected-path command.
 func TestBashStaticGatesRunBeforeApproval(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	tests := []struct {
 		name    string
 		command string
@@ -109,6 +111,7 @@ func TestBashStaticGatesRunBeforeApproval(t *testing.T) {
 
 // An allowlisted command is pre-approved: it runs with no prompt at all.
 func TestBashAllowlistSkipsPrompt(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	eng, prompts := askBashEngine(t, []string{"echo"})
 	res := runBash(t, eng, "echo hi")
 	if res.Error != nil {
@@ -121,6 +124,7 @@ func TestBashAllowlistSkipsPrompt(t *testing.T) {
 
 // With bash set to Allow (unattended), the allowlist is the guard rail.
 func TestBashAllowlistEnforcedWhenLevelAllow(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	eng := newTestEngine(&mockProvider{}, t.TempDir())
 	cfg := NewPermissionConfig(Deny)
 	cfg.Tools["bash"] = Allow
@@ -140,6 +144,7 @@ func TestBashAllowlistEnforcedWhenLevelAllow(t *testing.T) {
 // An empty allowlist is "nothing pre-approved", not "everything approved":
 // with level Allow (explicit user opt-in) it runs; nothing is enforced.
 func TestBashAllowEmptyAllowlistRunsWhenAllowed(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	eng := newTestEngine(&mockProvider{}, t.TempDir())
 	cfg := NewPermissionConfig(Deny)
 	cfg.Tools["bash"] = Allow
@@ -153,6 +158,7 @@ func TestBashAllowEmptyAllowlistRunsWhenAllowed(t *testing.T) {
 // Fresh human consent outranks the allowlist for that one call: the user saw
 // the exact command and said yes.
 func TestBashFreshApprovalNotVetoedByAllowlist(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	eng, prompts := askBashEngine(t, []string{"git"})
 	if res := runBash(t, eng, "curl http://example.com"); res.Error != nil {
 		t.Fatalf("freshly approved command should run despite the allowlist: %v", res.Error)

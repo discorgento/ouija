@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -41,6 +42,22 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 		}
 	}
 	return res
+}
+
+// posixShell is the absolute path of the shell bash commands run in:
+// /bin/sh, or on Windows a POSIX sh from PATH (Git for Windows ships one).
+// Never the literal "/bin/sh" on Windows: there it means \bin\sh(.bat,
+// .cmd, .exe) on the current drive, which any local user may create.
+func posixShell() (string, error) {
+	if runtime.GOOS != "windows" {
+		return "/bin/sh", nil
+	}
+	for _, name := range []string{"sh", "bash"} {
+		if p, err := exec.LookPath(name); err == nil && filepath.IsAbs(p) {
+			return p, nil
+		}
+	}
+	return "", errors.New("no POSIX shell found — install Git for Windows (its sh.exe on PATH) to use the bash tool")
 }
 
 // execBash runs the command (see bashTool).
@@ -74,7 +91,11 @@ func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 		}
 		cmd = sandboxed // its environment is sanitized too
 	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+		shell, err := posixShell()
+		if err != nil {
+			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash: " + err.Error()}}
+		}
+		cmd = exec.CommandContext(ctx, shell, "-c", command)
 		cmd.Env = sanitizeEnv()
 	}
 	cmd.Dir = root
@@ -102,12 +123,13 @@ func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 	out = strings.Join(slices.DeleteFunc([]string{out, errOut}, func(s string) bool { return s == "" }), "\n")
 	if err != nil {
 		// A non-zero exit is data for the model, not a Go error — but it must
-		// see that the command failed, and how.
-		status := err.Error()
+		// see that the command failed, and how. A command that never started
+		// (no shell, no such file) is a tool error, not a "successful" result.
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			status = fmt.Sprintf("exit status %d", exitErr.ExitCode())
+		if !errors.As(err, &exitErr) {
+			return ToolResult{Error: &ToolError{Code: ErrCodeInternal, Message: "bash: the command could not start: " + err.Error()}}
 		}
+		status := fmt.Sprintf("exit status %d", exitErr.ExitCode())
 		return ToolResult{Data: trim(strings.TrimSpace(out + "\n[" + status + "]"))}
 	}
 	return ToolResult{Data: trim(cmp.Or(out, "(no output)"))}

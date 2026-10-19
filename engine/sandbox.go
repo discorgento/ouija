@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -16,6 +17,9 @@ type escapeKey struct{}
 // (lexical containment). It does NOT require the path to exist, so it is also
 // safe for output paths that will be created.
 func SafeJoin(root, rel string) (string, error) {
+	if err := checkPathSyntax(rel); err != nil {
+		return "", err
+	}
 	rootAbs, err := canonRoot(root)
 	if err != nil {
 		return "", err
@@ -122,7 +126,11 @@ func physicalPathDepth(p string, hops int) string {
 		if real, err := filepath.EvalSymlinks(existing); err == nil {
 			return filepath.Join(real, rest)
 		}
-		if fi, err := os.Lstat(existing); err == nil && fi.Mode()&os.ModeSymlink != 0 && hops < maxLinkHops {
+		// ModeIrregular too: since Go 1.23 a Windows junction (mklink /J,
+		// npm link, pnpm) is reported as irregular, not as a symlink, and
+		// EvalSymlinks stops at it — `link\…` with link -> C:\Users\me
+		// otherwise looked like a path inside the project.
+		if fi, err := os.Lstat(existing); err == nil && fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 && hops < maxLinkHops {
 			if target, err := os.Readlink(existing); err == nil {
 				if !filepath.IsAbs(target) {
 					target = filepath.Join(filepath.Dir(existing), target)
@@ -137,6 +145,19 @@ func physicalPathDepth(p string, hops int) string {
 		rest = filepath.Join(filepath.Base(existing), rest)
 		existing = parent
 	}
+}
+
+// checkPathSyntax refuses, on Windows, a ':' in a path component after the
+// volume: NTFS reads `ouija.json::$DATA` as ouija.json itself (and
+// `.ssh::$INDEX_ALLOCATION\…` as .ssh), which slipped past every name rule.
+func checkPathSyntax(p string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	if strings.Contains(p[len(filepath.VolumeName(p)):], ":") {
+		return fmt.Errorf("path %q uses an NTFS stream (':'), which is not allowed", p)
+	}
+	return nil
 }
 
 func canonRoot(root string) (string, error) {

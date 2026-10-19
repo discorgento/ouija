@@ -122,7 +122,9 @@ func TestBashSandboxScopesSignals(t *testing.T) {
 func TestCheckSandboxGrant(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, ".config"))
 	for path, ok := range map[string]bool{
 		home:                                  false,
 		filepath.Join(home, ".config"):        false,

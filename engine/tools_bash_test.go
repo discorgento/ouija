@@ -12,6 +12,7 @@ import (
 )
 
 func TestBashSimpleCommand(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	res := bashTool(context.Background(), root, map[string]any{
 		"command": "echo hello",
@@ -25,6 +26,7 @@ func TestBashSimpleCommand(t *testing.T) {
 }
 
 func TestBashWorkingDir(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "marker.txt"), []byte("here"), 0o644); err != nil {
 		t.Fatal(err)
@@ -41,6 +43,7 @@ func TestBashWorkingDir(t *testing.T) {
 }
 
 func TestBashNonZeroExit(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	// Non-zero exit should return stderr, not a Go error.
 	res := bashTool(context.Background(), root, map[string]any{
@@ -65,6 +68,7 @@ func TestBashEmptyCommand(t *testing.T) {
 }
 
 func TestBashTimeout(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	res := bashTool(context.Background(), root, map[string]any{
 		"command": "sleep 10",
@@ -91,6 +95,7 @@ func TestBashCapTimeout(t *testing.T) {
 }
 
 func TestBashStderrCapture(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	res := bashTool(context.Background(), root, map[string]any{
 		"command": "echo stdout && echo stderr >&2",
@@ -104,6 +109,7 @@ func TestBashStderrCapture(t *testing.T) {
 }
 
 func TestBashNoOutput(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	res := bashTool(context.Background(), root, map[string]any{
 		"command": "true",
@@ -387,6 +393,7 @@ func TestBashDenylistSemantic(t *testing.T) {
 // bash has no `path` argument for the permission gate to inspect — the command
 // itself must not reach the credential files read_file refuses.
 func TestBashProtectedPathRefs(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	denied := []string{
 		"cat .env",
 		"cat ~/.ssh/id_rsa",
@@ -505,6 +512,7 @@ func TestBashAllowlistOperandExtension(t *testing.T) {
 }
 
 func TestBashEnvSanitizationApplied(t *testing.T) {
+	skipOnWindows(t, "runs /bin/sh")
 	root := t.TempDir()
 	t.Setenv("OUIJA_TEST_SECRET", "supersecret")
 
@@ -522,6 +530,7 @@ func TestBashEnvSanitizationApplied(t *testing.T) {
 // Quoting is a free way around a lexical scan: the shell removes the quotes,
 // so the scan must judge each word by its value, not its spelling.
 func TestBashProtectedPathRefsSurviveQuoting(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	denied := []string{
 		`cat .e""nv`,
 		`cat '.e'nv`,
@@ -676,6 +685,7 @@ func TestAllowlistPatterns(t *testing.T) {
 // Process and command substitution must never crash the gate: expanding them
 // with a nil expand config used to panic and take the whole process down.
 func TestBashGatesSurviveSubstitutions(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	w := NewBashAllowlist([]string{"diff"})
 	for _, c := range []string{`diff <(ls) x`, `cat >(tee x)`, `echo $(id) ${X:-y} $((1+2))`} {
 		func() {
@@ -693,6 +703,7 @@ func TestBashGatesSurviveSubstitutions(t *testing.T) {
 // The shell globs and expands $HOME; the scan must judge the files a word
 // really opens, not its spelling.
 func TestBashProtectedPathRefsSurviveGlobs(t *testing.T) {
+	skipOnWindows(t, "POSIX paths")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	root := t.TempDir()
@@ -735,5 +746,13 @@ func TestBashFailureKeepsStdoutAndStatus(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q lacks %q", out, want)
 		}
+	}
+}
+
+// skipOnWindows skips a test that runs /bin/sh or judges POSIX paths.
+func skipOnWindows(t *testing.T, why string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip(why)
 	}
 }

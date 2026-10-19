@@ -189,7 +189,7 @@ func checkSandboxGrant(path string) error {
 		guarded = append(guarded, filepath.Join(home, d))
 	}
 	if dir, err := os.UserConfigDir(); err == nil {
-		guarded = append(guarded, filepath.Join(dir, "ouija"))
+		guarded = append(guarded, filepath.Join(dir, "ouija"), filepath.Join(dir, "gcloud"))
 	}
 	for _, g := range guarded {
 		if rel, err := filepath.Rel(clean, g); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

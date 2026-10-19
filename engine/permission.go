@@ -172,6 +172,12 @@ func isProtectedPath(absPath string) bool {
 		return true
 	case dir == "/var/lib" || strings.HasPrefix(dir, "/var/lib/"):
 		return true
+	// macOS: /etc and /var are links into /private, so the physical path
+	// checks see /private/etc/… (a project symlink to /etc/master.passwd).
+	case dir == "/private/etc" || strings.HasPrefix(dir, "/private/etc/"):
+		return true
+	case dir == "/private/var/lib" || strings.HasPrefix(dir, "/private/var/lib/"):
+		return true
 	}
 
 	// ── Protected directory names at ANY path level ─────────────────
@@ -197,13 +203,17 @@ func isProtectedPath(absPath string) bool {
 	if containsComponentPair(absPath, sep, ".config", "ouija") {
 		return true
 	}
+	// …and the OS config dir's ouija and gcloud (on Windows gcloud keeps its
+	// credentials in %AppData%\gcloud, not .config/gcloud).
 	if dir, err := os.UserConfigDir(); err == nil {
-		g := filepath.Join(dir, "ouija")
-		if foldCase {
-			g = strings.ToLower(g)
-		}
-		if absPath == g || strings.HasPrefix(absPath, g+sep) {
-			return true
+		for _, name := range []string{"ouija", "gcloud"} {
+			g := filepath.Join(dir, name)
+			if foldCase {
+				g = strings.ToLower(g)
+			}
+			if absPath == g || strings.HasPrefix(absPath, g+sep) {
+				return true
+			}
 		}
 	}
 

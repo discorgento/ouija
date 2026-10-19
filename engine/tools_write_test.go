@@ -61,7 +61,7 @@ func TestWriteFileRejectsSymlinkEscape(t *testing.T) {
 
 	// Create a symlink inside root that points outside.
 	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
-		t.Fatal(err)
+		t.Skip("symlinks unavailable:", err) // Windows without the privilege
 	}
 
 	res := writeFileTool(context.Background(), root, map[string]any{
