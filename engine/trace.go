@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -246,6 +247,62 @@ func (t *Tracer) RenderLastRootString() string {
 	}
 	fmt.Fprintf(&buf, "  🛠️ %s\n", strings.Join(parts, ", "))
 	return buf.String()
+}
+
+// TurnTool is one tool call of a turn, as LastTurn reports it.
+type TurnTool struct {
+	Name     string        // tool name (read_file, bash…)
+	Target   string        // its path, pattern or command; "" when none
+	Duration time.Duration // 0 while it runs
+	Error    string        // why it failed or was refused; "" on success
+}
+
+// TurnSummary is what the current turn did: its tool calls in the order they
+// started, the model's token usage and the wall time.
+type TurnSummary struct {
+	Tools        []TurnTool
+	InputTokens  int
+	OutputTokens int
+	Duration     time.Duration
+}
+
+// LastTurn summarizes the current turn — the spans since the last NextTurn or
+// Reset — for a UI that shows the tool calls rather than the span tree.
+func (t *Tracer) LastTurn() TurnSummary {
+	if t == nil || !t.active {
+		return TurnSummary{}
+	}
+	t.mu.Lock()
+	roots := slices.Clone(t.roots[t.turnStart:])
+	t.mu.Unlock()
+	sum := TurnSummary{Duration: wallTime(roots)}
+	var walk func([]*Span)
+	walk = func(spans []*Span) {
+		for _, s := range spans {
+			s.mu.Lock()
+			name, attrs, errText := s.Name, maps.Clone(s.Attrs), s.Error
+			children := slices.Clone(s.Children)
+			s.mu.Unlock()
+			if tool, ok := strings.CutPrefix(name, "tool."); ok {
+				target := attrs["path"]
+				for _, k := range []string{"pattern", "command"} {
+					if v := attrs[k]; v != "" && target == "" {
+						target = v
+					}
+				}
+				sum.Tools = append(sum.Tools, TurnTool{Name: tool, Target: target, Duration: s.Duration(), Error: errText})
+			}
+			if n, err := strconv.Atoi(attrs["input_tokens"]); err == nil {
+				sum.InputTokens += n
+			}
+			if n, err := strconv.Atoi(attrs["output_tokens"]); err == nil {
+				sum.OutputTokens += n
+			}
+			walk(children)
+		}
+	}
+	walk(roots) // roots in turn order, children in start order
+	return sum
 }
 
 // RenderString returns the span tree as a string, or "" when there is nothing

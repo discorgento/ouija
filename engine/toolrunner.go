@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -105,6 +106,13 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	}
 	if p, ok := call.Input["pattern"].(string); ok { // grep/glob: what was searched
 		span.SetAttr("pattern", p)
+	}
+	if c, ok := call.Input["command"].(string); ok { // bash: its first line
+		c, _, _ = strings.Cut(strings.TrimSpace(c), "\n")
+		if len(c) > 120 {
+			c = strings.ToValidUTF8(c[:117], "") + "..."
+		}
+		span.SetAttr("command", c)
 	}
 	defer span.End()
 

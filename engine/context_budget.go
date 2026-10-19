@@ -62,6 +62,13 @@ func fitContext(msgs []Message, system string, window int) []Message {
 	return out
 }
 
+// ContextTokens estimates the tokens a request with system and msgs takes in
+// the context window — the estimate the engine fits the window with, so a UI
+// showing it agrees with when the engine starts compacting.
+func ContextTokens(system string, msgs []Message) int {
+	return estimateTokens(system) + conversationTokens(msgs)
+}
+
 // conversationTokens estimates the tokens msgs take, tool-call inputs included.
 func conversationTokens(msgs []Message) int {
 	n := 0

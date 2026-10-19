@@ -419,3 +419,42 @@ func TestRenderShowsRunLabel(t *testing.T) {
 		t.Fatalf("render = %q; want the scout label, and no repeated chat", out)
 	}
 }
+
+// LastTurn lists the turn's tool calls in order with their target, and sums the
+// model's token usage; earlier turns are left out.
+func TestTracerLastTurn(t *testing.T) {
+	tr := NewTracer(true)
+	old := tr.Start("chat")
+	old.StartChild("tool.read_file").End()
+	old.End()
+	tr.NextTurn()
+
+	chat := tr.Start("chat")
+	chat.SetAttr("input_tokens", "1200")
+	chat.SetAttr("output_tokens", "300")
+	read := chat.StartChild("tool.read_file")
+	read.SetAttr("path", "a.go")
+	read.End()
+	bash := chat.StartChild("tool.bash")
+	bash.SetAttr("command", "go test ./...")
+	bash.SetError("exit status 1")
+	bash.End()
+	chat.End()
+
+	sum := tr.LastTurn()
+	if len(sum.Tools) != 2 {
+		t.Fatalf("tools = %+v, want this turn's two", sum.Tools)
+	}
+	if sum.Tools[0].Name != "read_file" || sum.Tools[0].Target != "a.go" || sum.Tools[0].Error != "" {
+		t.Errorf("tools[0] = %+v", sum.Tools[0])
+	}
+	if sum.Tools[1].Name != "bash" || sum.Tools[1].Target != "go test ./..." || sum.Tools[1].Error != "exit status 1" {
+		t.Errorf("tools[1] = %+v", sum.Tools[1])
+	}
+	if sum.InputTokens != 1200 || sum.OutputTokens != 300 {
+		t.Errorf("tokens = %d in / %d out, want 1200 / 300", sum.InputTokens, sum.OutputTokens)
+	}
+	if (*Tracer)(nil).LastTurn().Tools != nil {
+		t.Error("a nil tracer reports tools")
+	}
+}

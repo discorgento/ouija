@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"time"
 )
 
 // SubmitTool is the tool through which a model hands in a structured answer
@@ -37,12 +38,14 @@ type Engine struct {
 	tracer *Tracer
 
 	// mu guards the fields a setter may change while runs read them: the
-	// provider, the logger, the token callback and cfg's Provider/Model/Tools.
+	// provider, the logger, the token and run callbacks and cfg's
+	// Provider/Model/Tools.
 	mu       sync.RWMutex
 	provider Provider
 	cfg      *Config
 	logger   *slog.Logger
 	tokenCb  TokenCallback // streaming token callback (e.g. TUI)
+	runCb    RunCallback   // run start/end callback (e.g. CLI progress)
 
 	// Components — each owns a single responsibility.
 	doom      *DoomDetector  // doom-loop detection
@@ -176,6 +179,27 @@ func (e *Engine) SetTokenCallback(fn TokenCallback) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.tokenCb = fn
+}
+
+// RunEvent reports a Run starting (Done false) or ending (Done true, with its
+// error and duration). Label is the RunRequest's.
+type RunEvent struct {
+	Label    string
+	Done     bool
+	Err      error
+	Duration time.Duration
+}
+
+// RunCallback receives RunEvents. Runs can be concurrent (a totem's passes):
+// it must be safe for concurrent use.
+type RunCallback func(RunEvent)
+
+// SetRunCallback registers a function told when each Run starts and ends —
+// enough for a host to draw a totem's progress. Chat turns are not reported.
+func (e *Engine) SetRunCallback(fn RunCallback) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.runCb = fn
 }
 
 // SetModel changes the active model name, from the next run on.
@@ -392,8 +416,18 @@ func (e *Engine) env() RunEnv {
 // Run executes the agent loop and returns a RunResult (final text + tool metadata).
 // When Schema is set, Text is the JSON of a submit_result call.
 func (e *Engine) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
+	e.mu.RLock()
+	cb := e.runCb
+	e.mu.RUnlock()
+	start := time.Now()
+	if cb != nil {
+		cb(RunEvent{Label: req.Label})
+	}
 	msgs := []Message{{Role: RoleUser, Content: req.Prompt}}
 	res, _, err := e.runAgent(ctx, req, msgs)
+	if cb != nil {
+		cb(RunEvent{Label: req.Label, Done: true, Err: err, Duration: time.Since(start)})
+	}
 	return res, err
 }
 
