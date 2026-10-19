@@ -34,8 +34,10 @@ func TestWriteExternalModule(t *testing.T) {
 	if !strings.Contains(string(gomod), "module github.com/you/my-agent") {
 		t.Errorf("go.mod lacks module line:\n%s", gomod)
 	}
-	if !strings.Contains(string(gomod), "github.com/discorgento/ouija") {
-		t.Errorf("go.mod lacks ouija require:\n%s", gomod)
+	// A development build pins nothing (tidy takes the latest release); a
+	// release build pins itself — see TestOuijaRequire.
+	if strings.Contains(string(gomod), "v1.0.0") {
+		t.Errorf("go.mod pins a version that does not exist:\n%s", gomod)
 	}
 
 	totem, _ := os.ReadFile(filepath.Join(dir, "totems", "my-agent", "my-agent.go"))
@@ -136,6 +138,18 @@ func TestScaffoldsCompile(t *testing.T) {
 		cmd.Env = append(os.Environ(), "GOPROXY=off", "GOFLAGS=-mod=mod", "GOWORK=off")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+}
+
+func TestOuijaRequire(t *testing.T) {
+	for v, want := range map[string]string{
+		"0.0.0":     "",
+		"1.2.0":     "\nrequire github.com/discorgento/ouija v1.2.0\n",
+		"1.3.0-dev": "",
+	} {
+		if got := ouijaRequire(v); got != want {
+			t.Errorf("ouijaRequire(%q) = %q, want %q", v, got, want)
 		}
 	}
 }

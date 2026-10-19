@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+
+	"github.com/discorgento/ouija/internal/version"
 )
 
 var validName = regexp.MustCompile(`^[a-z][a-z0-9-_]{1,31}$`)
@@ -227,6 +229,16 @@ func scaffoldInternal(wd, name, summary string) error {
 	return nil
 }
 
+// ouijaRequire is the go.mod require line for the ouija release this binary
+// is, or nothing for a development build (0.0.0): pinning v1.0.0, which did
+// not exist, made `go mod tidy` fail; without a line, tidy takes the latest.
+func ouijaRequire(v string) string {
+	if v == "" || v == "0.0.0" || strings.Contains(v, "-") {
+		return ""
+	}
+	return "\nrequire github.com/discorgento/ouija v" + strings.TrimPrefix(v, "v") + "\n"
+}
+
 // scaffoldExternal writes a standalone module, then resolves deps and builds.
 func scaffoldExternal(wd, target, name, summary string) error {
 	base, err := writeExternalModule(wd, target, name, summary)
@@ -283,7 +295,7 @@ func writeExternalModule(wd, target, name, summary string) (string, error) {
 	}
 
 	files := map[string]string{
-		"go.mod": fmt.Sprintf("module %s\n\ngo 1.26\n\nrequire github.com/discorgento/ouija v1.0.0\n", module),
+		"go.mod": fmt.Sprintf("module %s\n\ngo 1.26\n%s", module, ouijaRequire(version.Version)),
 
 		filepath.Join("totems", name, name+".go"): fmt.Sprintf(`package %[1]s
 
@@ -368,6 +380,15 @@ go build -o %[2]s ./cmd/%[2]s
 
 Config comes from the shared ouija config — run `+"`ouija setup`"+` once, or
 drop a `+"`.ouija/config.json`"+` in the project you run from.
+
+## Building against a local ouija checkout
+
+To try unreleased ouija changes, point the module at your clone, then tidy:
+
+`+"```sh"+`
+go mod edit -replace github.com/discorgento/ouija=/path/to/ouija
+go mod tidy
+`+"```"+`
 `, name, bin),
 
 		// Anchored: a bare `<bin>` pattern would also ignore cmd/<bin>/,
