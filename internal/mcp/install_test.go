@@ -298,3 +298,17 @@ func readJSON(t *testing.T, path string) map[string]any {
 	}
 	return v
 }
+
+// `"mcp": null` in a harness config used to panic (assignment to a nil map).
+func TestJSONAddServerNullContainer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	if err := os.WriteFile(path, []byte(`{"mcp": null}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := jsonAddServer(path, "mcp", "ouija", map[string]any{"type": "local"}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := jsonHasServer(path, "mcp", "ouija"); err != nil || !ok {
+		t.Fatalf("server not added: %v %v", ok, err)
+	}
+}

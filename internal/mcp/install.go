@@ -250,6 +250,9 @@ func jsonAddServer(path, container, name string, entry map[string]any) error {
 		if err := json.Unmarshal(c, &servers); err != nil {
 			return fmt.Errorf("parse %s: %q is not an object: %w", path, container, err)
 		}
+		if servers == nil { // `"mcp": null` unmarshals to a nil map
+			servers = map[string]json.RawMessage{}
+		}
 	}
 	if _, exists := servers[name]; exists {
 		return nil
