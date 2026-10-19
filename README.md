@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="ouija" width="300">
+  <img src="assets/banner.svg" alt="ouija — AI agents you write in Go: several hands on the board, one answer" width="720">
 </p>
 
 <p align="center">
@@ -14,6 +14,10 @@
 An AI harness for **agents you write in Go** — a shared engine (providers,
 sandbox, cost budget, tracing, MCP export) under **totems** you own: real code
 with types, tests and golden files, not prompt files.
+
+<p align="center">
+  <img src="assets/demo.gif" alt="ouija chat: the intro, a question with an @file, the tools live, the reply and its diff, then /task drawn live and its plan" width="800">
+</p>
 
 > **Why not a prompt file?** "Do A, then verify B, then reconcile" written in
 > prose is a request the model may skip; in Go it is the next line — and you can

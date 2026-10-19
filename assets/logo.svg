@@ -1,22 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 122" role="img" aria-label="ouija planchette logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -2 128 140" role="img" aria-label="ouija: a planchette with a terminal prompt in its lens">
   <defs>
-    <linearGradient id="dp" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2f0f5c"/>
-      <stop offset="1" stop-color="#150330"/>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5fd7"/>
+      <stop offset=".55" stop-color="#af87ff"/>
+      <stop offset="1" stop-color="#8700ff"/>
     </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b1050"/>
+      <stop offset="1" stop-color="#120620"/>
+    </linearGradient>
+    <radialGradient id="lens" cx=".5" cy=".42" r=".6">
+      <stop offset="0" stop-color="#2a1a4a"/>
+      <stop offset="1" stop-color="#0c0616"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3.4"/>
+    </filter>
   </defs>
-  <!-- planchette: rounded valley at top center (horizontal tangent => no heart point) -->
-  <path fill="url(#dp)" fill-rule="evenodd"
-        d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z
-           M50 56 A17 17 0 1 0 50 90 A17 17 0 1 0 50 56 Z"/>
-  <path transform="translate(50 60) scale(0.89) translate(-50 -60)"
-        d="M21 8 C12 11 8 23 8 40 C8 64 24 93 50 116 C76 93 92 64 92 40 C92 23 88 11 79 8 C70 6 60 13 50 13 C40 13 30 6 21 8 Z"
-        fill="none" stroke="#c9a9f7" stroke-width="2.2"/>
-  <circle cx="50" cy="73" r="17" fill="none" stroke="#c9a9f7" stroke-width="2.2"/>
-  <circle cx="50" cy="73" r="12.5" fill="none" stroke="#c9a9f7" stroke-width="1.6"/>
-  <path fill="#c9a9f7" d="M50 31 a7.2 7.2 0 1 0 0 14.4 a5.4 5.4 0 1 1 0 -14.4 z"/>
-  <g fill="#c9a9f7">
-    <path d="M28 41 l1.4 3.3 3.3 1.4 -3.3 1.4 -1.4 3.3 -1.4 -3.3 -3.3 -1.4 3.3 -1.4 z"/>
-    <path d="M72 41 l1.4 3.3 3.3 1.4 -3.3 1.4 -1.4 3.3 -1.4 -3.3 -3.3 -1.4 3.3 -1.4 z"/>
-  </g>
+
+  <!-- the planchette: point up, broad round foot -->
+  <path d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"
+        fill="none" stroke="url(#edge)" stroke-width="5" stroke-opacity=".75" filter="url(#glow)"/>
+  <path fill="url(#body)" stroke="url(#edge)" stroke-width="4" stroke-linejoin="round"
+        d="M60 8 C76 21 106 50 106 81 C106 107 86 124 60 124 C34 124 14 107 14 81 C14 50 44 21 60 8 Z"/>
+
+  <!-- the lens the answer shows through: a prompt -->
+  <circle cx="60" cy="58" r="21" fill="url(#lens)" stroke="url(#edge)" stroke-width="3.5"/>
+  <circle cx="60" cy="58" r="15.5" fill="none" stroke="#af87ff" stroke-opacity=".35" stroke-width="1.2"/>
+  <path d="M51 50 L59 58 L51 66" fill="none" stroke="#ff8ae0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M62 67 H71" stroke="#c9a9ff" stroke-width="4" stroke-linecap="round"/>
+  <!-- a glint on the glass -->
+  <path d="M47 46 A16 16 0 0 1 56 41" fill="none" stroke="#ffffff" stroke-opacity=".55" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- several hands on the board, one answer -->
+  <path d="M38 99 C42 88 52 82 56 79 M82 99 C78 88 68 82 64 79 M60 104 V80" fill="none" stroke="#af87ff" stroke-opacity=".28" stroke-width="1.3" stroke-dasharray="2 3" stroke-linecap="round"/>
+  <circle cx="38" cy="99" r="5.4" fill="#ff5fd7"/>
+  <circle cx="60" cy="105" r="5.4" fill="#af87ff"/>
+  <circle cx="82" cy="99" r="5.4" fill="#8a5cff"/>
+
+  <!-- sparks -->
+  <path fill="#ffd1f4" d="M30 52 l1.3 3 3 1.3 -3 1.3 -1.3 3 -1.3 -3 -3 -1.3 3 -1.3 z"/>
+  <path fill="#d9c4ff" d="M90 52 l1.3 3 3 1.3 -3 1.3 -1.3 3 -1.3 -3 -3 -1.3 3 -1.3 z"/>
 </svg>

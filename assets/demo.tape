@@ -1,7 +1,7 @@
-# Records the chat TUI for the README: `vhs assets/demo.tape` writes
-# assets/demo.gif (https://github.com/charmbracelet/vhs). Run it from the repo
+# Records a real session of the chat: `vhs assets/demo.tape` writes
+# assets/demo-live.gif (https://github.com/charmbracelet/vhs). Run it from the repo
 # root with a configured provider (`ouija setup`); it asks one real question.
-Output assets/demo.gif
+Output assets/demo-live.gif
 
 Set Shell "bash"
 Set FontSize 15
