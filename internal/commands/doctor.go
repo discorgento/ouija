@@ -1,17 +1,22 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/mcp"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
+	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/internal/version"
 	"github.com/discorgento/ouija/registry"
 )
@@ -50,12 +55,13 @@ type report struct {
 
 // line prints "  <mark> <label>  <text>".
 func (r *report) line(mark, label, text string) {
-	fmt.Fprintf(r.w, "  %s %-*s %s\n", mark, labelWidth, label, text)
+	// text holds config values and errors from a repository or a server.
+	fmt.Fprintf(r.w, "  %s %-*s %s\n", mark, labelWidth, label, termsafe.Clean(text))
 }
 
 // detail prints a continuation line aligned under the label column.
 func (r *report) detail(text string) {
-	fmt.Fprintf(r.w, "    %-*s %s\n", labelWidth, "", text)
+	fmt.Fprintf(r.w, "    %-*s %s\n", labelWidth, "", termsafe.Clean(text))
 }
 
 func (r *report) ok(label, text string)   { r.line("✓", label, text) }
@@ -146,8 +152,42 @@ func (r *report) provider() {
 
 	if err := app.ValidateConfig(cfg); err != nil {
 		r.fail("config", err.Error())
-	} else {
-		r.ok("config", "valid")
+		return
+	}
+	r.ok("config", "valid")
+	r.providerAPI(cfg)
+}
+
+// probeModels lists the provider's models — the cheapest real call that
+// proves the key and endpoint work. A variable so tests stay off the network.
+var probeModels = func(ctx context.Context, l engine.ModelLister) ([]engine.ModelInfo, error) {
+	return l.ListModels(ctx)
+}
+
+// providerAPI checks the configured key against the provider's API: setup
+// and the pickers fall back to built-in suggestions without a word when the
+// key is wrong, so this is where a bad or revoked key shows.
+func (r *report) providerAPI(cfg *engine.Config) {
+	p, err := app.BuildProvider(cfg.Provider, cfg.APIKey)
+	if err != nil {
+		return
+	}
+	lister, ok := p.(engine.ModelLister)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	list, err := probeModels(ctx, lister)
+	switch {
+	case engine.Is(err, engine.ErrCodeAuth):
+		r.fail("provider API", err.Error()+" — check the key with `ouija setup`")
+	case err != nil:
+		r.warn("provider API", "could not list models: "+err.Error())
+	case !slices.ContainsFunc(list, func(m engine.ModelInfo) bool { return m.ID == cfg.Model }):
+		r.warn("provider API", fmt.Sprintf("reachable, but model %q is not among its %d models", cfg.Model, len(list)))
+	default:
+		r.ok("provider API", fmt.Sprintf("reachable · %s available", cfg.Model))
 	}
 }
 

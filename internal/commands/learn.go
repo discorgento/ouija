@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/discorgento/ouija/internal/knowledge"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // Learn manages project knowledge (show or save).
@@ -26,7 +27,7 @@ func Learn(args []string) error {
 			fmt.Println("No knowledge yet")
 			return nil
 		}
-		fmt.Println(known)
+		fmt.Println(termsafe.Clean(known)) // a cloned repo's file
 		return nil
 	}
 

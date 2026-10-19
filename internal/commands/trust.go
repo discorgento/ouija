@@ -8,6 +8,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // Trust implements `ouija trust [--revoke] [path]`: it trusts the project
@@ -64,7 +65,9 @@ func Trust(args []string) error {
 		fmt.Println("  It sets no security-sensitive keys.")
 	}
 	for _, k := range keys {
-		fmt.Printf("  %-13s %s\n", k, describeSensitive(k, cfg))
+		// The values come from the file under review: an escape sequence in
+		// one could erase the lines above it and hide what is granted.
+		fmt.Printf("  %-13s %s\n", k, termsafe.Clean(describeSensitive(k, cfg)))
 	}
 	if err := app.Trust(path); err != nil {
 		return err
@@ -90,6 +93,8 @@ func describeSensitive(key string, cfg *engine.Config) string {
 		return "(no bash allowlist)"
 	case "apiKey":
 		return "overrides your API key for provider " + cfg.Provider
+	case "projectRoot":
+		return fmt.Sprintf("moves the sandbox root to %q (it must stay inside the project)", cfg.ProjectRoot)
 	case "systemPrompt":
 		p := strings.Join(strings.Fields(cfg.SystemPrompt), " ")
 		if len(p) > 70 {

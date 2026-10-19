@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/discorgento/ouija/internal/app"
+	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/registry"
 )
 
@@ -96,7 +97,7 @@ func run(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.
 		b, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 	} else {
-		fmt.Fprintln(stdout, registry.Render(out))
+		fmt.Fprintln(stdout, termsafe.Clean(registry.Render(out))) // model-written text
 	}
 	tokens, steps, usd := a.Engine.Spent()
 	fmt.Fprintf(stderr, "\n%s · %d tokens · %d steps · $%.2f\n", a.Config.Model, tokens, steps, usd)

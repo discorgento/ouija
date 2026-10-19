@@ -2,10 +2,13 @@ package commands
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/discorgento/ouija/engine"
 
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 
@@ -84,6 +87,12 @@ func isolateDoctor(t *testing.T) (configDir string) {
 	t.Setenv("AppData", xdg)
 	t.Setenv("PATH", t.TempDir()) // hide `claude` so no CLI is spawned
 	t.Chdir(t.TempDir())
+	// Stay off the network: the provider API answers with the default model.
+	old := probeModels
+	probeModels = func(context.Context, engine.ModelLister) ([]engine.ModelInfo, error) {
+		return []engine.ModelInfo{{ID: "big-pickle"}}, nil
+	}
+	t.Cleanup(func() { probeModels = old })
 
 	return filepath.Join(xdg, "ouija")
 }
@@ -138,5 +147,24 @@ func TestDoctor_ReportsHarnesses(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "harnesses") {
 		t.Errorf("report is missing the harness section:\n%s", buf.String())
+	}
+}
+
+// A key the provider refuses is a problem doctor reports (setup cannot tell).
+func TestDoctor_RefusedKey(t *testing.T) {
+	configDir := isolateDoctor(t)
+	probeModels = func(context.Context, engine.ModelLister) ([]engine.ModelInfo, error) {
+		return nil, engine.ErrAuth("HTTP 401: invalid key")
+	}
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `{"apiKeys":{"opencode":"sk-bad"},"defaults":{"provider":"opencode","model":"big-pickle"}}`
+	if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := Doctor(&buf); err == nil || !strings.Contains(buf.String(), "provider API") {
+		t.Fatalf("Doctor() = %v; want the refused key reported\n%s", err, buf.String())
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/discorgento/ouija/internal/commands"
 	"github.com/discorgento/ouija/internal/knowledge"
 	"github.com/discorgento/ouija/internal/mcp"
+	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/internal/version"
 	"github.com/discorgento/ouija/registry"
 
@@ -146,7 +147,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		b, _ := json.MarshalIndent(out.Result, "", "  ")
 		fmt.Fprintln(stdout, string(b))
 	} else {
-		fmt.Fprintln(stdout, registry.Render(out.Result))
+		fmt.Fprintln(stdout, termsafe.Clean(registry.Render(out.Result))) // model-written text
 	}
 
 	tokens, steps, usd := out.Engine.Spent()
