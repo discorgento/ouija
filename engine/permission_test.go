@@ -200,3 +200,34 @@ func TestSaveConfigAtDoesNotLeakResolvedKey(t *testing.T) {
 		t.Fatal("SaveConfigAt changed the in-memory key")
 	}
 }
+
+// A project key belongs to the provider the file names: saving after a switch
+// to another provider drops it, or the next start would send it there.
+func TestSaveConfigAtDropsKeyOfOtherProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Provider = "anthropic"
+	eng := New(EngineConfig{Provider: &mockProvider{}, Config: cfg, Tracer: NewTracer(false)})
+	path := filepath.Join(t.TempDir(), "config.json")
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"provider":"openrouter","apiKey":"sk-or-client"}`)
+	if err := eng.SaveConfigAt(path); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "sk-or-client") {
+		t.Fatalf("openrouter key kept for anthropic: %s", b)
+	}
+
+	write(`{"provider":"anthropic","apiKey":"sk-ant-client"}`)
+	if err := eng.SaveConfigAt(path); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); !strings.Contains(string(b), "sk-ant-client") {
+		t.Fatalf("same-provider key dropped: %s", b)
+	}
+}

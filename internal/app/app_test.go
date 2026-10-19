@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/engine/providers"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/registry"
 )
@@ -556,5 +557,39 @@ func TestProjectConfigWithoutModelKeepsGlobalChoice(t *testing.T) {
 	}
 	if cfg.Provider != "ollama" || cfg.Model != "llama3" || len(cfg.Rules) != 1 {
 		t.Fatalf("got provider=%q model=%q rules=%v; want the global choice and the project rules", cfg.Provider, cfg.Model, cfg.Rules)
+	}
+}
+
+// keyProvider records the key it was built with.
+type keyProvider struct {
+	engine.Provider
+	name, key string
+}
+
+func (p keyProvider) Name() string { return p.name }
+
+// The project's key goes only to the provider it was resolved for; `/provider`
+// to any other provider uses that provider's global key.
+func TestProviderFactoryScopesProjectKey(t *testing.T) {
+	isolateGlobalConfig(t)
+	for _, n := range []string{"test-keyed-a", "test-keyed-b"} {
+		providers.Register(n, func(key string) engine.Provider { return keyProvider{name: n, key: key} })
+	}
+	if err := ouijaconfig.Save(&ouijaconfig.Config{APIKeys: map[string]string{
+		"test-keyed-a": "global-a", "test-keyed-b": "global-b",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	out := &Outcome{Config: &engine.Config{Provider: "test-keyed-a", APIKey: "project-a"}}
+	build := out.ProviderFactory()
+
+	for name, want := range map[string]string{"test-keyed-a": "project-a", "test-keyed-b": "global-b"} {
+		p, err := build(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.(keyProvider).key; got != want {
+			t.Errorf("%s built with key %q, want %q", name, got, want)
+		}
 	}
 }

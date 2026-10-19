@@ -212,16 +212,10 @@ func cmdChat(args []string, stderr io.Writer) int {
 	}
 
 	eng := out.Engine
-	chat.Run(eng, app.BuildProviderByName, chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath)
+	chat.Run(eng, out.ProviderFactory(), chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath)
 
-	// Chat's default trace: the whole session's span tree.
-	eng.Tracer().Render(stderr)
-
-	if *traceFile != "" {
-		if err := eng.Tracer().WritePerfettoFile(*traceFile); err != nil {
-			fmt.Fprintf(stderr, "[ouija] trace file error: %v\n", err)
-		}
-	}
+	// The whole session's span tree (each turn was also shown in the chat).
+	app.FinishTrace(eng.Tracer(), stderr, *traceFile)
 	eng.Close()
 	return 0
 }

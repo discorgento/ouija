@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -30,22 +31,23 @@ type Outcome struct {
 // Then it merges with the global ~/.config/ouija/config.json (for API keys).
 // Falls back to defaults if nothing is found.
 func DiscoverConfig(explicit string) (*engine.Config, string, error) {
-	projectCfg, cfgPath, err := findConfigFile(explicit)
+	projectCfg, cfgPath, data, err := findConfigFile(explicit)
 	if err != nil {
 		return nil, "", err
 	}
+	globalCfg, _ := ouijaconfig.Load()
 	// A discovered config may come from a cloned repository: its sensitive
 	// keys apply only once the user trusts the file (see trust.go). An
-	// explicit --config is trusted like any CLI flag.
-	if projectCfg != nil && explicit == "" && !IsTrusted(cfgPath) {
-		if keys, _ := SensitiveKeys(cfgPath); len(keys) > 0 {
+	// explicit --config is trusted like any CLI flag. The check uses the same
+	// bytes that were parsed, so the file cannot change in between.
+	if projectCfg != nil && explicit == "" && !trusted(globalCfg, cfgPath, data) {
+		if keys, _ := sensitiveKeysIn(data); len(keys) > 0 {
 			stripUntrusted(projectCfg)
 			slog.Warn("untrusted project config: ignoring "+strings.Join(keys, ", ")+
 				" — run `ouija trust` to apply them", "path", cfgPath)
 		}
 	}
 
-	globalCfg, _ := ouijaconfig.Load()
 	cfg := engine.DefaultConfig()
 	applyGlobalConfig(cfg, globalCfg)
 	applyProjectConfig(cfg, projectCfg, cfgPath, explicit != "")
@@ -58,15 +60,23 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 
 // findConfigFile walks up from the current directory looking for a project
 // config file (.ouija/config.json, .ouija.json, ouija.json). If explicit is
-// non-empty, it loads that path directly instead. Returns (nil, "", nil) when
+// non-empty, it loads that path directly instead. It returns the parsed
+// config, its path and the bytes it was parsed from; (nil, "", nil, nil) when
 // no project config is found.
-func findConfigFile(explicit string) (*engine.Config, string, error) {
-	if explicit != "" {
-		c, err := LoadProjectConfig(explicit)
+func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
+	load := func(p string) (*engine.Config, string, []byte, error) {
+		b, err := os.ReadFile(p)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
-		return c, explicit, nil
+		c, err := parseProjectConfig(b)
+		if err != nil {
+			return nil, "", nil, fmt.Errorf("%s: %w", p, err)
+		}
+		return c, p, b, nil
+	}
+	if explicit != "" {
+		return load(explicit)
 	}
 
 	dir, _ := os.Getwd()
@@ -76,11 +86,7 @@ func findConfigFile(explicit string) (*engine.Config, string, error) {
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
 				// A broken file is an error: silently skipping it would run
 				// with the parent's or the global config instead.
-				c, err := LoadProjectConfig(p)
-				if err != nil {
-					return nil, "", fmt.Errorf("%s: %w", p, err)
-				}
-				return c, p, nil
+				return load(p)
 			}
 		}
 		parent := filepath.Dir(dir)
@@ -89,7 +95,7 @@ func findConfigFile(explicit string) (*engine.Config, string, error) {
 		}
 		dir = parent
 	}
-	return nil, "", nil
+	return nil, "", nil, nil
 }
 
 // applyGlobalConfig merges the user's global config (~/.config/ouija/config.json)
@@ -250,11 +256,24 @@ func BuildProvider(name, apiKey string) (engine.Provider, error) {
 }
 
 // BuildProviderByName resolves the API key for name from the global config and
-// builds the provider. It is the name-only variant used by the interactive
-// chat's `/provider` switch, which has no project config key at hand.
+// builds the provider.
 func BuildProviderByName(name string) (engine.Provider, error) {
 	globalCfg, _ := ouijaconfig.Load()
 	return BuildProvider(name, resolveAPIKey(name, globalCfg, nil))
+}
+
+// ProviderFactory builds providers for the chat's `/provider` switch. The
+// project's own key belongs to the provider it was resolved for: switching
+// back to that provider reuses it, any other takes its key from the global
+// config (a client key sent to another vendor would only fail auth).
+func (o *Outcome) ProviderFactory() func(name string) (engine.Provider, error) {
+	provider, key := o.Config.Provider, o.Config.APIKey
+	return func(name string) (engine.Provider, error) {
+		if name == provider {
+			return BuildProvider(name, key)
+		}
+		return BuildProviderByName(name)
+	}
 }
 
 // Run discovers config, builds the engine, initialises the totem, runs it,
@@ -277,18 +296,21 @@ func Run(ctx context.Context, name string, args registry.Args, configPath string
 	res, runErr := registry.Invoke(ctx, out.Engine, mod, args)
 	out.Result = res
 
-	// Render trace tree to stderr (tracer no-op when inactive).
-	out.Engine.Tracer().Render(os.Stderr)
-
-	// Export Perfetto JSON when a file path is given.
-	if traceFile != "" {
-		if err := out.Engine.Tracer().WritePerfettoFile(traceFile); err != nil {
-			fmt.Fprintf(os.Stderr, "[ouija] trace file error: %v\n", err)
-		}
-	}
-
+	FinishTrace(out.Engine.Tracer(), os.Stderr, traceFile)
 	out.Engine.Close()
 	return out, runErr
+}
+
+// FinishTrace renders the span tree to w and, when file is set, writes the
+// Perfetto export there. Both are no-ops on an inactive tracer.
+func FinishTrace(t *engine.Tracer, w io.Writer, file string) {
+	t.Render(w)
+	if file == "" {
+		return
+	}
+	if err := t.WritePerfettoFile(file); err != nil {
+		fmt.Fprintf(w, "[ouija] trace file: %v\n", err)
+	}
 }
 
 // SetupEngine discovers config, applies env overrides, and builds the engine.

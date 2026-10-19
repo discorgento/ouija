@@ -74,7 +74,10 @@ edit can be as small as:
 }
 ```
 
-The `apiKey` field is only written when it differs from the global one.
+The `apiKey` field is only written when it differs from the global one. It
+belongs to the project's `provider`: switching provider in the chat
+(`/provider`) uses the new provider's global key, and saving that switch drops
+the old provider's `apiKey` from the file.
 Optional sections (`permission`, `tools`, `modelSuggestions`, `streamTimeout`)
 are omitted when unset.
 

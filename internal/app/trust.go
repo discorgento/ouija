@@ -30,28 +30,34 @@ var sensitiveKeys = []string{"permission", "tools", "apiKey", "systemPrompt"}
 // FindProjectConfig returns the project config path discovery would load from
 // the current directory, "" when there is none.
 func FindProjectConfig() (string, error) {
-	_, path, err := findConfigFile("")
+	_, path, _, err := findConfigFile("")
 	return path, err
 }
 
 // IsTrusted reports whether the config file at path was trusted by the user
 // and is unchanged since.
 func IsTrusted(path string) bool {
-	global, _ := ouijaconfig.Load()
-	if global == nil {
-		return false
-	}
-	digest, err := fileDigest(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
+	global, _ := ouijaconfig.Load()
+	return trusted(global, path, b)
+}
+
+// trusted reports whether data, the contents of the file at path, is what
+// the user trusted.
+func trusted(global *ouijaconfig.Config, path string, data []byte) bool {
+	if global == nil {
+		return false
+	}
 	want, ok := global.TrustedProjects[trustKey(path)]
-	return ok && want == digest
+	return ok && want == digest(data)
 }
 
 // Trust records the current contents of the config file at path as trusted.
 func Trust(path string) error {
-	digest, err := fileDigest(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -65,7 +71,7 @@ func Trust(path string) error {
 	if global.TrustedProjects == nil {
 		global.TrustedProjects = make(map[string]string)
 	}
-	global.TrustedProjects[trustKey(path)] = digest
+	global.TrustedProjects[trustKey(path)] = digest(b)
 	return ouijaconfig.Save(global)
 }
 
@@ -90,6 +96,11 @@ func SensitiveKeys(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return sensitiveKeysIn(b)
+}
+
+// sensitiveKeysIn lists the sensitive keys a config file's contents set.
+func sensitiveKeysIn(b []byte) ([]string, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, err
@@ -139,13 +150,9 @@ func stripUntrusted(c *engine.Config) {
 	c.SystemPrompt = engine.DefaultConfig().SystemPrompt
 }
 
-func fileDigest(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // trustKey is the canonical path trust is recorded under: absolute, with

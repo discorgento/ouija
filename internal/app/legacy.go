@@ -11,22 +11,27 @@ import (
 // configs written before per-totem settings over to the current one (see
 // migrateLegacyTotemKeys). Saving the result writes the current layout.
 func LoadProjectConfig(path string) (*engine.Config, error) {
-	cfg, err := engine.LoadConfig(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	migrateLegacyTotemKeys(path, cfg)
+	return parseProjectConfig(b)
+}
+
+// parseProjectConfig is LoadProjectConfig on the file's contents.
+func parseProjectConfig(b []byte) (*engine.Config, error) {
+	cfg, err := engine.ParseConfig(b)
+	if err != nil {
+		return nil, err
+	}
+	migrateLegacyTotemKeys(b, cfg)
 	return cfg, nil
 }
 
 // migrateLegacyTotemKeys moves the top-level `passes` and `dimensions` keys
 // into `totems.task`, and `passes` into `totems.doc` too (both totems read
 // it), unless the file already has those sections.
-func migrateLegacyTotemKeys(path string, cfg *engine.Config) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
+func migrateLegacyTotemKeys(b []byte, cfg *engine.Config) {
 	var legacy struct {
 		Passes     *int     `json:"passes"`
 		Dimensions []string `json:"dimensions"`

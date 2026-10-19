@@ -196,6 +196,11 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ParseConfig(b)
+}
+
+// ParseConfig is LoadConfig on a file's contents already read.
+func ParseConfig(b []byte) (*Config, error) {
 	c := DefaultConfig()
 	if err := json.Unmarshal(b, c); err != nil {
 		return nil, err

@@ -304,21 +304,24 @@ func (e *Engine) SaveConfigAt(path string) error {
 	c := *e.cfg // runs read the shared config without the lock: never edit it
 	e.mu.RUnlock()
 	c.ProjectRoot = "."
-	c.APIKey = apiKeyOnDisk(path)
+	c.APIKey = apiKeyOnDisk(path, c.Provider)
 	return c.Save(path)
 }
 
-// apiKeyOnDisk returns the apiKey a config file declares, "" when the file is
-// missing, unreadable or has none.
-func apiKeyOnDisk(path string) string {
+// apiKeyOnDisk returns the apiKey a config file declares for provider, ""
+// when the file is missing, unreadable or has none. A key the file declares
+// for another provider is dropped: after a provider switch it would be sent
+// to the new provider on the next start.
+func apiKeyOnDisk(path, provider string) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
 	var f struct {
-		APIKey string `json:"apiKey"`
+		Provider string `json:"provider"`
+		APIKey   string `json:"apiKey"`
 	}
-	if json.Unmarshal(b, &f) != nil {
+	if json.Unmarshal(b, &f) != nil || (f.Provider != "" && f.Provider != provider) {
 		return ""
 	}
 	return f.APIKey

@@ -17,7 +17,7 @@ import (
 
 // Run starts the chat TUI. It blocks until the user exits.
 // The engine must be configured and ready; the system prompt is pre-built.
-// buildProvider is injected by the entrypoint (app.BuildProviderByName) so
+// buildProvider is injected by the entrypoint (Outcome.ProviderFactory) so
 // tests can drive /provider with a stub.
 func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath string) {
 	// Silence engine progress — the TUI owns the visual.
