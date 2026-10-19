@@ -11,6 +11,11 @@ import (
 
 const maxRetries = 3
 
+// maxRetryAfter caps a server-suggested wait. A Retry-After of an hour would
+// otherwise park the run, silently, until its context times out; past the cap
+// it is better to fail and let the user decide.
+const maxRetryAfter = 60 * time.Second
+
 // retryAfter parses a Retry-After header value (seconds or HTTP-date).
 // Returns 0 if the header is absent or unparseable.
 func retryAfter(resp *http.Response) time.Duration {
@@ -35,10 +40,11 @@ func retryAfter(resp *http.Response) time.Duration {
 
 // backoff returns a jittered exponential backoff for the given attempt.
 // Base delay is 1s; each attempt doubles (1s, 2s, 4s).
-// If retryAfter > 0, it takes precedence (honours server-suggested wait).
+// If retryAfter > 0, it takes precedence (honours server-suggested wait),
+// capped at maxRetryAfter.
 func backoff(attempt int, retryAfterDur time.Duration) time.Duration {
 	if retryAfterDur > 0 {
-		return retryAfterDur
+		return min(retryAfterDur, maxRetryAfter)
 	}
 	// Exponential: 1s, 2s, 4s, capped at attempt 3 (max 4s).
 	base := time.Duration(1<<uint(min(attempt-1, 3))) * time.Second
