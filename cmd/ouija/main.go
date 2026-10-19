@@ -50,8 +50,6 @@ func help() string {
 	b.WriteString("                   ouija chat\n")
 	b.WriteString("      learn      Save/show knowledge about the project\n")
 	b.WriteString("                   ouija learn \"fact\"\n")
-	b.WriteString("      task       Analyze a task and produce a plan\n")
-	b.WriteString("                   ouija task \"description\"\n")
 
 	b.WriteString("\n  ◆ Harnesses\n")
 	b.WriteString("      mcp        Serve/connect the MCP server for any agent\n")
