@@ -1,6 +1,8 @@
 package providers
 
 import (
+	"context"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -117,5 +119,56 @@ func TestCircuitBreakerStateString(t *testing.T) {
 		if got := tt.s.String(); got != tt.want {
 			t.Errorf("CircuitState(%d).String() = %q, want %q", tt.s, got, tt.want)
 		}
+	}
+}
+
+// Half-open lets one probe through at a time; an abandoned (cancelled) probe
+// frees the slot without counting a failure.
+func TestCircuitBreakerHalfOpenSingleProbe(t *testing.T) {
+	cb := NewCircuitBreaker()
+	t0 := time.Now()
+	for range cb.maxFailures {
+		cb.FailureAt(t0)
+	}
+	later := t0.Add(cb.openTimeout)
+	if !cb.AllowAt(later) {
+		t.Fatal("no probe after the open timeout")
+	}
+	if cb.AllowAt(later) {
+		t.Fatal("a second request passed while the probe is in flight")
+	}
+	cb.Abandon()
+	if cb.State() != CircuitHalfOpen || !cb.AllowAt(later) {
+		t.Fatal("an abandoned probe must free the slot without reopening")
+	}
+}
+
+// A cancelled request is not a provider failure: it used to open the circuit.
+func TestRoundTripCancelIsNotAFailure(t *testing.T) {
+	cb := NewCircuitBreaker()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, r.Context().Err()
+	})}
+	for range cb.maxFailures + 1 {
+		_, _ = retryableRoundTrip(ctx, client, "POST", "http://x", nil, nil, cb)
+	}
+	if cb.State() != CircuitClosed {
+		t.Fatalf("circuit %v after cancelled requests, want closed", cb.State())
+	}
+}
+
+// A Retry-After beyond the cap is answered at once, not slept on and retried.
+func TestRoundTripRetryAfterBeyondCap(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: http.NoBody,
+			Header: http.Header{"Retry-After": []string{"3600"}}, Request: r}, nil
+	})}
+	resp, err := retryableRoundTrip(context.Background(), client, "POST", "http://x", nil, nil, nil)
+	if err != nil || resp.StatusCode != http.StatusTooManyRequests || calls != 1 {
+		t.Fatalf("calls=%d err=%v; want one call returning the 429", calls, err)
 	}
 }

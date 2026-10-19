@@ -107,8 +107,10 @@ func chatOpenAICompat(ctx context.Context, client *Client, name, baseURL, apiKey
 			body["response_format"] = map[string]any{
 				"type": "json_schema",
 				"json_schema": map[string]any{
-					"name":   "response",
-					"schema": req.Schema,
+					"name": "response",
+					// Closed objects: OpenAI (and Azure behind OpenRouter)
+					// reject a nested object without additionalProperties.
+					"schema": outputSchema(req.Schema),
 				},
 			}
 		} else if len(req.Tools) > 0 {
@@ -201,17 +203,21 @@ func chatOpenAICompat(ctx context.Context, client *Client, name, baseURL, apiKey
 				}
 
 				for _, tc := range choice.Delta.ToolCalls {
-					if tc.ID != "" {
-						toolByIndex[tc.Index] = &oaiTool{
-							ID:   tc.ID,
-							Name: tc.Function.Name,
+					// A new index opens a call; later chunks for it only add
+					// to it — some backends repeat the id on every chunk, and
+					// replacing the call kept only the last argument fragment.
+					tb, ok := toolByIndex[tc.Index]
+					if !ok {
+						if tc.ID == "" {
+							continue
 						}
+						tb = &oaiTool{ID: tc.ID}
+						toolByIndex[tc.Index] = tb
 					}
-					if tc.Function.Arguments != "" {
-						if tb, ok := toolByIndex[tc.Index]; ok {
-							tb.Args.WriteString(tc.Function.Arguments)
-						}
+					if tb.Name == "" {
+						tb.Name = tc.Function.Name
 					}
+					tb.Args.WriteString(tc.Function.Arguments)
 				}
 
 				if choice.FinishReason != nil {
@@ -270,10 +276,13 @@ func oaiMessages(system string, msgs []engine.Message) []map[string]any {
 			out = append(out, map[string]any{"role": "user", "content": m.Content})
 		case engine.RoleAssistant:
 			am := map[string]any{"role": "assistant"}
-			if m.Content != "" {
+			switch {
+			case m.Content != "":
 				am["content"] = m.Content
-			} else {
-				am["content"] = nil
+			case len(m.ToolCalls) > 0:
+				am["content"] = nil // allowed alongside tool_calls
+			default:
+				am["content"] = emptyTurn // null with no tool_calls is a 400
 			}
 			if len(m.ToolCalls) > 0 {
 				var tcs []map[string]any

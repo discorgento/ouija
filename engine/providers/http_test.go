@@ -2,6 +2,7 @@ package providers
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,5 +72,22 @@ func TestNewClientHasNoTotalTimeout(t *testing.T) {
 	tr, ok := c.HTTP.Transport.(*http.Transport)
 	if !ok || tr.ResponseHeaderTimeout != time.Minute {
 		t.Fatalf("transport = %#v; want ResponseHeaderTimeout = 1m", c.HTTP.Transport)
+	}
+}
+
+func TestErrorDetail(t *testing.T) {
+	// OpenRouter wraps the upstream error (here the doc totem's real 400).
+	openRouter := `{"error":{"message":"Provider returned error","code":400,"metadata":{"raw":"{\n  \"error\": {\n    \"message\": \"Invalid schema for response_format 'response'\",\n    \"type\": \"invalid_request_error\"\n  }\n}","provider_name":"Azure"}},"user_id":"user_x"}`
+	for body, want := range map[string]string{
+		openRouter: "Provider returned error: Invalid schema for response_format 'response'",
+		`{"type":"error","error":{"type":"FreeTierError","message":"use OpenCode"}}`: "use OpenCode",
+		`{"error":"model not found"}`: "model not found",
+		`{"message":"rate limited"}`:  "rate limited",
+		"plain text":                  "plain text",
+		strings.Repeat("x", 600):      strings.Repeat("x", 500) + "…",
+	} {
+		if got := errorDetail(body); got != want {
+			t.Errorf("errorDetail(%.40q) = %q, want %q", body, got, want)
+		}
 	}
 }

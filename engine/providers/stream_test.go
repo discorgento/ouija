@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,5 +72,68 @@ func TestStreamsStopWhenTheConsumerBreaks(t *testing.T) {
 				break
 			}
 		}()
+	}
+}
+
+// response_format carries the closed schema: OpenAI (and Azure via
+// OpenRouter) reject a nested object without additionalProperties: false —
+// the doc totem's reconcile failed with a 400 on every OpenAI model.
+func TestOpenAIResponseFormatClosesObjects(t *testing.T) {
+	o := NewOpenAI("k")
+	var body map[string]any
+	o.client.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &body)
+		return &http.Response{StatusCode: http.StatusBadRequest, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}, Request: r}, nil
+	})
+	section := map[string]any{"type": "object", "properties": map[string]any{"heading": map[string]any{"type": "string"}}}
+	schema := map[string]any{"type": "object", "properties": map[string]any{
+		"sections": map[string]any{"type": "array", "items": section},
+	}}
+	for range o.Chat(context.Background(), engine.ChatRequest{Model: "m", Schema: schema}) {
+	}
+	js, _ := body["response_format"].(map[string]any)["json_schema"].(map[string]any)
+	got, _ := js["schema"].(map[string]any)
+	items := got["properties"].(map[string]any)["sections"].(map[string]any)["items"].(map[string]any)
+	if got["additionalProperties"] != false || items["additionalProperties"] != false {
+		t.Fatalf("objects not closed: %v", got)
+	}
+}
+
+// The real API opens a tool_use block with "input":{} and streams the
+// arguments as input_json_delta fragments; they used to be appended to the
+// {} ("{}{...}"), so every tool ran with no arguments.
+func TestAnthropicToolInputFromDeltas(t *testing.T) {
+	a := NewAnthropic("k")
+	sseServer(a.client, "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"read_file\",\"input\":{}}}\n\n"+
+		"event: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\"}}\n\n"+
+		"event: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"a.go\\\"}\"}}\n\n"+
+		"event: content_block_stop\ndata: {\"index\":0}\n\n"+
+		"event: content_block_start\ndata: {\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"list_dir\",\"input\":{\"path\":\".\"}}}\n\n"+
+		"event: content_block_stop\ndata: {\"index\":1}\n\n"+
+		"event: message_stop\ndata: {}\n\n")
+	resp, err := engine.CollectStream(a.Chat(context.Background(), engine.ChatRequest{Model: "m"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 2 || resp.ToolCalls[0].Input["path"] != "a.go" || resp.ToolCalls[1].Input["path"] != "." {
+		t.Fatalf("tool calls = %+v; want path a.go from the deltas and . from the start block", resp.ToolCalls)
+	}
+}
+
+// Tool-call arguments accumulate per index even when a backend repeats the id
+// on every chunk, and `data:` without a space is still an event.
+func TestOpenAIRepeatedIDAndCompactSSE(t *testing.T) {
+	o := NewOpenAI("k")
+	sseServer(o.client, "data:{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\n"+
+		"data:{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"arguments\":\"\\\"a.go\\\"}\"}}]}}]}\n\n"+
+		"data:{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"+
+		"data:[DONE]\n\n")
+	resp, err := engine.CollectStream(o.Chat(context.Background(), engine.ChatRequest{Model: "m"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.ToolCalls) != 1 || resp.ToolCalls[0].Input["path"] != "a.go" || resp.ToolCalls[0].Name != "read_file" {
+		t.Fatalf("tool calls = %+v; want read_file{path: a.go}", resp.ToolCalls)
 	}
 }

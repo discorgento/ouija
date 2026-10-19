@@ -88,9 +88,10 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 		}
 
 		type antTool struct {
-			ID   string
-			Name string
-			Args []byte
+			ID    string
+			Name  string
+			Start []byte // the start block's input: always {} when deltas follow
+			Args  []byte // the input_json_delta fragments
 		}
 		toolBlocks := make(map[int]*antTool)
 		var usage engine.Usage
@@ -147,9 +148,9 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 					}
 					if cbs.Block.Type == "tool_use" {
 						toolBlocks[cbs.Index] = &antTool{
-							ID:   cbs.Block.ID,
-							Name: cbs.Block.Name,
-							Args: []byte(cbs.Block.Input),
+							ID:    cbs.Block.ID,
+							Name:  cbs.Block.Name,
+							Start: []byte(cbs.Block.Input),
 						}
 					}
 
@@ -184,8 +185,12 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 						return nil
 					}
 					if tb, ok := toolBlocks[cbs.Index]; ok {
+						raw := tb.Args
+						if len(raw) == 0 { // no deltas: the start block held the whole input
+							raw = tb.Start
+						}
 						var input map[string]any
-						if err := json.Unmarshal(tb.Args, &input); err != nil {
+						if err := json.Unmarshal(raw, &input); err != nil {
 							input = map[string]any{}
 						}
 						if !yield(engine.StreamEvent{
@@ -281,6 +286,9 @@ func antMessages(msgs []engine.Message) []map[string]any {
 					"type": "tool_use", "id": tc.ID, "name": tc.Name, "input": tc.Input,
 				})
 			}
+			if len(blocks) == 0 { // an empty turn (e.g. all thinking): null content is a 400
+				blocks = append(blocks, map[string]any{"type": "text", "text": emptyTurn})
+			}
 			out = append(out, map[string]any{"role": "assistant", "content": blocks})
 		case engine.RoleTool:
 			pending = append(pending, map[string]any{
@@ -297,7 +305,8 @@ func antMessages(msgs []engine.Message) []map[string]any {
 // ask for (4096) would cut answers short; max_tokens is a ceiling, not spend.
 const minMaxTokens = 16000
 
-// outputSchema adapts a JSON Schema to what structured outputs accept: every
+// outputSchema adapts a JSON Schema to what structured outputs accept (both
+// Anthropic's output_config.format and OpenAI's response_format): every
 // object closed with additionalProperties: false (required), and the
 // constraints they reject — numeric bounds, string lengths, array sizes —
 // removed. Property names are never taken for schema keywords.

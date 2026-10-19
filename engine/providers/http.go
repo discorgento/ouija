@@ -41,7 +41,7 @@ func retryAfter(resp *http.Response) time.Duration {
 // backoff returns a jittered exponential backoff for the given attempt.
 // Base delay is 1s; each attempt doubles (1s, 2s, 4s).
 // If retryAfter > 0, it takes precedence (honours server-suggested wait),
-// capped at maxRetryAfter.
+// capped at maxRetryAfter (the caller does not retry past the cap at all).
 func backoff(attempt int, retryAfterDur time.Duration) time.Duration {
 	if retryAfterDur > 0 {
 		return min(retryAfterDur, maxRetryAfter)
@@ -85,17 +85,29 @@ func retryableRoundTrip(ctx context.Context, client *http.Client, method, url st
 			if attempt < maxRetries && sleep(ctx, backoff(attempt, 0)) {
 				continue
 			}
-			if cb != nil {
+			// A cancelled call (Esc, the idle watchdog) says nothing about
+			// the provider: counting it opened the circuit on a healthy one.
+			if cb != nil && ctx.Err() != nil {
+				cb.Abandon()
+			} else if cb != nil {
 				cb.Failure()
 			}
 			return nil, err
 		}
 
-		if isRetryableStatus(resp.StatusCode) && attempt < maxRetries {
-			d := backoff(attempt, retryAfter(resp))
-			if sleep(ctx, d) {
+		// A server asking for a longer wait than we would sleep is not
+		// retried: sleeping the cap and failing anyway only adds minutes.
+		if ra := retryAfter(resp); isRetryableStatus(resp.StatusCode) && attempt < maxRetries && ra <= maxRetryAfter {
+			if sleep(ctx, backoff(attempt, ra)) {
 				resp.Body.Close()
 				continue
+			}
+			if ctx.Err() != nil {
+				resp.Body.Close()
+				if cb != nil {
+					cb.Abandon()
+				}
+				return nil, ctx.Err()
 			}
 		}
 

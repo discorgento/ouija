@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,11 @@ func NewClient(timeout time.Duration) *Client {
 	}
 }
 
+// emptyTurn stands in for an assistant turn that produced no text and no tool
+// calls: both APIs reject such a message, which would fail every later call of
+// the conversation.
+const emptyTurn = "(no output)"
+
 // errStopped ends a stream whose consumer stopped iterating; it is never
 // yielded (a range-over-func body that returned false must not be called
 // again).
@@ -44,12 +50,48 @@ var errStopped = errors.New("stream consumer stopped")
 // errors (a missing or refused key, or a plan that does not cover this use),
 // so callers can tell them from transient failures.
 func statusError(prefix string, code int, body string) error {
-	msg := fmt.Sprintf("%sHTTP %d: %s", prefix, code, body)
+	msg := fmt.Sprintf("%sHTTP %d: %s", prefix, code, errorDetail(body))
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		return engine.ErrAuth(msg)
 	}
 	// Retryable statuses (429, 5xx) were already retried by the client.
 	return engine.ErrProvider(msg)
+}
+
+// errorDetail is the readable reason in an error response body: the
+// `error.message` the providers send (with the upstream one OpenRouter wraps
+// in metadata.raw, when present), else the body cut to a sane length — not a
+// page of JSON with request metadata.
+func errorDetail(body string) string {
+	var e struct {
+		Error   json.RawMessage `json:"error"`
+		Message string          `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &e) == nil {
+		var obj struct {
+			Message  string `json:"message"`
+			Metadata struct {
+				Raw string `json:"raw"`
+			} `json:"metadata"`
+		}
+		var str string
+		switch {
+		case json.Unmarshal(e.Error, &obj) == nil && obj.Message != "":
+			if upstream := errorDetail(obj.Metadata.Raw); obj.Metadata.Raw != "" && upstream != obj.Metadata.Raw {
+				return obj.Message + ": " + upstream
+			}
+			return obj.Message
+		case json.Unmarshal(e.Error, &str) == nil && str != "":
+			return str
+		case e.Message != "":
+			return e.Message
+		}
+	}
+	const maxBody = 500
+	if len(body) > maxBody {
+		return strings.ToValidUTF8(body[:maxBody], "") + "…"
+	}
+	return body
 }
 
 // RoundTrip performs the request with retries and circuit breaking.
@@ -137,11 +179,13 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 			eventType = ""
 			dataBuf.Reset()
 
-		case strings.HasPrefix(line, "event: "):
-			eventType = strings.TrimPrefix(line, "event: ")
+		// The space after the colon is optional in SSE (`data:{…}`); servers
+		// that omit it had every event silently dropped.
+		case strings.HasPrefix(line, "event:"):
+			eventType = strings.TrimPrefix(strings.TrimPrefix(line, "event:"), " ")
 
-		case strings.HasPrefix(line, "data: "):
-			data := strings.TrimPrefix(line, "data: ")
+		case strings.HasPrefix(line, "data:"):
+			data := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
 			if dataBuf.Len() > 0 {
 				dataBuf.WriteByte('\n')
 			}

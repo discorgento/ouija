@@ -44,6 +44,7 @@ type CircuitBreaker struct {
 	state       CircuitState
 	failures    int
 	lastFailure time.Time
+	probeSince  time.Time // half-open: when the one probe was let through (zero = none)
 
 	// Configuration.
 	maxFailures int           // consecutive failures before opening (default: 3)
@@ -74,10 +75,17 @@ func (cb *CircuitBreaker) AllowAt(now time.Time) bool {
 	case CircuitClosed:
 		return true
 	case CircuitHalfOpen:
+		// One probe at a time; a probe that never reported back (its caller
+		// vanished) stops blocking after openTimeout.
+		if !cb.probeSince.IsZero() && now.Sub(cb.probeSince) < cb.openTimeout {
+			return false
+		}
+		cb.probeSince = now
 		return true
 	case CircuitOpen:
 		if now.Sub(cb.lastFailure) >= cb.openTimeout {
 			cb.state = CircuitHalfOpen
+			cb.probeSince = now
 			return true
 		}
 		return false
@@ -93,9 +101,19 @@ func (cb *CircuitBreaker) Success() {
 	defer cb.mu.Unlock()
 
 	cb.failures = 0
+	cb.probeSince = time.Time{}
 	if cb.state == CircuitHalfOpen {
 		cb.state = CircuitClosed
 	}
+}
+
+// Abandon reports a request that ended without a verdict on the provider
+// (the caller cancelled it): no failure is counted, and a half-open probe
+// slot is freed for the next request.
+func (cb *CircuitBreaker) Abandon() {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.probeSince = time.Time{}
 }
 
 // Failure reports a failed request. If the failure threshold is reached,
@@ -111,6 +129,7 @@ func (cb *CircuitBreaker) FailureAt(now time.Time) {
 
 	cb.failures++
 	cb.lastFailure = now
+	cb.probeSince = time.Time{}
 	switch cb.state {
 	case CircuitClosed:
 		if cb.failures >= cb.maxFailures {

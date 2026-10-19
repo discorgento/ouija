@@ -38,3 +38,17 @@ func TestOAIMessagesRolesAndSystem(t *testing.T) {
 		t.Fatalf("tool result mapped incorrectly: %#v", last)
 	}
 }
+
+// An assistant turn with no text and no tool calls must not be sent empty:
+// Anthropic and OpenAI reject it, failing every later call of the session.
+func TestEmptyAssistantTurn(t *testing.T) {
+	msgs := []engine.Message{{Role: engine.RoleUser, Content: "hi"}, {Role: engine.RoleAssistant}}
+	ant := antMessages(msgs)
+	if blocks, _ := ant[1]["content"].([]map[string]any); len(blocks) == 0 {
+		t.Fatalf("anthropic: empty assistant content %v", ant[1])
+	}
+	oai := oaiMessages("", msgs)
+	if oai[1]["content"] == nil {
+		t.Fatalf("openai: null assistant content with no tool calls: %v", oai[1])
+	}
+}

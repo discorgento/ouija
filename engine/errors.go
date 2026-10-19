@@ -8,7 +8,7 @@ type ErrorCode string
 const (
 	ErrCodeConfig   ErrorCode = "CONFIG"   // invalid config (missing field, bad value)
 	ErrCodeAuth     ErrorCode = "AUTH"     // API key missing/invalid
-	ErrCodeProvider ErrorCode = "PROVIDER" // provider not registered / init failed
+	ErrCodeProvider ErrorCode = "PROVIDER" // the provider refused the request (HTTP status, error event, refusal)
 	ErrCodeBudget   ErrorCode = "BUDGET"   // token/cost budget exceeded
 	ErrCodeNetwork  ErrorCode = "NETWORK"  // transport error (DNS, refused connection), already retried
 	ErrCodeStream   ErrorCode = "STREAM"   // a streamed reply broke off or went silent mid-way: retryable
