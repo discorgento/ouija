@@ -289,7 +289,7 @@ func cmdChat(args []string, stderr io.Writer) int {
 	}
 
 	eng := out.Engine
-	chat.Run(eng, out.ProviderFactory(), chatSystemPrompt(out.Config, knowledge.Load(".")), out.ConfigPath, chat.Options{Continue: *cont})
+	chat.Run(eng, out.ProviderFactory(), chatSystemPrompt(out.Config, knowledge.Load(cmp.Or(out.Config.ProjectRoot, "."))), out.ConfigPath, chat.Options{Continue: *cont})
 
 	// The whole session's span tree (each turn was also shown in the chat).
 	app.FinishTrace(eng.Tracer(), stderr, *traceFile)

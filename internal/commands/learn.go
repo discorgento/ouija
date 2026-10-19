@@ -21,9 +21,10 @@ func Learn(args []string) error {
 		return app.ErrUsage // flag already printed why
 	}
 	rest := fs.Args()
+	root := projectRoot()
 
 	if len(rest) == 0 {
-		known := knowledge.Load(".")
+		known := knowledge.Load(root)
 		if known == "" {
 			fmt.Println("No knowledge yet")
 			return nil
@@ -33,10 +34,20 @@ func Learn(args []string) error {
 	}
 
 	fact := strings.Join(rest, " ")
-	if err := knowledge.Save(".", fact); err != nil {
+	if err := knowledge.Save(root, fact); err != nil {
 		return fmt.Errorf("cannot save knowledge: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "✓ Learned: %s\n", fact)
-	fmt.Fprintf(os.Stderr, "  → %s\n", filepath.Join(".", knowledge.FileName))
+	fmt.Fprintf(os.Stderr, "  → %s\n", filepath.Join(root, knowledge.FileName))
 	return nil
+}
+
+// projectRoot is the root of the project the current directory belongs to —
+// where the chat and the task totem read the knowledge from — or "." when no
+// project config is found (a subdirectory used to get its own docs/).
+func projectRoot() string {
+	if cfg, _, err := app.DiscoverConfig(""); err == nil && cfg.ProjectRoot != "" {
+		return cfg.ProjectRoot
+	}
+	return "."
 }
