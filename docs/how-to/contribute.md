@@ -209,14 +209,19 @@ There is **no version to edit anywhere** — the git tag is the version:
 2. [`release-please`](https://github.com/googleapis/release-please) opens a
    *release PR* with the bump, the new `CHANGELOG.md` section and the fallback
    in `internal/version/version.go`.
+   The release workflow also dispatches CI on that PR: GitHub starts no
+   workflow for a push made with the workflow's own token, and `main` requires
+   CI's checks to merge.
 3. Merging that PR creates the tag `vX.Y.Z` and the GitHub Release.
-4. The same workflow cross-compiles `make dist` and attaches the archives.
+4. The same workflow re-runs the gate on the tag, cross-compiles `make dist`,
+   smoke-tests the archives (checksums, the binary's `version` against the
+   tag), attests their provenance and attaches them.
 
 The workflow lives in `.github/workflows/release.yml`; config in
 `release-please-config.json` + `.release-please-manifest.json`. The manifest
-starts at `0.0.0`, which release-please treats as *no release yet* — so the
-first release takes the tool's default (`1.0.0`); every release after that is
-a SemVer bump of the previous tag.
+starts at `0.0.0`, and `bump-minor-pre-major` keeps ouija below 1.0 while its
+API settles: until then a breaking change bumps the minor (`0.1.0` → `0.2.0`)
+and a fix the patch. Reaching `1.0.0` is a decision, made with `release-as`.
 
 ## Documentation
 
