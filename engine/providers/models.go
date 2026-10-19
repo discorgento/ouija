@@ -89,28 +89,8 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]engine.ModelInfo, error) 
 // anthropicModelsURL is the models endpoint (a variable for tests).
 var anthropicModelsURL = "https://api.anthropic.com/v1/models"
 
-func (o *OpenAI) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
-	return listOpenAICompat(ctx, o.client, o.Name(), o.baseURL, o.apiKey, o.headers)
-}
-
-func (o *OpenRouter) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
-	return listOpenAICompat(ctx, o.client, o.Name(), o.baseURL, o.apiKey, o.headers)
-}
-
-// ListModels lists the models installed locally (Ollama's OpenAI-compatible API).
-func (o *Ollama) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
-	return listOpenAICompat(ctx, o.client, o.Name(), o.baseURL, o.apiKey, o.headers)
-}
-
-func (o *OpenCode) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
-	return listOpenAICompat(ctx, o.client, o.Name(), o.baseURL, o.apiKey, o.headers)
-}
-
 // The compiler checks every built-in provider lists its models.
 var (
 	_ engine.ModelLister = (*Anthropic)(nil)
-	_ engine.ModelLister = (*OpenAI)(nil)
-	_ engine.ModelLister = (*OpenRouter)(nil)
-	_ engine.ModelLister = (*Ollama)(nil)
-	_ engine.ModelLister = (*OpenCode)(nil)
+	_ engine.ModelLister = (*OpenAICompat)(nil)
 )

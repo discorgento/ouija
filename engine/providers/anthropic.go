@@ -1,9 +1,10 @@
 package providers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"iter"
 	"strings"
 	"time"
@@ -101,13 +102,17 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 				case "error":
 					var errPayload struct {
 						Error struct {
+							Type    string `json:"type"`
 							Message string `json:"message"`
 						} `json:"error"`
 					}
-					if json.Unmarshal(data, &errPayload) == nil && errPayload.Error.Message != "" {
-						return fmt.Errorf("anthropic: %s", errPayload.Error.Message)
+					_ = json.Unmarshal(data, &errPayload)
+					msg := "anthropic: " + cmp.Or(errPayload.Error.Message, "SSE error: "+string(data))
+					// Overload and internal errors mid-stream are transient.
+					if t := errPayload.Error.Type; t == "overloaded_error" || t == "api_error" {
+						return engine.ErrStream(msg)
 					}
-					return fmt.Errorf("anthropic: SSE error: %s", string(data))
+					return engine.ErrProvider(msg)
 
 				case "message_start":
 					var ms struct {
@@ -163,7 +168,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 					switch cbd.Delta.Type {
 					case "text_delta":
 						if !yield(engine.StreamEvent{Type: engine.EventText, Text: cbd.Delta.Text}, nil) {
-							return fmt.Errorf("stream cancelled")
+							return errStopped
 						}
 					case "input_json_delta":
 						if tb, ok := toolBlocks[cbd.Index]; ok {
@@ -187,7 +192,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 							Type:     engine.EventToolCall,
 							ToolCall: engine.ToolCall{ID: tb.ID, Name: tb.Name, Input: input},
 						}, nil) {
-							return fmt.Errorf("stream cancelled")
+							return errStopped
 						}
 						delete(toolBlocks, cbs.Index)
 					}
@@ -221,10 +226,10 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 
 				case "message_stop":
 					if !yield(engine.StreamEvent{Type: engine.EventUsage, Usage: usage}, nil) {
-						return fmt.Errorf("stream cancelled")
+						return errStopped
 					}
 					if !yield(engine.StreamEvent{Type: engine.EventDone, StopReason: stopReason}, nil) {
-						return fmt.Errorf("stream cancelled")
+						return errStopped
 					}
 
 				case "ping":
@@ -240,7 +245,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 			err = engine.ErrProvider("anthropic: the model declined the request (" +
 				strings.Trim(refusal, ": ") + ")")
 		}
-		if err != nil {
+		if err != nil && !errors.Is(err, errStopped) {
 			yield(engine.StreamEvent{}, err)
 		}
 	}

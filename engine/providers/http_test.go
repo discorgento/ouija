@@ -29,7 +29,7 @@ func TestRetryAfterParsing(t *testing.T) {
 	if got := retryAfter(resp("7")); got != 7*time.Second {
 		t.Fatalf("seconds form = %v, want 7s", got)
 	}
-	date := time.Now().Add(30 * time.Second).UTC().Format(time.RFC1123)
+	date := time.Now().Add(30 * time.Second).UTC().Format(http.TimeFormat) // "GMT", as RFC 9110 requires
 	if got := retryAfter(resp(date)); got <= 0 || got > 31*time.Second {
 		t.Fatalf("HTTP-date form = %v, want about 30s", got)
 	}
@@ -39,6 +39,16 @@ func TestRetryAfterParsing(t *testing.T) {
 	if got := retryAfter(nil); got != 0 {
 		t.Fatalf("nil response = %v, want 0", got)
 	}
+	for _, v := range []string{"1.5", "30abc", "-5"} {
+		if got := retryAfter(resp(v)); got != 0 {
+			t.Errorf("Retry-After %q = %v, want 0 (not delay-seconds)", v, got)
+		}
+	}
+	// RFC 850, one of the other HTTP-date formats servers still send.
+	rfc850 := time.Now().Add(20 * time.Second).UTC().Format("Monday, 02-Jan-06 15:04:05 GMT")
+	if got := retryAfter(resp(rfc850)); got <= 0 || got > 21*time.Second {
+		t.Errorf("RFC 850 date = %v, want ~20s", got)
+	}
 }
 
 // A refused key or plan (401/403) is an AUTH error; other statuses are not.
@@ -47,8 +57,8 @@ func TestStatusErrorAuth(t *testing.T) {
 	if code, ok := engine.Code(err); !ok || code != engine.ErrCodeAuth {
 		t.Fatalf("403 → %v; want AUTH", err)
 	}
-	if _, ok := engine.Code(statusError("SSE: ", http.StatusBadRequest, "bad")); ok {
-		t.Fatal("400 must not be classified as AUTH")
+	if code, _ := engine.Code(statusError("SSE: ", http.StatusBadRequest, "bad")); code != engine.ErrCodeProvider {
+		t.Fatalf("400 → %v; want PROVIDER (not AUTH, not retryable)", code)
 	}
 }
 

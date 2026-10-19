@@ -3,9 +3,10 @@ package providers
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -26,14 +27,13 @@ func retryAfter(resp *http.Response) time.Duration {
 	if v == "" {
 		return 0
 	}
-	// Try seconds first.
-	var sec int
-	if _, err := fmt.Sscanf(v, "%d", &sec); err == nil {
-		return time.Duration(sec) * time.Second
+	// Delay-seconds, else an HTTP-date (any of the three formats RFC 9110
+	// allows). Sscanf would have read "1.5" as 1 and "30abc" as 30.
+	if sec, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+		return max(time.Duration(sec)*time.Second, 0)
 	}
-	// Try HTTP-date.
-	if t, err := time.Parse(time.RFC1123, v); err == nil {
-		return time.Until(t)
+	if t, err := http.ParseTime(v); err == nil {
+		return max(time.Until(t), 0)
 	}
 	return 0
 }
@@ -70,8 +70,7 @@ func retryableRoundTrip(ctx context.Context, client *http.Client, method, url st
 		return nil, ErrCircuitOpen
 	}
 
-	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; ; attempt++ { // every iteration continues or returns
 		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -83,7 +82,6 @@ func retryableRoundTrip(ctx context.Context, client *http.Client, method, url st
 		resp, err := client.Do(req)
 		if err != nil {
 			// Transport error (connection refused, DNS, TLS, etc.).
-			lastErr = err
 			if attempt < maxRetries && sleep(ctx, backoff(attempt, 0)) {
 				continue
 			}
@@ -111,10 +109,6 @@ func retryableRoundTrip(ctx context.Context, client *http.Client, method, url st
 		}
 		return resp, nil
 	}
-	if cb != nil {
-		cb.Failure()
-	}
-	return nil, lastErr
 }
 
 // sleep waits for the given duration, honoring context cancellation.

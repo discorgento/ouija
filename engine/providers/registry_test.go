@@ -68,9 +68,9 @@ func TestBuild_keyIsThreaded(t *testing.T) {
 	if !ok {
 		t.Fatal("Build(opencode) ok = false")
 	}
-	oc, cast := p.(*OpenCode)
+	oc, cast := p.(*OpenAICompat)
 	if !cast {
-		t.Fatalf("Build(opencode) returned %T, want *OpenCode", p)
+		t.Fatalf("Build(opencode) returned %T, want *OpenAICompat", p)
 	}
 	if oc.apiKey != "sk-secret" {
 		t.Errorf("apiKey = %q, want sk-secret (must be passed to the constructor)", oc.apiKey)

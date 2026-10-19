@@ -35,6 +35,11 @@ func NewClient(timeout time.Duration) *Client {
 	}
 }
 
+// errStopped ends a stream whose consumer stopped iterating; it is never
+// yielded (a range-over-func body that returned false must not be called
+// again).
+var errStopped = errors.New("stream consumer stopped")
+
 // statusError turns a non-2xx response into an error. 401 and 403 are AUTH
 // errors (a missing or refused key, or a plan that does not cover this use),
 // so callers can tell them from transient failures.
@@ -43,7 +48,8 @@ func statusError(prefix string, code int, body string) error {
 	if code == http.StatusUnauthorized || code == http.StatusForbidden {
 		return engine.ErrAuth(msg)
 	}
-	return errors.New(msg)
+	// Retryable statuses (429, 5xx) were already retried by the client.
+	return engine.ErrProvider(msg)
 }
 
 // RoundTrip performs the request with retries and circuit breaking.
@@ -85,14 +91,15 @@ func (c *Client) GetJSON(ctx context.Context, url string, headers map[string]str
 func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]string, body []byte, onEvent func(eventType string, data []byte) error) error {
 	resp, err := c.RoundTrip(ctx, http.MethodPost, url, headers, body)
 	if err != nil {
-		return fmt.Errorf("SSE: %w", err)
+		// RoundTrip already retried (and the circuit breaker may be open).
+		return engine.ErrNetwork("SSE: connect", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
 		raw, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return fmt.Errorf("SSE: HTTP %d (body read error: %w)", resp.StatusCode, readErr)
+			return engine.ErrProvider(fmt.Sprintf("SSE: HTTP %d (body read error)", resp.StatusCode), readErr)
 		}
 		return statusError("SSE: ", resp.StatusCode, string(raw))
 	}
@@ -111,11 +118,12 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 		if err != nil {
 			if err == io.EOF {
 				if dataBuf.Len() > 0 {
-					_ = onEvent(eventType, bytes.TrimRight(dataBuf.Bytes(), "\n\r"))
+					return onEvent(eventType, bytes.TrimRight(dataBuf.Bytes(), "\n\r"))
 				}
 				return nil
 			}
-			return err
+			// The reply had started and broke off: worth repeating the call.
+			return engine.ErrStream("SSE: stream broke off", err)
 		}
 		line = strings.TrimRight(line, "\n\r")
 
