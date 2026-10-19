@@ -46,7 +46,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// 1) Scout — map the current reality with read-only tools.
 	scoutSystem := "You are doing code reconnaissance (scout). Project rules:\n" + rules
-	if known := knowledge.Load("."); known != "" {
+	if known := knowledge.Load(cfg.ProjectRoot); known != "" {
 		scoutSystem += "\n\n## Known project facts (from previous analyses)\n" + known
 	}
 	scoutPrompt := fmt.Sprintf(
@@ -137,7 +137,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 	// Fallback: only when the model didn't call write_plan itself.
 	if !slices.Contains(recResult.Tools, "write_plan") {
-		writePlan(".", &res)
+		writePlan(cfg.ProjectRoot, &res)
 	}
 
 	return &res, nil
