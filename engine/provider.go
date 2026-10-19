@@ -57,7 +57,7 @@ type ChatRequest struct {
 	System    string
 	Messages  []Message
 	Tools     []ToolDef
-	Schema    map[string]any // when set, the engine adds a submit_result tool
+	Schema    map[string]any // when set, the reply must be this JSON object: native structured output, or a forced SubmitTool call
 	MaxTokens int
 	Model     string
 }

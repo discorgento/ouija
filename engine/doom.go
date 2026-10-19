@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 )
@@ -53,6 +54,26 @@ func (d *DoomDetector) ResetCount() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.repeat = 0
+}
+
+// doomCtxKey carries the run-scoped DoomDetector through the context.
+type doomCtxKey struct{}
+
+// withDoomDetector scopes d to one agent run. Concurrent runs on the same
+// Engine (the task totem's parallel passes) each get their own detector, so
+// one run can neither reset another's state nor trip its loop check by
+// reading the same file.
+func withDoomDetector(ctx context.Context, d *DoomDetector) context.Context {
+	return context.WithValue(ctx, doomCtxKey{}, d)
+}
+
+// doomFromContext returns the run-scoped detector, or fallback when the call
+// did not come through an agent run (e.g. a ToolRunner used directly).
+func doomFromContext(ctx context.Context, fallback *DoomDetector) *DoomDetector {
+	if d, ok := ctx.Value(doomCtxKey{}).(*DoomDetector); ok && d != nil {
+		return d
+	}
+	return fallback
 }
 
 // fingerprint produces a stable string fingerprint of a tool-call input map

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 )
@@ -118,11 +119,18 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 		span.SetAttr("input_tokens", fmt.Sprintf("%d", resp.Usage.InputTokens))
 		span.SetAttr("output_tokens", fmt.Sprintf("%d", resp.Usage.OutputTokens))
 		span.End()
-		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
-		if js, ok := extractJSON(resp.Text); ok {
+		if js, ok := structuredAnswer(resp); ok {
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
 			return &RunResult{Text: js, Tools: nil}, msgs, nil
 		}
+		msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
 		return &RunResult{Text: resp.Text, Tools: nil}, msgs, nil
+	}
+
+	// The model needs a way to hand in the structured answer while it still
+	// has tools: submit_result, whose input schema IS the requested schema.
+	if useStructured {
+		toolDefs = append(toolDefs, submitToolDef(req.Schema))
 	}
 
 	// Build lookup maps for extra tool dispatch.
@@ -139,7 +147,6 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 
 	nudges := 0
 	var toolNames []string
-	const submitToolName = submitTool
 
 	// ── Phase 1: tool-gathering loop ───────────────────────────────
 	// Runs with tools but WITHOUT Schema (no response_format) so the
@@ -234,10 +241,13 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 
 			// ── Sequential execution ────────────────────────────────────
 			for _, call := range seqCalls {
-				if call.Name == submitToolName {
+				if call.Name == submitTool {
 					chatSpan.SetAttr("submit_result", "true")
 					b, _ := json.Marshal(call.Input)
 					submitResult = string(b)
+					// Answer the call so the history stays well-formed
+					// (every tool_use has its tool_result) for a later Chat.
+					msgs = append(msgs, Message{Role: RoleTool, ToolCallID: call.ID, Content: "submitted"})
 					continue
 				}
 				out := a.runTool(toolCtx, req.Label, call, extraFns, extraRisk)
@@ -254,42 +264,49 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 
 		// No tool calls this turn.
 
-		// ── Phase 2: structured output ──────────────────────────────
-		// Model signalled it's done gathering info. Make a final call
-		// with response_format enabled to get guaranteed JSON.
+		// ── Structured answer ───────────────────────────────────────
+		// The model stopped calling tools without submit_result. In order:
+		// JSON already in the text → native structured output (one more
+		// call, when the provider supports it) → nudge back to submit_result.
 		if useStructured {
-			phaseSpan := a.tracer.Start("phase2")
-			msgs = append(msgs, Message{Role: RoleAssistant, Content: resp.Text})
-			finalResp, err := a.streamChat(ctx, ChatRequest{
-				System:    req.System,
-				Messages:  msgs,
-				Schema:    req.Schema, // enables response_format in the provider
-				MaxTokens: maxTok,
-				Model:     a.cfg.Model,
-			})
-			if err != nil {
-				phaseSpan.SetError(err.Error())
-				phaseSpan.End()
-				return nil, msgs, err
-			}
-			if berr := a.budget.add(finalResp.Usage); berr != nil {
-				phaseSpan.SetError(berr.Error())
-				phaseSpan.End()
-				return nil, msgs, berr
-			}
-			phaseSpan.SetAttr("input_tokens", fmt.Sprintf("%d", finalResp.Usage.InputTokens))
-			phaseSpan.SetAttr("output_tokens", fmt.Sprintf("%d", finalResp.Usage.OutputTokens))
-			phaseSpan.End()
-			msgs = append(msgs, Message{Role: RoleAssistant, Content: finalResp.Text})
-			return &RunResult{Text: finalResp.Text, Tools: toolNames}, msgs, nil
-		}
-
-		// ── Legacy fallback: submit_result + extractJSON + nudges ──
-		if req.Schema != nil {
 			if js, ok := extractJSON(resp.Text); ok {
 				msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
 				return &RunResult{Text: js, Tools: toolNames}, msgs, nil
 			}
+			msgs = append(msgs, Message{Role: RoleAssistant, Content: cmp.Or(resp.Text, "(no output)")})
+
+			if a.provider.Capabilities().StructuredOutput {
+				// A user turn, not an assistant prefill: newer models reject
+				// a conversation that ends on an assistant message.
+				msgs = append(msgs, Message{Role: RoleUser, Content: "Now give the final answer as the structured object."})
+				phaseSpan := a.tracer.Start("phase2")
+				finalResp, err := a.streamChat(ctx, ChatRequest{
+					System:    req.System,
+					Messages:  msgs,
+					Schema:    req.Schema, // native structured output in the provider
+					MaxTokens: maxTok,
+					Model:     a.cfg.Model,
+				})
+				if err != nil {
+					phaseSpan.SetError(err.Error())
+					phaseSpan.End()
+					return nil, msgs, err
+				}
+				if berr := a.budget.add(finalResp.Usage); berr != nil {
+					phaseSpan.SetError(berr.Error())
+					phaseSpan.End()
+					return nil, msgs, berr
+				}
+				phaseSpan.SetAttr("input_tokens", fmt.Sprintf("%d", finalResp.Usage.InputTokens))
+				phaseSpan.SetAttr("output_tokens", fmt.Sprintf("%d", finalResp.Usage.OutputTokens))
+				phaseSpan.End()
+				if js, ok := structuredAnswer(finalResp); ok {
+					msgs = append(msgs, Message{Role: RoleAssistant, Content: js})
+					return &RunResult{Text: js, Tools: toolNames}, msgs, nil
+				}
+				msgs = append(msgs, Message{Role: RoleAssistant, Content: cmp.Or(finalResp.Text, "(no output)")})
+			}
+
 			maxNudges := a.cfg.MaxNudges
 			if maxNudges <= 0 {
 				maxNudges = 3
@@ -298,9 +315,7 @@ func (a *ReAct) Run(ctx context.Context, req RunRequest, msgs []Message) (*RunRe
 				return nil, msgs, fmt.Errorf("model did not return structured output after %d attempts", nudges)
 			}
 			nudges++
-			assistant := cmp.Or(resp.Text, "(no output)")
-			msgs = append(msgs, Message{Role: RoleAssistant, Content: assistant})
-			msgs = append(msgs, Message{Role: RoleUser, Content: "Reply by calling the " + submitToolName + " tool with the final object (or a single JSON object)."})
+			msgs = append(msgs, Message{Role: RoleUser, Content: "Reply by calling the " + submitTool + " tool with the final object (or a single JSON object)."})
 			continue
 		}
 
@@ -354,25 +369,52 @@ const compactTrimAt = 800
 const compactMaxMsgs = 60
 
 // compact trims old tool results and applies a sliding window to keep the
-// conversation size bounded. It returns the (possibly shrunk) message slice.
-// Message order is preserved; the most recent messages are kept verbatim.
+// conversation size bounded. It returns a new slice and never modifies the
+// caller's messages. Message order is preserved; the most recent messages are
+// kept verbatim.
 func compact(msgs []Message) []Message {
 	if len(msgs) <= compactKeepRecent {
 		return msgs
 	}
+	out := slices.Clone(msgs)
 	// 1. Trim content of older tool-result messages.
-	for i := range len(msgs) - compactKeepRecent {
-		if msgs[i].Role == RoleTool && len(msgs[i].Content) > compactTrimAt {
-			msgs[i].Content = msgs[i].Content[:compactTrimAt] + "…[compacted]"
+	for i := range len(out) - compactKeepRecent {
+		if out[i].Role == RoleTool && len(out[i].Content) > compactTrimAt {
+			out[i].Content = out[i].Content[:compactTrimAt] + "…[compacted]"
 		}
 	}
 	// 2. Sliding window: drop oldest messages to stay within limit.
-	if len(msgs) > compactMaxMsgs {
-		n := make([]Message, compactMaxMsgs)
-		copy(n, msgs[len(msgs)-compactMaxMsgs:])
-		return n
+	if len(out) > compactMaxMsgs {
+		return slideWindow(out)
 	}
-	return msgs
+	return out
+}
+
+// slideWindow keeps at most compactMaxMsgs of the most recent messages, cut
+// where the conversation stays valid for every provider:
+//   - never on a tool result, whose tool call would be dropped (Anthropic
+//     rejects an orphan tool_result with a 400);
+//   - when the window opens on an assistant turn, the first message (the
+//     user's task) is pinned in front, so the conversation still starts with
+//     a user turn and keeps its goal.
+func slideWindow(msgs []Message) []Message {
+	start := len(msgs) - compactMaxMsgs
+	skipToolResults := func() {
+		for start < len(msgs) && msgs[start].Role == RoleTool {
+			start++
+		}
+	}
+	skipToolResults()
+	if start >= len(msgs) || msgs[start].Role == RoleUser || msgs[0].Role != RoleUser {
+		return slices.Clone(msgs[start:])
+	}
+	// Make room for the pinned task without exceeding the limit.
+	start++
+	skipToolResults()
+	if start < len(msgs) && msgs[start].Role == RoleUser {
+		return slices.Clone(msgs[start:])
+	}
+	return append([]Message{msgs[0]}, msgs[start:]...)
 }
 
 // compressConversation collapses tool-heavy turns into a compact form:
@@ -413,11 +455,32 @@ func compressConversation(msgs []Message) []Message {
 		}
 		if hasTools && finalContent != nil {
 			// Compress: keep the user question, any edit/write diffs (small,
-			// useful for the model and TUI), and the final response.
-			out = append(out, msgs[turnStart])
+			// useful for the model and TUI), and the final response. Each kept
+			// result keeps the assistant call it answers, pruned to the kept
+			// calls: providers reject a tool result without its tool call.
+			kept := make(map[string]bool)
 			for k := turnStart; k < j; k++ {
-				if msgs[k].Role == RoleTool && (strings.HasPrefix(msgs[k].Content, "✓ edited") || strings.HasPrefix(msgs[k].Content, "✓ wrote")) {
-					out = append(out, msgs[k])
+				if isEditResult(msgs[k]) {
+					kept[msgs[k].ToolCallID] = true
+				}
+			}
+			out = append(out, msgs[turnStart])
+			for k := turnStart + 1; k < j; k++ {
+				m := msgs[k]
+				switch {
+				case m.Role == RoleAssistant && len(m.ToolCalls) > 0:
+					var calls []ToolCall
+					for _, c := range m.ToolCalls {
+						if kept[c.ID] {
+							calls = append(calls, c)
+						}
+					}
+					if len(calls) > 0 {
+						m.ToolCalls = calls
+						out = append(out, m)
+					}
+				case m.Role == RoleTool && kept[m.ToolCallID]:
+					out = append(out, m)
 				}
 			}
 			out = append(out, *finalContent)
@@ -430,6 +493,38 @@ func compressConversation(msgs []Message) []Message {
 		i = j
 	}
 	return out
+}
+
+// isEditResult reports whether m is a write/edit result, whose diff is worth
+// keeping in a compressed conversation (the chat TUI renders it).
+func isEditResult(m Message) bool {
+	return m.Role == RoleTool && m.ToolCallID != "" &&
+		(strings.HasPrefix(m.Content, "✓ edited") || strings.HasPrefix(m.Content, "✓ wrote"))
+}
+
+// submitToolDef is the tool the model calls to hand in a structured answer.
+// Its input schema is the run's Schema, so the call's input is the answer.
+func submitToolDef(schema map[string]any) ToolDef {
+	return ToolDef{
+		Name:        submitTool,
+		Description: "Submit the final answer. Call it exactly once, when you are done, with the complete result object.",
+		Schema:      schema,
+	}
+}
+
+// structuredAnswer extracts the JSON answer from a structured-output reply:
+// a submit_result call (how providers without a native JSON mode answer, e.g.
+// Anthropic's forced tool), else a JSON object in the text.
+func structuredAnswer(resp ChatResponse) (string, bool) {
+	for _, tc := range resp.ToolCalls {
+		if tc.Name != submitTool {
+			continue
+		}
+		if b, err := json.Marshal(tc.Input); err == nil {
+			return string(b), true
+		}
+	}
+	return extractJSON(resp.Text)
 }
 
 // extractJSON pulls the first balanced-looking JSON object out of free text.

@@ -52,8 +52,15 @@ applies a sliding window (max 60 messages) to bound context growth.
 - **`Chat(ctx, RunRequest)`** — conversational mode. Used by the TUI. Preserves
   history across turns with sliding window, no final result expectation.
 
-Both call `runAgent`, the single point every turn passes through: it resets
-doom-loop state and delegates to the loop strategy (`Agent.Run`).
+Both call `runAgent`, the single point every turn passes through: it gives the
+run a fresh, run-scoped doom-loop detector and delegates to the loop strategy
+(`Agent.Run`).
+
+When `RunRequest.Schema` is set, the model is offered `submit_result` (its input
+schema is the run's schema). If it stops calling tools without submitting, the
+loop takes JSON already in the text, else makes one native structured-output
+call (providers whose `Capabilities().StructuredOutput` is true), else nudges it
+back to `submit_result`, up to `maxNudges`.
 
 ## The gate: one place where a tool call is allowed or refused
 
@@ -127,6 +134,10 @@ of every loop iteration:
 | `compactMaxMsgs` | 60 | Drops oldest messages beyond this limit |
 | `compactKeepRecent` | 6 | Preserves last 6 tool results verbatim |
 | `compactTrimAt` | 800 chars | Truncates older tool-result content |
+
+The window never opens on a tool result whose tool call was dropped (providers
+reject an orphan tool result), and when it opens on an assistant turn the first
+user message (the task) stays pinned in front.
 
 This keeps cost predictable and latency low on long chat sessions (15-30 turns).
 

@@ -119,3 +119,34 @@ func TestDoomLoopResetsOnNewRun(t *testing.T) {
 	}
 	// If this test passes, the doom state was correctly reset between runs.
 }
+
+// Concurrent runs on one Engine (the task totem's parallel passes) must not
+// share doom-loop state: three different runs reading the same file, one
+// after the other, is not a loop.
+func TestDoomStateIsRunScoped(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := newTestEngine(&mockProvider{}, root)
+	call := ToolCall{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}
+
+	runs := []context.Context{
+		withDoomDetector(context.Background(), &DoomDetector{}),
+		withDoomDetector(context.Background(), &DoomDetector{}),
+		withDoomDetector(context.Background(), &DoomDetector{}),
+	}
+	for i, ctx := range runs {
+		if res := eng.runner.Run(ctx, "p", call, nil, nil); res.Error != nil {
+			t.Fatalf("run %d blocked by another run's state: %v", i, res.Error.Message)
+		}
+	}
+
+	// Within one run the guard still trips on the third identical call.
+	ctx := runs[0]
+	eng.runner.Run(ctx, "p", call, nil, nil)
+	res := eng.runner.Run(ctx, "p", call, nil, nil)
+	if res.Error == nil || res.Error.Code != ErrCodeDoomLoop {
+		t.Fatalf("third identical call in one run must be blocked, got %+v", res)
+	}
+}

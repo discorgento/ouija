@@ -39,7 +39,7 @@ CLI args → app.DiscoverConfig()
            → totem.Init(ctx, eng, cfg)
            → totem.Run(ctx, eng, args)
                → eng.Run() or eng.Chat()
-                   → runAgent() → doom.Reset() → agent.Run()
+                   → runAgent() → fresh DoomDetector → agent.Run()
                        → model proposes tool call
                        → harness validates + executes
                        → repeat until a final answer (text or submit_result)
@@ -51,7 +51,7 @@ CLI args → app.DiscoverConfig()
 
 ```
 Engine.Run(ctx, req) / Engine.Chat(ctx, req)
-  └─ runAgent() → doom.Reset() → agent.Run()
+  └─ runAgent() → fresh DoomDetector → agent.Run()
        └─ (*ReAct).Run(ctx, req, msgs)   ← the loop strategy (Agent)
             ├─ streamChat() → provider.Chat() → iter.Seq2[StreamEvent, error]
             ├─ tool execution (gated by ToolRunner, sandboxed)
@@ -61,7 +61,9 @@ Engine.Run(ctx, req) / Engine.Chat(ctx, req)
 ```
 
 Every `Engine.Run` / `Engine.Chat` call goes through `runAgent` once, which
-resets doom-loop state and delegates to the loop strategy (`ReAct`); the turns
+gives the run its own doom-loop detector (carried in the context, so the
+concurrent passes of a totem never share loop state) and delegates to the loop
+strategy (`ReAct`); the turns
 themselves loop inside `ReAct.Run`. The permission/approval wiring is a single
 `gateState` value shared **by pointer** between `Engine` and its `ToolRunner`, so
 the setters (`SetPermissionConfig`, `SetApprovalManager`, `SetToolCallback`) can

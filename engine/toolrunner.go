@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"maps"
 	"path/filepath"
 )
 
@@ -87,7 +88,8 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	}()
 
 	// ── Doom-loop detection ───────────────────────────────────────
-	if _, blocked := r.doom.Check(call.Name, call.Input); blocked {
+	doom := doomFromContext(ctx, r.doom)
+	if _, blocked := doom.Check(call.Name, call.Input); blocked {
 		if span != nil {
 			span.SetError("doom loop")
 		}
@@ -145,13 +147,18 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 			return errRejected("tool '" + call.Name + "' was denied by permission config")
 		case Ask:
 			if !r.bashPreApproved(call) {
-				// Generate preview before requesting approval.
+				// Generate preview before requesting approval. It goes on a
+				// copy: call.Input is the same map the conversation holds, and
+				// a diff written there would be resent to the provider on
+				// every later turn.
+				approvalInput := call.Input
 				if !isExtra && r.tools != nil {
 					if preview := r.tools.Preview(ctx, call); preview != "" {
-						if call.Input == nil {
-							call.Input = make(map[string]any)
+						approvalInput = maps.Clone(call.Input)
+						if approvalInput == nil {
+							approvalInput = make(map[string]any)
 						}
-						call.Input["_preview"] = preview
+						approvalInput["_preview"] = preview
 					}
 				}
 				if r.gate.approvalMgr == nil {
@@ -160,7 +167,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					}
 					return errRejected("tool '" + call.Name + "' requires approval (no approval UI configured)")
 				}
-				result, aerr := r.gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), call.Input)
+				result, aerr := r.gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), approvalInput)
 				if aerr != nil {
 					return errRejected(aerr.Error())
 				}
@@ -175,12 +182,12 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 				}
 				// Tool was already applied externally (e.g. editor) — skip execution.
 				if result.SkipExecution {
-					r.doom.ResetCount()
+					doom.ResetCount()
 					return ToolResult{Data: "✓ already applied via external editor", Mime: "text/plain"}
 				}
 				// Fresh human consent for this exact call: the allowlist does
 				// not get a second veto after the user said yes.
-				r.doom.ResetCount()
+				doom.ResetCount()
 			}
 		case Allow:
 			// Unattended execution: the allowlist is the guard rail, since no

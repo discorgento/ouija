@@ -147,3 +147,135 @@ func TestEngineJSONFallback(t *testing.T) {
 		t.Fatalf("got %q", res.Text)
 	}
 }
+
+// recordingMock wraps structuredMock and records every ChatRequest, with a
+// switchable StructuredOutput capability.
+type recordingMock struct {
+	structuredMock
+	native   bool
+	requests []ChatRequest
+}
+
+func (m *recordingMock) Capabilities() Capabilities { return Capabilities{StructuredOutput: m.native} }
+func (m *recordingMock) Chat(ctx context.Context, req ChatRequest) iter.Seq2[StreamEvent, error] {
+	m.requests = append(m.requests, req)
+	return m.structuredMock.Chat(ctx, req)
+}
+
+// A structured run with tools must offer submit_result to the model, with the
+// run's schema as its input schema — prompts tell the model to call it.
+func TestStructuredRunExposesSubmitTool(t *testing.T) {
+	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
+		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+	}}}
+	eng := newTestEngine(rm, t.TempDir())
+	schema := map[string]any{"type": "object", "properties": map[string]any{"ok": map[string]any{"type": "boolean"}}}
+
+	res, err := eng.Run(context.Background(), RunRequest{Schema: schema, UseTools: true})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Text != `{"ok":true}` {
+		t.Fatalf("got %q, want {\"ok\":true}", res.Text)
+	}
+	var submit *ToolDef
+	for i, d := range rm.requests[0].Tools {
+		if d.Name == submitTool {
+			submit = &rm.requests[0].Tools[i]
+		}
+	}
+	if submit == nil {
+		t.Fatalf("submit_result not offered; tools = %v", rm.requests[0].Tools)
+	}
+	if submit.Schema["properties"] == nil {
+		t.Fatalf("submit_result schema is not the run schema: %v", submit.Schema)
+	}
+}
+
+// Phase 2 on a provider that answers structured output with a forced
+// submit_result call (Anthropic) must return that call's input, not the
+// (empty) text.
+func TestStructuredPhaseTwoAcceptsSubmitCall(t *testing.T) {
+	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
+		{Text: "Done exploring."},
+		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"answer": "x"}}}},
+	}}}
+	eng := newTestEngine(rm, t.TempDir())
+
+	res, err := eng.Run(context.Background(), RunRequest{Schema: map[string]any{"type": "object"}, UseTools: true})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Text != `{"answer":"x"}` {
+		t.Fatalf("got %q, want {\"answer\":\"x\"}", res.Text)
+	}
+	// Phase 2 must not end on an assistant message (prefill is rejected by
+	// newer models).
+	p2 := rm.requests[1]
+	if last := p2.Messages[len(p2.Messages)-1]; last.Role != RoleUser {
+		t.Fatalf("phase 2 conversation ends on %q, want user", last.Role)
+	}
+	if p2.Schema == nil {
+		t.Fatal("phase 2 must request native structured output")
+	}
+}
+
+// Prose from phase 2 is not an answer: the loop nudges back to submit_result
+// instead of returning the prose as if it were the JSON.
+func TestStructuredPhaseTwoProseIsNudged(t *testing.T) {
+	rm := &recordingMock{native: true, structuredMock: structuredMock{responses: []ChatResponse{
+		{Text: "Done exploring."},
+		{Text: "Here is a summary in words."},
+		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+	}}}
+	eng := newTestEngine(rm, t.TempDir())
+
+	res, err := eng.Run(context.Background(), RunRequest{Schema: map[string]any{"type": "object"}, UseTools: true})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Text != `{"ok":true}` {
+		t.Fatalf("got %q, want {\"ok\":true}", res.Text)
+	}
+}
+
+// Without native structured output, a prose reply is nudged (no phase 2 call).
+func TestStructuredWithoutNativeSupportNudges(t *testing.T) {
+	rm := &recordingMock{native: false, structuredMock: structuredMock{responses: []ChatResponse{
+		{Text: "Done exploring."},
+		{ToolCalls: []ToolCall{{ID: "1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+	}}}
+	eng := newTestEngine(rm, t.TempDir())
+
+	res, err := eng.Run(context.Background(), RunRequest{Schema: map[string]any{"type": "object"}, UseTools: true})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Text != `{"ok":true}` {
+		t.Fatalf("got %q", res.Text)
+	}
+	for i, r := range rm.requests {
+		if r.Schema != nil {
+			t.Fatalf("request %d asked a provider without native support for structured output", i)
+		}
+	}
+}
+
+// After submit_result the history must stay well-formed: the call gets a
+// tool result, so a later Chat turn does not send an orphan tool_use.
+func TestSubmitCallIsAnsweredInHistory(t *testing.T) {
+	sm := &structuredMock{responses: []ChatResponse{
+		{ToolCalls: []ToolCall{{ID: "s1", Name: submitTool, Input: map[string]any{"ok": true}}}},
+	}}
+	eng := newTestEngine(sm, t.TempDir())
+	_, msgs, err := eng.runAgent(context.Background(),
+		RunRequest{Schema: map[string]any{"type": "object"}, UseTools: true},
+		[]Message{{Role: RoleUser, Content: "go"}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	last := msgs[len(msgs)-1]
+	if last.Role != RoleTool || last.ToolCallID != "s1" {
+		t.Fatalf("submit_result call left unanswered; last message = %+v", last)
+	}
+}

@@ -77,7 +77,9 @@ func (m *Mistral) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[en
         //    - req.System → system message
         //    - req.Messages → conversation history
         //    - req.Tools → tool definitions
-        //    - req.Schema → final output schema (add submit_result tool)
+        //    - req.Schema → the reply must be this JSON object: a native JSON mode
+        //      (response_format), or a forced engine.SubmitTool call whose
+        //      input_schema is req.Schema (see anthropic.go)
         //    - req.MaxTokens → response length cap
         //    - req.Model → model name
 

@@ -6,7 +6,11 @@ import (
 	"os"
 )
 
-const submitTool = "submit_result"
+// SubmitTool is the tool through which a model hands in a structured answer
+// (RunRequest.Schema). Providers without a native JSON mode force a call to it.
+const SubmitTool = "submit_result"
+
+const submitTool = SubmitTool
 
 // ToolCallback is called before each tool execution (optional, for UI progress).
 type ToolCallback func(name string, input map[string]any)
@@ -169,8 +173,8 @@ func (e *Engine) SetTokenCallback(fn TokenCallback) {
 	}
 }
 
-// SetModel changes the active model name used by the next Chat call.
-// It takes effect immediately; any ongoing call is unaffected.
+// SetModel changes the active model name. The loop reads the model on every
+// provider call, so a run already in progress switches on its next turn.
 func (e *Engine) SetModel(name string) { e.cfg.Model = name }
 
 // SetProvider replaces the provider instance. The caller is responsible
@@ -297,9 +301,11 @@ type RunRequest struct {
 }
 
 // runAgent is the single point through which every agent turn passes: it
-// resets doom-loop state and delegates to the loop strategy.
+// gives the run a fresh doom-loop detector and delegates to the loop strategy.
+// The detector is run-scoped (carried in ctx), not engine-wide: totems run
+// several agents concurrently on one Engine.
 func (e *Engine) runAgent(ctx context.Context, req RunRequest, msgs []Message) (*RunResult, []Message, error) {
-	e.doom.Reset()
+	ctx = withDoomDetector(ctx, &DoomDetector{})
 	return e.agent.Run(ctx, req, msgs)
 }
 

@@ -54,15 +54,25 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 				"cache_control": map[string]any{"type": "ephemeral"},
 			}}
 		}
-		if len(req.Tools) > 0 {
-			var tools []map[string]any
-			for _, t := range req.Tools {
-				tools = append(tools, map[string]any{
-					"name":         t.Name,
-					"description":  t.Description,
-					"input_schema": t.Schema,
-				})
-			}
+		var tools []map[string]any
+		for _, t := range req.Tools {
+			tools = append(tools, map[string]any{
+				"name":         t.Name,
+				"description":  t.Description,
+				"input_schema": t.Schema,
+			})
+		}
+		// Structured output: the answer is the input of a forced submit_result
+		// call, whose input_schema is the requested schema.
+		if req.Schema != nil {
+			tools = append(tools, map[string]any{
+				"name":         engine.SubmitTool,
+				"description":  "Submit the final answer as the structured result object.",
+				"input_schema": req.Schema,
+			})
+			body["tool_choice"] = map[string]any{"type": "tool", "name": engine.SubmitTool}
+		}
+		if len(tools) > 0 {
 			tools[len(tools)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
 			body["tools"] = tools
 		}
@@ -72,9 +82,6 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 			"x-api-key":         a.apiKey,
 			"anthropic-version": "2023-06-01",
 			"content-type":      "application/json",
-		}
-		if req.Schema != nil {
-			headers["anthropic-beta"] = "output-json-encoding-2025-01-31"
 		}
 
 		type antTool struct {

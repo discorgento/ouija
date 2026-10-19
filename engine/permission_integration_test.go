@@ -176,3 +176,32 @@ func TestEngineDeniesWriteTool(t *testing.T) {
 		t.Fatalf("got %q", res.Text)
 	}
 }
+
+// The approval preview is shown to the user but must not be written into the
+// tool call's input: that map is part of the conversation and would be
+// resent to the provider on every later turn.
+func TestApprovalPreviewDoesNotLeakIntoCall(t *testing.T) {
+	root := t.TempDir()
+	eng := newTestEngine(&mockProvider{}, root)
+	eng.SetPermissionConfig(NewPermissionConfig(Ask))
+
+	var seen map[string]any
+	am := NewApprovalManager()
+	am.SetCallback(func(_ context.Context, _ string, input map[string]any) (ApprovalResult, error) {
+		seen = input
+		return ApprovalResult{Allowed: true}, nil
+	})
+	eng.SetApprovalManager(am)
+
+	input := map[string]any{"path": "new.txt", "content": "hello\n"}
+	res := eng.runner.Run(context.Background(), "t", ToolCall{ID: "1", Name: "write_file", Input: input}, nil, nil)
+	if res.Error != nil {
+		t.Fatalf("write_file: %v", res.Error.Message)
+	}
+	if _, leaked := input["_preview"]; leaked {
+		t.Fatal("_preview was written into the conversation's tool input")
+	}
+	if _, ok := seen["_preview"]; !ok {
+		t.Fatalf("approval did not receive the preview; got %v", seen)
+	}
+}

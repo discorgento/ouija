@@ -157,3 +157,120 @@ func TestCompactBelowSlidingWindow(t *testing.T) {
 		t.Fatalf("expected 10 (untouched), got %d", len(got))
 	}
 }
+
+// The window must never open on a tool result whose tool call was dropped:
+// Anthropic rejects an orphan tool_result.
+func TestCompactSlidingWindowNeverStartsOnToolResult(t *testing.T) {
+	// user task, then assistant(tool call) + 3 tool results, repeated.
+	msgs := []Message{{Role: RoleUser, Content: "task"}}
+	for i := 0; len(msgs) < 100; i++ {
+		msgs = append(msgs, Message{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: fmt.Sprint(i)}}})
+		for range 3 {
+			msgs = append(msgs, Message{Role: RoleTool, ToolCallID: fmt.Sprint(i), Content: "r"})
+		}
+	}
+	for n := compactMaxMsgs + 1; n <= len(msgs); n++ {
+		got := compact(msgs[:n])
+		if len(got) > compactMaxMsgs {
+			t.Fatalf("n=%d: window has %d messages, limit %d", n, len(got), compactMaxMsgs)
+		}
+		if got[0].Role != RoleUser {
+			t.Fatalf("n=%d: conversation starts with %q, want user", n, got[0].Role)
+		}
+		if got[0].Content != "task" {
+			t.Fatalf("n=%d: the task was not pinned, first = %q", n, got[0].Content)
+		}
+		if got[1].Role == RoleTool {
+			t.Fatalf("n=%d: orphan tool result right after the pinned task", n)
+		}
+	}
+}
+
+// compact must not rewrite the caller's messages.
+func TestCompactDoesNotMutateInput(t *testing.T) {
+	msgs := make([]Message, 10)
+	for i := range msgs {
+		msgs[i] = Message{Role: RoleTool, Content: strings.Repeat("x", 1000)}
+	}
+	_ = compact(msgs)
+	for i, m := range msgs {
+		if len(m.Content) != 1000 {
+			t.Fatalf("msgs[%d] was modified in place (len=%d)", i, len(m.Content))
+		}
+	}
+}
+
+// assertWellFormed fails when a tool result has no preceding tool call with
+// its ID, or a tool call is left without a result — what providers reject.
+func assertWellFormed(t *testing.T, msgs []Message) {
+	t.Helper()
+	open := map[string]bool{}
+	for i, m := range msgs {
+		switch m.Role {
+		case RoleAssistant:
+			for _, c := range m.ToolCalls {
+				open[c.ID] = true
+			}
+		case RoleTool:
+			if !open[m.ToolCallID] {
+				t.Fatalf("msgs[%d]: tool result %q has no matching tool call", i, m.ToolCallID)
+			}
+			delete(open, m.ToolCallID)
+		}
+	}
+	if len(open) > 0 {
+		t.Fatalf("tool calls without a result: %v", open)
+	}
+}
+
+// A compressed chat turn keeps the edit diffs, and with them the tool calls
+// they answer — otherwise the next Chat turn sends orphan tool results.
+func TestCompressConversationKeepsEditCallsPaired(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleUser, Content: "fix the bug"},
+		{Role: RoleAssistant, Content: "Reading.", ToolCalls: []ToolCall{
+			{ID: "r1", Name: "read_file"}, {ID: "r2", Name: "grep"},
+		}},
+		{Role: RoleTool, ToolCallID: "r1", Content: "file contents"},
+		{Role: RoleTool, ToolCallID: "r2", Content: "matches"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{ID: "e1", Name: "edit_file"}, {ID: "r3", Name: "read_file"},
+		}},
+		{Role: RoleTool, ToolCallID: "e1", Content: "✓ edited a.go\n-old\n+new"},
+		{Role: RoleTool, ToolCallID: "r3", Content: "more contents"},
+		{Role: RoleAssistant, Content: "Fixed it."},
+	}
+	got := compressConversation(msgs)
+	assertWellFormed(t, got)
+
+	var diffs, reads int
+	for _, m := range got {
+		if isEditResult(m) {
+			diffs++
+		}
+		if m.Content == "file contents" || m.Content == "more contents" {
+			reads++
+		}
+	}
+	if diffs != 1 || reads != 0 {
+		t.Fatalf("want the edit diff kept and reads dropped, got diffs=%d reads=%d: %+v", diffs, reads, got)
+	}
+	if first, last := got[0], got[len(got)-1]; first.Content != "fix the bug" || last.Content != "Fixed it." {
+		t.Fatalf("turn boundaries lost: first=%q last=%q", first.Content, last.Content)
+	}
+}
+
+// A turn with tools but no edits collapses to question + answer.
+func TestCompressConversationDropsReadOnlyTurn(t *testing.T) {
+	msgs := []Message{
+		{Role: RoleUser, Content: "what does x do"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "r1", Name: "read_file"}}},
+		{Role: RoleTool, ToolCallID: "r1", Content: "contents"},
+		{Role: RoleAssistant, Content: "It parses."},
+	}
+	got := compressConversation(msgs)
+	assertWellFormed(t, got)
+	if len(got) != 2 {
+		t.Fatalf("want question + answer, got %d messages: %+v", len(got), got)
+	}
+}
