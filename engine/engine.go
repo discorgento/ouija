@@ -51,6 +51,7 @@ type Engine struct {
 	doom      *DoomDetector  // doom-loop detection
 	allowlist *BashAllowlist // bash command allowlist
 	runner    *ToolRunner    // tool gating + execution pipeline
+	journal   *Journal       // files as they were before a change (undo)
 
 	// gate is the permission/approval wiring shared with ToolRunner: both
 	// hold the same pointer, so setters can never leave the runner stale.
@@ -88,6 +89,7 @@ func New(cfg EngineConfig) *Engine {
 		doom:      &DoomDetector{},
 		allowlist: NewBashAllowlist(nil),
 		gate:      gate,
+		journal:   &Journal{},
 	}
 	e.runner = NewToolRunner(ToolRunnerConfig{
 		Tools:     e.tools,
@@ -95,6 +97,7 @@ func New(cfg EngineConfig) *Engine {
 		Doom:      e.doom,
 		Allowlist: e.allowlist,
 		Tracer:    e.tracer,
+		Journal:   e.journal,
 	})
 	e.tools.escapeApprover = func(ctx context.Context, toolName, path string) bool {
 		return e.requestEscapeApproval(ctx, toolName, path)

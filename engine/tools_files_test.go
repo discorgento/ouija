@@ -105,3 +105,33 @@ func TestGrepHonoursCancel(t *testing.T) {
 		t.Fatalf("a cancelled grep returned %q", res.Data)
 	}
 }
+
+// The file picker sees what the search tools see, and attached files are read
+// through the sandbox.
+func TestProjectFilesAndRead(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"a.go", "dir/b.go", ".git/HEAD", "node_modules/x/y.js"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, f), []byte("package x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := ProjectFiles(context.Background(), root, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(files, ",") != "a.go,dir/b.go" {
+		t.Fatalf("files = %v, want a.go and dir/b.go only", files)
+	}
+	if got, err := ReadProjectFile(context.Background(), root, "dir/b.go"); err != nil || got != "package x\n" {
+		t.Fatalf("read = %q, %v", got, err)
+	}
+	if _, err := ReadProjectFile(context.Background(), root, "../outside"); err == nil {
+		t.Fatal("read outside the project")
+	}
+	if few, _ := ProjectFiles(context.Background(), root, 1); len(few) != 1 {
+		t.Fatalf("limit 1 gave %d files", len(few))
+	}
+}

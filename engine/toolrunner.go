@@ -59,6 +59,7 @@ type ToolRunner struct {
 	doom      *DoomDetector
 	allowlist *BashAllowlist
 	tracer    *Tracer
+	journal   *Journal // nil: changes are not recorded for undo
 }
 
 type ToolRunnerConfig struct {
@@ -67,6 +68,7 @@ type ToolRunnerConfig struct {
 	Doom      *DoomDetector
 	Allowlist *BashAllowlist
 	Tracer    *Tracer
+	Journal   *Journal
 }
 
 func NewToolRunner(cfg ToolRunnerConfig) *ToolRunner {
@@ -82,6 +84,7 @@ func NewToolRunner(cfg ToolRunnerConfig) *ToolRunner {
 	}
 	return &ToolRunner{
 		tools:     cfg.Tools,
+		journal:   cfg.Journal,
 		gate:      gate,
 		doom:      cfg.Doom,
 		allowlist: allowlist,
@@ -234,7 +237,17 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	if isExtra {
 		return extraFns[call.Name](ctx, r.tools.Root(), call.Input)
 	}
-	return r.tools.Run(ctx, call)
+	// The file as it was goes to the undo journal; a change that did not
+	// happen leaves nothing to undo.
+	entry := -1
+	if r.journal != nil && journaled[call.Name] && rawPath != "" {
+		entry = r.journal.snapshot(ctx, r.tools.Root(), rawPath)
+	}
+	res := r.tools.Run(ctx, call)
+	if res.Error != nil && entry >= 0 {
+		r.journal.discard(entry)
+	}
+	return res
 }
 
 // MayRun reports whether a call to the tool could run at all under the

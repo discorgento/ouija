@@ -302,3 +302,33 @@ func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult
 	}
 	return ToolResult{Data: trim(out.String())}
 }
+
+// ProjectFiles lists the project's files (relative, slash-separated) the way
+// the search tools see them — .git, node_modules, protected paths and
+// symlinks left out — up to limit, for a UI's file picker.
+func ProjectFiles(ctx context.Context, root string, limit int) ([]string, error) {
+	rootAbs, err := canonRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	err = walkFiles(ctx, rootAbs, rootAbs, func(_, rel string, _ fs.DirEntry) error {
+		out = append(out, filepath.ToSlash(rel))
+		if len(out) >= limit {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ReadProjectFile reads a text file of the project through the sandbox, as
+// read_file does (cut at the same size), for a file the developer attached to
+// a message.
+func ReadProjectFile(ctx context.Context, root, rel string) (string, error) {
+	r := readFileTool(ctx, root, map[string]any{"path": rel})
+	if r.Error != nil {
+		return "", errors.New(r.Error.Message)
+	}
+	return r.Data, nil
+}
