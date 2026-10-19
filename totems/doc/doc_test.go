@@ -129,3 +129,33 @@ func TestDocResultRender(t *testing.T) {
 		t.Fatalf("render missing header")
 	}
 }
+
+// The CSP must come first in <head> (it only covers what follows it) and be
+// added even when the model left out <head> or <html>.
+func TestWithCSP(t *testing.T) {
+	cases := []string{
+		`<!doctype html><html lang="pt"><HEAD><link href="x"></HEAD><body></body></html>`,
+		`<html><body><img src="https://evil/x"></body></html>`,
+		`<p>fragment</p>`,
+	}
+	for _, in := range cases {
+		out := withCSP(in)
+		i := strings.Index(out, `http-equiv="Content-Security-Policy"`)
+		if i < 0 {
+			t.Fatalf("no CSP in %q", out)
+		}
+		for _, later := range []string{"<link", "<img", "<p>", "<body"} {
+			if j := strings.Index(out, later); j >= 0 && j < i {
+				t.Errorf("%q comes before the CSP in %q", later, out)
+			}
+		}
+	}
+	for _, must := range []string{"default-src 'none'", "img-src data:"} {
+		if !strings.Contains(docCSP, must) {
+			t.Errorf("docCSP lost %q", must)
+		}
+	}
+	if strings.Contains(docCSP, "script-src") {
+		t.Error("docCSP must not allow scripts")
+	}
+}

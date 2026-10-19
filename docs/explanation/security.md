@@ -145,7 +145,11 @@ logged or traced. The bash tool sanitizes environment: `sanitizeEnv()` strips
 credential-like env vars (`AWS_*`, `*API_KEY*`, `*SECRET*`, `*TOKEN*`, etc.)
 before passing to subprocesses. Subprocesses have `WaitDelay = 3s` as a safety
 net against runaway children. PDF rendering runs headless Chrome with argv only,
-controlled paths, and a throwaway `--user-data-dir`. The totems' fixed outputs
+controlled paths, and a throwaway `--user-data-dir`. The model-written HTML
+gets a Content-Security-Policy as the first element of `<head>` (inline styles,
+Google Fonts and `data:` images only): no scripts, frames, remote images or
+requests, so content injected through the repository cannot use the render —
+or a later look at the HTML — to send data out. The totems' fixed outputs
 (`docs/task-plan.md`, `docs/<slug>.*`, `docs/sticker/`) and `docs/knowledge.md`
 go through `engine.SafeResolve()`, so a symlink planted in the repository cannot
 redirect them outside the project or onto a protected file.

@@ -170,7 +170,7 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 		return nil, fmt.Errorf("cannot create %s: %w", filepath.Dir(res.HTML), err)
 	}
 
-	if err := os.WriteFile(res.HTML, []byte(htmlRes.Text), 0o644); err != nil {
+	if err := os.WriteFile(res.HTML, []byte(withCSP(htmlRes.Text)), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write html: %w", err)
 	}
 	if err := os.WriteFile(res.MD, []byte(technicalMD(&sheet)), 0o644); err != nil {
@@ -182,6 +182,30 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 }
 
 // --- PDF: headless Chrome print-to-pdf ---
+
+// docCSP locks the model-written HTML down to what the template needs: inline
+// styles, Google Fonts and data: images. No scripts, frames, remote images or
+// requests — content injected through the repo (prompt injection) can't turn
+// the PDF render, or a later look at the HTML, into an exfiltration channel.
+const docCSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+	"font-src https://fonts.gstatic.com data:; img-src data:; base-uri 'none'; form-action 'none'"
+
+var headTag = regexp.MustCompile(`(?i)<head(\s[^>]*)?>`)
+var htmlTag = regexp.MustCompile(`(?i)<html(\s[^>]*)?>`)
+
+// withCSP puts the docCSP meta tag first in <head> (a CSP only covers what
+// comes after it), creating the head when the model left it out. A second
+// CSP in the document can only narrow it further: browsers enforce both.
+func withCSP(html string) string {
+	meta := `<meta http-equiv="Content-Security-Policy" content="` + docCSP + `">`
+	if loc := headTag.FindStringIndex(html); loc != nil {
+		return html[:loc[1]] + meta + html[loc[1]:]
+	}
+	if loc := htmlTag.FindStringIndex(html); loc != nil {
+		return html[:loc[1]] + "<head>" + meta + "</head>" + html[loc[1]:]
+	}
+	return "<head>" + meta + "</head>" + html
+}
 
 func renderPDF(htmlPath, pdf string) (string, string) {
 	chrome := findChrome()
