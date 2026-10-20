@@ -275,9 +275,6 @@ var (
 
 	txtDim = lipgloss.NewStyle().Foreground(gray)
 
-	bannerTag    = lipgloss.NewStyle().Italic(true).Foreground(theme.Lavender)
-	bannerAction = lipgloss.NewStyle().Foreground(theme.Purple)
-
 	pillNew      = lipgloss.NewStyle().Bold(true).Foreground(theme.Surface).Background(theme.Pink)
 	pillSelect   = lipgloss.NewStyle().Bold(true).Foreground(theme.Surface).Background(theme.Amber)
 	slashTyped   = lipgloss.NewStyle().Bold(true).Foreground(theme.Pink)
@@ -293,7 +290,6 @@ var (
 	ftScope = lipgloss.NewStyle().Foreground(gray)
 	ftVal   = lipgloss.NewStyle().Foreground(violet)
 
-	pipeYou   = lipgloss.NewStyle().SetString("▎").Foreground(pink).String()
 	pipeOui   = lipgloss.NewStyle().SetString("▎").Foreground(purple).String()
 	pipeTrace = lipgloss.NewStyle().SetString("▎").Foreground(theme.Gray).String()
 	sepLine   = lipgloss.NewStyle().Faint(true).Foreground(gray)
