@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ouija — page not found</title>
+<link rel="icon" href="/ouija/assets/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&display=swap" rel="stylesheet">
+<style>
+:root { --bg: #0b0614; --pane: #120a22; --line: #3a2a63; --text: #e9e3fb; --muted: #a99cc9; --dim: #6f6294; --lilac: #c39bff; --orchid: #e7a6ff; --err: #ff7a9a; color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px 16px;
+  background: radial-gradient(40% 40% at 50% 35%, rgba(139, 92, 246, .22), transparent 70%), var(--bg);
+  color: var(--text); font: 15px/1.7 "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+fieldset { margin: 0; width: 100%; max-width: 620px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 10px; background: var(--pane); }
+legend { padding: 0 8px; color: var(--lilac); font-weight: 800; }
+img { width: 84px; display: block; margin: 0 auto 18px; filter: drop-shadow(0 12px 30px rgba(139, 92, 246, .5)); }
+.p { color: var(--lilac); } .s { color: var(--orchid); font-weight: 800; }
+.e { color: var(--err); } .d { color: var(--dim); }
+a { color: var(--lilac); }
+.cursor { display: inline-block; width: .6em; height: 1.1em; background: var(--orchid); vertical-align: -3px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+</style>
+</head>
+<body>
+<fieldset>
+  <legend>404</legend>
+  <img src="/ouija/assets/logo.svg" alt="ouija planchette">
+  <div><span class="p">~</span> <span class="s">❯</span> cd <span id="path">this-page</span></div>
+  <div><span class="e">ouija: page not found</span> <span class="d">— the board spells nothing here</span></div>
+  <div style="margin-top: 14px;"><span class="p">~</span> <span class="s">❯</span> <a href="/ouija/">cd home</a> <span class="d">·</span> <a href="https://github.com/discorgento/ouija">github</a> <span class="d">·</span> <a href="https://github.com/discorgento/ouija/tree/main/docs">docs</a> <span class="cursor"></span></div>
+</fieldset>
+<script>
+document.getElementById('path').textContent = decodeURIComponent(location.pathname.replace(/^\/ouija\/?/, '')) || 'this-page';
+</script>
+</body>
+</html>
