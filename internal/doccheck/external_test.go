@@ -36,6 +36,12 @@ func TestExternalLinksReachable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("rel: %v", err)
 		}
+		// release-please writes the changelog's links, and a release PR links
+		// the compare view of a tag it has not created yet (404 until merged):
+		// a check there only ever turns release PRs red.
+		if filepath.Base(rel) == "CHANGELOG.md" {
+			continue
+		}
 		raw, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatalf("read %s: %v", rel, err)
