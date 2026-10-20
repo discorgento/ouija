@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/discorgento/ouija/compare/v0.3.0...v0.4.0) (2026-10-20)
+
+
+### Features
+
+* **review:** add a review totem for the branch's changes ([938beb5](https://github.com/discorgento/ouija/commit/938beb5d380d6e41e1db944abdc527ae78b028ca))
+* **site:** show the review totem as the write-your-own example ([14b8382](https://github.com/discorgento/ouija/commit/14b8382f925c770d861f4edb1c84f4742a0bab8d))
+
+
+### Bug Fixes
+
+* **mcp:** never answer a request the client cancelled, even during shutdown ([694c813](https://github.com/discorgento/ouija/commit/694c8134e9488044a9c5c5c698fb0d0604b600b8))
+
+
+### Documentation
+
+* **assets:** show doctor, an approved fix and /review in the demo ([007b4fa](https://github.com/discorgento/ouija/commit/007b4fade8452a16b7ab5b25c8223c6a81e81322))
+* rewrite the prose so a newcomer understands it on first read ([a9fbc81](https://github.com/discorgento/ouija/commit/a9fbc81d76758459d8611c4a3d40441644a18a2a))
+* **totems:** teach writing a totem with the review example ([d17a07e](https://github.com/discorgento/ouija/commit/d17a07ec230a70b4e982d4eecaaf7096f5baa877))
+
 ## [0.3.0](https://github.com/discorgento/ouija/compare/v0.2.0...v0.3.0) (2026-10-20)
 
 
