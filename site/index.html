@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ouija — AI agents you write in Go</title>
+<meta name="description" content="An AI harness for agents you write in Go: a shared engine (providers, sandbox, cost budget, tracing, MCP) under totems you own. A terminal chat that shows every tool, diff and cent.">
+<meta property="og:title" content="ouija — AI agents you write in Go">
+<meta property="og:description" content="A shared engine under agents you own: real Go code with types and tests, not prompt files.">
+<meta property="og:image" content="assets/screens/chat-welcome.png">
+<meta name="theme-color" content="#0b0614">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,600;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0b0614;
+  --pane: #120a22;
+  --pane-2: #1a1030;
+  --line: #3a2a63;
+  --line-hi: #8b5cf6;
+  --text: #e9e3fb;
+  --muted: #a99cc9;
+  --dim: #6f6294;
+  --violet: #8b5cf6;
+  --lilac: #c39bff;
+  --orchid: #e7a6ff;
+  --ok: #7ee2b8;
+  --warn: #ffd27a;
+  --err: #ff7a9a;
+  --cyan: #8bd5ff;
+  --grad: linear-gradient(90deg, #c39bff, #a78bfa, #8b5cf6, #6d28d9, #a78bfa, #c39bff);
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+body {
+  margin: 0; padding-bottom: 44px;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.7 var(--mono);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+/* faint scanlines + a violet glow, like a CRT left on */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 50;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 3px);
+}
+body::after {
+  content: ""; position: fixed; inset: -30% -20% auto; height: 90vh; pointer-events: none; z-index: -1;
+  background: radial-gradient(40% 50% at 50% 30%, rgba(139, 92, 246, .22), transparent 70%);
+}
+a { color: var(--lilac); text-decoration: underline; text-decoration-color: rgba(195, 155, 255, .35); text-underline-offset: 3px; }
+a:hover { color: var(--orchid); text-decoration-color: currentColor; }
+img { max-width: 100%; display: block; }
+::selection { background: var(--violet); color: #fff; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+/* colors as in the TUI */
+.v { color: var(--violet); } .l { color: var(--lilac); } .o { color: var(--orchid); }
+.ok { color: var(--ok); } .w { color: var(--warn); } .e { color: var(--err); }
+.d { color: var(--dim); } .m { color: var(--muted); } .c { color: var(--cyan); }
+.b { font-weight: 800; }
+.g { background: var(--grad); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 8s linear infinite; }
+@keyframes shimmer { to { background-position: 200% 0; } }
+
+/* ── the prompt line that opens every section ──── */
+.prompt { display: flex; flex-wrap: wrap; gap: 0 10px; align-items: baseline; font-size: 15px; margin: 0 0 18px; }
+.prompt .path { color: var(--lilac); }
+.prompt .branch { color: var(--dim); }
+.prompt .sym { color: var(--orchid); font-weight: 800; }
+.prompt .cmd { color: var(--text); }
+.cursor { display: inline-block; width: .6em; height: 1.15em; background: var(--orchid); vertical-align: -3px; margin-left: 2px; animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── panes: a rounded border with its title in the border, like lipgloss ── */
+fieldset.pane {
+  margin: 0; min-width: 0; padding: 18px 22px 20px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: color-mix(in srgb, var(--pane) 82%, transparent);
+  transition: border-color .2s;
+}
+fieldset.pane:hover { border-color: var(--line-hi); }
+fieldset.pane > legend { padding: 0 8px; margin-left: -4px; color: var(--lilac); font-weight: 600; font-size: 13.5px; }
+fieldset.pane > legend .d { font-weight: 400; }
+fieldset.hi { border-color: var(--line-hi); box-shadow: 0 0 0 1px rgba(139, 92, 246, .25), 0 20px 60px rgba(139, 92, 246, .18); }
+
+/* ── top bar: the window's title ───────────────── */
+.titlebar {
+  display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 16px;
+  border-bottom: 1px solid var(--line); background: var(--pane); font-size: 13px; color: var(--dim);
+}
+.titlebar i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.titlebar i:nth-child(1) { background: #ff6b8b; } .titlebar i:nth-child(2) { background: #ffd27a; } .titlebar i:nth-child(3) { background: #7ee2b8; }
+.titlebar .t { margin: 0 auto; }
+.titlebar a { color: var(--muted); text-decoration: none; }
+.titlebar a:hover { color: var(--text); }
+
+/* ── hero ──────────────────────────────────────── */
+.hero { padding: 64px 0 40px; }
+.hero-grid { display: grid; grid-template-columns: 170px 1fr; gap: 36px; align-items: center; }
+.planchette { width: 150px; filter: drop-shadow(0 14px 34px rgba(139, 92, 246, .55)); animation: drift 7s ease-in-out infinite; }
+@keyframes drift {
+  0%, 100% { transform: translate(0, 0) rotate(-3deg); }
+  25% { transform: translate(10px, -6px) rotate(2deg); }
+  50% { transform: translate(-4px, -10px) rotate(4deg); }
+  75% { transform: translate(-10px, -3px) rotate(-2deg); }
+}
+.wordmark { font-size: clamp(54px, 10vw, 104px); line-height: .95; font-weight: 800; letter-spacing: -4px; margin: 0; }
+.tagline { font-size: clamp(17px, 2.4vw, 22px); margin: 14px 0 0; color: var(--text); }
+.tagline .o { font-weight: 600; }
+.lede { color: var(--muted); max-width: 680px; margin: 14px 0 0; }
+.lede b { color: var(--text); font-weight: 600; }
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; font-size: 13px; }
+.badge { padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); }
+.badge.live { border-color: rgba(126, 226, 184, .45); color: var(--ok); }
+.badge.live::before { content: "● "; }
+
+.typed { margin-top: 34px; }
+.typed .prompt { margin: 0; font-size: 16px; }
+.typed-out { margin-top: 10px; color: var(--muted); min-height: 7.2em; }
+.typed-out .row { white-space: pre-wrap; }
+.typed-out .nw { display: inline-block; white-space: pre; margin-right: 1.5ch; }
+.typed-out .row { opacity: 0; transition: opacity .25s; }
+.typed-out .row.on { opacity: 1; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+.key-btn {
+  display: inline-flex; align-items: center; gap: 10px; padding: 9px 16px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--pane-2); color: var(--text); text-decoration: none; font-weight: 600;
+  transition: transform .12s, border-color .12s, box-shadow .12s;
+}
+.key-btn kbd { font: inherit; font-size: 12px; padding: 0 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); color: var(--dim); }
+.key-btn:hover { color: var(--text); border-color: var(--line-hi); transform: translateY(-2px); }
+.key-btn.primary { background: var(--violet); border-color: var(--violet); color: #fff; box-shadow: 0 8px 26px rgba(139, 92, 246, .45); }
+.key-btn.primary kbd { background: rgba(0, 0, 0, .25); border-color: transparent; color: #f0e8ff; }
+.key-btn.primary:hover { color: #fff; box-shadow: 0 12px 32px rgba(139, 92, 246, .6); }
+
+/* ── the demo, as a terminal window ────────────── */
+.window { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: #08040f; box-shadow: 0 40px 100px rgba(0, 0, 0, .6), 0 0 0 1px rgba(139, 92, 246, .12); }
+.window .titlebar { height: 38px; }
+.window img { width: 100%; height: auto; }
+.demo { margin-top: 48px; }
+
+/* ── sections ──────────────────────────────────── */
+section { padding: 72px 0 24px; }
+h2 { font-size: clamp(22px, 3.4vw, 32px); line-height: 1.2; margin: 0 0 10px; font-weight: 800; letter-spacing: -.5px; }
+h2::before { content: "## "; color: var(--violet); }
+.sub { color: var(--muted); max-width: 720px; margin: 0 0 30px; }
+.sub code, td code, li code, p code { color: var(--orchid); }
+
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.grid p { margin: 0; color: var(--muted); font-size: 14px; }
+.grid .lead { color: var(--text); margin-bottom: 6px; font-weight: 600; font-size: 15px; }
+.grid .lead::before { content: "▸ "; color: var(--orchid); }
+
+/* séance */
+.seance { display: grid; grid-template-columns: 1fr auto 1.25fr auto 1fr; gap: 14px; align-items: center; }
+.seance p { margin: 0; color: var(--muted); font-size: 14px; }
+.pass { display: block; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.pass:last-child { border-bottom: 0; }
+.flow { color: var(--violet); font-size: 22px; text-align: center; }
+.spin { display: inline-block; width: 1ch; }
+.note { color: var(--dim); font-size: 13.5px; margin: 16px 0 0; }
+.note::before { content: "# "; }
+
+/* tool line, like the TUI's turn summary */
+.turn { font-size: 14px; color: var(--muted); }
+.turn .tool { color: var(--ok); }
+
+/* gallery */
+.gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.gallery figure { margin: 0; }
+.gallery .wide { grid-column: 1 / -1; }
+.gallery figcaption { margin-top: 10px; color: var(--muted); font-size: 13.5px; }
+.gallery figcaption::before { content: "└─ "; color: var(--dim); }
+.gallery .window { transition: transform .2s, border-color .2s; }
+.gallery figure:hover .window { transform: translateY(-3px); border-color: var(--line-hi); }
+
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 22px; }
+.keys div { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--pane); font-size: 13.5px; color: var(--muted); }
+.keys kbd { display: inline-block; font: inherit; font-weight: 600; color: var(--text); padding: 0 7px; margin-right: 6px; border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 5px; background: var(--pane-2); }
+
+/* install */
+.split { display: grid; grid-template-columns: 1fr 1.2fr; gap: 28px; align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { padding: 0 0 16px; color: var(--muted); }
+.steps li .n { color: var(--orchid); font-weight: 800; margin-right: 8px; }
+.steps li b { color: var(--text); }
+.check { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13.5px; }
+.check li::before { content: "✓ "; color: var(--ok); }
+.check li { color: var(--muted); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 14px; }
+.tabs button {
+  font: inherit; font-size: 13.5px; cursor: pointer; padding: 3px 12px; border-radius: 6px;
+  border: 1px solid transparent; background: transparent; color: var(--dim);
+}
+.tabs button::before { content: "  "; white-space: pre; }
+.tabs button[aria-selected="true"] { color: var(--text); background: var(--pane-2); border-color: var(--line); }
+.tabs button[aria-selected="true"]::before { content: "▸ "; color: var(--orchid); }
+.panel[hidden] { display: none; }
+pre.code {
+  position: relative; margin: 0; padding: 14px 16px; overflow-x: auto;
+  border-radius: 8px; background: #08040f; border: 1px solid var(--line);
+  font: 13.5px/1.75 var(--mono); color: #d9d0f5;
+}
+pre.code .p { color: var(--orchid); user-select: none; }
+pre.code .cm { color: var(--dim); }
+pre.code .k { color: var(--orchid); }
+pre.code .s { color: var(--ok); }
+pre.code .f { color: var(--lilac); }
+.copy {
+  position: absolute; top: 8px; right: 8px; font: inherit; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--pane-2); color: var(--muted); border-radius: 5px; padding: 1px 9px;
+}
+.copy:hover { color: var(--text); border-color: var(--line-hi); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 14px; font-size: 13.5px; }
+.chips span::before { content: "◆ "; color: var(--violet); }
+.chips .free { color: var(--ok); }
+
+/* help output */
+.help { font-size: 14px; }
+.help .row { display: grid; grid-template-columns: 250px 1fr; gap: 18px; padding: 3px 0; }
+.help .row span:first-child { color: var(--orchid); white-space: nowrap; }
+.help .row span:last-child { color: var(--muted); }
+.help .head { color: var(--text); font-weight: 800; margin: 14px 0 4px; }
+.help .head:first-child { margin-top: 0; }
+
+/* final */
+.final { text-align: center; padding: 34px 20px 28px; }
+.final .planchette { width: 70px; margin: 0 auto 14px; }
+.final h3 { font-size: clamp(24px, 4vw, 36px); margin: 0 0 8px; }
+.final p { color: var(--muted); margin: 0 auto; max-width: 560px; }
+.final .actions { justify-content: center; }
+.goodbye { margin-top: 26px; letter-spacing: 10px; color: var(--dim); font-size: 13px; }
+
+footer { padding: 40px 0 30px; color: var(--dim); font-size: 13px; }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 24px; }
+footer nav { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+footer a { color: var(--muted); text-decoration: none; }
+
+/* ── tmux-style status bar ─────────────────────── */
+.status {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; height: 32px;
+  display: flex; align-items: stretch; font-size: 13px;
+  background: #0f081c; border-top: 1px solid var(--line);
+}
+.status .sess { display: flex; align-items: center; padding: 0 14px; background: var(--violet); color: #fff; font-weight: 800; }
+.status .wins { display: flex; overflow-x: auto; scrollbar-width: none; }
+.status .wins::-webkit-scrollbar { display: none; }
+.status .wins a { display: flex; align-items: center; padding: 0 12px; color: var(--dim); text-decoration: none; white-space: nowrap; }
+.status .wins a:hover { color: var(--text); }
+.status .wins a.on { color: var(--text); background: var(--pane-2); }
+.status .wins a.on::after { content: "*"; color: var(--orchid); }
+.status .right { margin-left: auto; display: flex; align-items: center; gap: 14px; padding: 0 14px; color: var(--dim); white-space: nowrap; }
+.status .right .ok { color: var(--ok); }
+
+.reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .planchette, .g, .cursor { animation: none; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .typed-out .row { opacity: 1; }
+  html { scroll-behavior: auto; }
+}
+@media (max-width: 900px) {
+  .grid { grid-template-columns: 1fr 1fr; }
+  .split { grid-template-columns: 1fr; }
+  .keys { grid-template-columns: 1fr 1fr; }
+  .seance { grid-template-columns: 1fr; }
+  .flow { transform: rotate(90deg); }
+  .help .row { grid-template-columns: 1fr; gap: 0; padding: 6px 0; }
+  .status .right .hide-sm { display: none; }
+}
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+  .wrap { padding: 0 16px; }
+  .hero { padding: 40px 0 24px; }
+  .hero-grid { grid-template-columns: 1fr; gap: 18px; }
+  .planchette { width: 96px; }
+  .grid, .gallery, .keys { grid-template-columns: 1fr; }
+  fieldset.pane { padding: 14px 14px 16px; }
+  .titlebar .t { font-size: 12px; }
+  .titlebar .links { display: none; }
+  .status .right { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="titlebar">
+  <i></i><i></i><i></i>
+  <span class="t">ouija — ~/your-project — 120×40</span>
+  <span class="links"><a href="https://github.com/discorgento/ouija">github</a> · <a href="https://github.com/discorgento/ouija/tree/main/docs">docs</a></span>
+</div>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-grid">
+      <img class="planchette" src="assets/logo.svg" alt="ouija planchette">
+      <div>
+        <h1 class="wordmark g">ouija</h1>
+        <p class="tagline">AI agents you <span class="o">write in Go</span> — not prompt files.</p>
+        <p class="lede">A shared engine — <b>providers, sandbox, cost budget, tracing, MCP</b> — under <b>totems</b> you own: real code with types, tests and golden files. And a terminal chat that shows every tool, every diff and every cent.</p>
+        <div class="badges">
+          <span class="badge live" id="ver">latest release</span>
+          <span class="badge">MIT</span>
+          <span class="badge">Go 1.26+</span>
+          <span class="badge">linux · macos · windows</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="typed">
+      <div class="prompt"><span class="path">~/your-project</span><span class="branch">on main</span><span class="sym">❯</span><span class="cmd" id="typed-cmd"></span><span class="cursor"></span></div>
+      <div class="typed-out" id="typed-out"><div class="row"><span class="l">◆ scout</span>     <span class="d">mapped 14 files · internal/api, internal/cache</span></div><div class="row"><span class="nw"><span class="l">◆ pass 1</span> <span class="ok">done</span> <span class="d">· 6 steps</span></span><span class="nw"><span class="l">◆ pass 2</span> <span class="ok">done</span> <span class="d">· 7 steps</span></span><span class="nw"><span class="l">◆ pass 3</span> <span class="ok">done</span> <span class="d">· 6 steps</span></span></div><div class="row"><span class="l">◆ reconcile</span> <span class="ok">✓ verified plan</span> <span class="d">· 6 steps · 3 risks · checklist ready</span></div><div class="row"><span class="d">  42s · 31.2k tokens · $0.08</span></div></div>
+    </div>
+
+    <div class="actions">
+      <a class="key-btn primary" href="#install"><kbd>i</kbd> install</a>
+      <a class="key-btn" href="#chat"><kbd>c</kbd> see the chat</a>
+      <a class="key-btn" href="#agent"><kbd>a</kbd> write your agent</a>
+      <a class="key-btn" href="https://github.com/discorgento/ouija">★ star on github</a>
+    </div>
+
+    <div class="window demo reveal">
+      <div class="titlebar"><i></i><i></i><i></i><span class="t">ouija chat</span></div>
+      <img src="assets/demo.gif" alt="ouija chat: the intro, a question with an @file, the tools live, the reply and its diff, then /task drawn live and its plan">
+    </div>
+  </div>
+</header>
+
+<section id="why" data-win="why">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~/ouija</span><span class="sym">❯</span><span class="cmd">cat WHY.md</span></div>
+    <h2 class="reveal">Your workflow, as code the model can't skip</h2>
+    <p class="sub reveal">"Do A, then verify B, then reconcile" written in prose is a request the model may ignore. In Go it is the next line — and you can test it.</p>
+    <div class="grid">
+      <fieldset class="pane reveal"><legend>totems <span class="d">· go</span></legend>
+        <p class="lead">Agents are Go types</p>
+        <p>A totem lives in <em>your</em> repo, with types, unit tests and golden files. <code>go build</code> gives you a standalone binary.</p>
+      </fieldset>
+      <fieldset class="pane reveal"><legend>sandbox <span class="d">· fail closed</span></legend>
+        <p class="lead">An unsure check means deny</p>
+        <p>Filesystem sandbox, protected paths, permission levels, bash allowlist, doom-loop detection, env sanitization.</p>
+      </fieldset>
+      <fieldset class="pane reveal"><legend>budget <span class="d">· $</span></legend>
+        <p class="lead">Every cent on screen</p>
+        <p>Token and cost ceilings per run; every reply tells you its time, tokens and cost.</p>
+      </fieldset>
+      <fieldset class="pane reveal"><legend>trace <span class="d">· json</span></legend>
+        <p class="lead">Traced end to end</p>
+        <p>Every model call and tool run lands in a trace you can read back: what was asked, what ran, what it cost.</p>
+      </fieldset>
+      <fieldset class="pane reveal"><legend>chat <span class="d">· tui</span></legend>
+        <p class="lead">Shows its work</p>
+        <p>Tools live, diffs side by side, approval before writes, <code>/undo</code>, <code>@file</code>, search, themes, resume.</p>
+      </fieldset>
+      <fieldset class="pane reveal"><legend>mcp <span class="d">· editors</span></legend>
+        <p class="lead">Plugs into your editor</p>
+        <p><code>ouija mcp install</code> registers every totem as a tool in Claude Code, Cursor or OpenCode.</p>
+      </fieldset>
+    </div>
+  </div>
+</section>
+
+<section id="seance" data-win="seance">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~/ouija</span><span class="sym">❯</span><span class="cmd">ouija task <span class="s ok">"add a cache"</span></span></div>
+    <h2 class="reveal">Several hands spell one answer</h2>
+    <p class="sub reveal">A ouija board needs several hands. So does a good plan: the <code>task</code> totem runs independent passes and keeps what they agree on.</p>
+    <div class="seance reveal">
+      <fieldset class="pane"><legend>01 scout</legend><p>Reads the code that matters for the task and maps it.</p></fieldset>
+      <div class="flow">→</div>
+      <fieldset class="pane hi"><legend>02 passes <span class="d">· in parallel</span></legend>
+        <span class="pass"><span class="spin l" data-spin></span> <b>pass 1</b> <span class="d">· independent plan</span></span>
+        <span class="pass"><span class="spin l" data-spin></span> <b>pass 2</b> <span class="d">· independent plan</span></span>
+        <span class="pass"><span class="spin l" data-spin></span> <b>pass N</b> <span class="d">· independent plan</span></span>
+      </fieldset>
+      <div class="flow">→</div>
+      <fieldset class="pane"><legend>03 reconcile</legend><p>Merges the passes into one <span class="ok">verified plan</span> and a checklist.</p></fieldset>
+    </div>
+    <p class="note reveal">the engine knows nothing about tasks or documents — every totem defines its own flow on top of the same budget, sandbox and tracing</p>
+  </div>
+</section>
+
+<section id="chat" data-win="chat">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~/your-project</span><span class="sym">❯</span><span class="cmd">ouija</span></div>
+    <h2 class="reveal">Every reply says what it did</h2>
+    <p class="sub reveal">The turn's tools on one line — a failed command shows its last lines — the time, tokens and cost, and every file change as a diff.</p>
+    <fieldset class="pane reveal" style="margin-bottom: 22px;"><legend>last turn</legend>
+      <div class="turn"><span class="tool">✓ read</span> cache.go · <span class="tool">✓ grep</span> "Client" · <span class="e">✗ bash</span> go test ./... · <span class="tool">✓ edit</span> client.go <span class="d">+18 −4</span></div>
+      <div class="turn d">  12s · 8.4k tokens · $0.02 · /undo to take it back</div>
+    </fieldset>
+    <div class="gallery">
+      <figure class="reveal">
+        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">welcome</span></div><img src="assets/screens/chat-welcome.png" alt="The welcome screen: the logo and four places to start" loading="lazy"></div>
+        <figcaption>four places to start: <code>@file</code> <code>/task</code> <code>/learn</code> <code>/help</code></figcaption>
+      </figure>
+      <figure class="reveal">
+        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">conversation</span></div><img src="assets/screens/chat-conversation.png" alt="A reply with its tools, a failed test's output and the diff it applied" loading="lazy"></div>
+        <figcaption>tools, a failed test's tail, the diff it applied</figcaption>
+      </figure>
+      <figure class="wide reveal">
+        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">diff</span></div><img src="assets/screens/chat-diff.png" alt="A diff side by side, syntax-highlighted" loading="lazy"></div>
+        <figcaption>side by side on a wide terminal, syntax-highlighted, approved before it is written</figcaption>
+      </figure>
+      <figure class="wide reveal">
+        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">/task</span></div><img src="assets/screens/chat-task.png" alt="/task in the chat: the scout and the passes drawn live" loading="lazy"></div>
+        <figcaption>totems right in the chat: <code>/task "add a cache"</code> draws the séance live</figcaption>
+      </figure>
+    </div>
+    <div class="keys reveal">
+      <div><kbd>@file</kbd>attach a file</div>
+      <div><kbd>/undo</kbd>take a change back</div>
+      <div><kbd>Ctrl+F</kbd>search</div>
+      <div><kbd>-c</kbd>resume last chat</div>
+    </div>
+  </div>
+</section>
+
+<section id="install" data-win="install">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~</span><span class="sym">❯</span><span class="cmd">ouija setup</span></div>
+    <h2 class="reveal">From zero to a séance in a minute</h2>
+    <p class="sub reveal">ouija is a terminal program: "installed" means <code>ouija</code> is on your <code>PATH</code>.</p>
+    <div class="split">
+      <fieldset class="pane reveal"><legend>3 steps</legend>
+        <ol class="steps">
+          <li><span class="n">1</span><b>install</b> — pick your platform</li>
+          <li><span class="n">2</span><b>ouija setup</b> — API keys + default provider and model</li>
+          <li><span class="n">3</span><b>cd your-project &amp;&amp; ouija</b> — and start talking</li>
+        </ol>
+        <ul class="check">
+          <li>pick <code>ollama</code> to run fully local and free</li>
+          <li>something off? <code>ouija doctor</code> tells you what</li>
+          <li>archives checked against <code>SHA256SUMS</code>, built with provenance</li>
+        </ul>
+        <div class="chips"><span>anthropic</span><span>openai</span><span>openrouter</span><span>opencode</span><span class="free">ollama (local)</span></div>
+      </fieldset>
+      <fieldset class="pane hi reveal"><legend>install</legend>
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="win">windows</button>
+          <button role="tab" aria-selected="false" data-tab="nix">macos · linux</button>
+          <button role="tab" aria-selected="false" data-tab="go">from source</button>
+        </div>
+        <div class="panel" data-panel="win">
+<pre class="code"><button class="copy">copy</button><span class="cm"># PowerShell, no administrator rights needed</span>
+<span class="p">PS&gt; </span>irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
+
+<span class="cm"># then, in a new terminal</span>
+<span class="p">PS&gt; </span>ouija setup
+<span class="p">PS&gt; </span>ouija</pre>
+          <p class="note">installs to %LOCALAPPDATA%\Programs\ouija and adds it to PATH · the bash tool needs <a href="https://gitforwindows.org">Git for Windows</a></p>
+        </div>
+        <div class="panel" data-panel="nix" hidden>
+<pre class="code"><button class="copy">copy</button><span class="cm"># grab your archive + SHA256SUMS from the latest release</span>
+<span class="p">$ </span>sha256sum -c SHA256SUMS --ignore-missing   <span class="cm"># macOS: shasum -a 256 -c</span>
+<span class="p">$ </span>tar -xzf ouija_*_linux_amd64.tar.gz
+<span class="p">$ </span>sudo mv ouija ouija-mcp /usr/local/bin/
+
+<span class="p">$ </span>ouija setup
+<span class="p">$ </span>ouija</pre>
+          <p class="note">linux and macos, amd64 and arm64, on every <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
+        </div>
+        <div class="panel" data-panel="go" hidden>
+<pre class="code"><button class="copy">copy</button><span class="cm"># Go 1.26+</span>
+<span class="p">$ </span>git clone https://github.com/discorgento/ouija.git
+<span class="p">$ </span>cd ouija
+<span class="p">$ </span>make install   <span class="cm"># ouija + ouija-mcp into $GOBIN</span>
+
+<span class="p">$ </span>ouija setup
+<span class="p">$ </span>ouija</pre>
+          <p class="note">without make: go install ./cmd/ouija ./cmd/ouija-mcp · <a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/install.md">install guide</a></p>
+        </div>
+      </fieldset>
+    </div>
+  </div>
+</section>
+
+<section id="commands" data-win="help">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~</span><span class="sym">❯</span><span class="cmd">ouija --help</span></div>
+    <fieldset class="pane help reveal"><legend>usage: ouija &lt;command&gt; [flags]</legend>
+      <div class="head">Talk</div>
+      <div class="row"><span>ouija · ouija chat</span><span>interactive terminal chat: tools, streaming, diffs, approvals</span></div>
+      <div class="row"><span>ouija chat -c</span><span>resume the last conversation</span></div>
+      <div class="head">Totems</div>
+      <div class="row"><span>ouija task "…"</span><span>verified plan: scout → N passes → reconcile → checklist</span></div>
+      <div class="row"><span>ouija doc "…"</span><span>code-verified client document — HTML + PDF + technical Markdown</span></div>
+      <div class="row"><span>ouija sticker</span><span>laptop sticker SVG from real project metrics</span></div>
+      <div class="row"><span>ouija generate totem</span><span>scaffold a new totem</span></div>
+      <div class="head">Project</div>
+      <div class="row"><span>ouija setup · ouija init</span><span>global defaults · per-project config</span></div>
+      <div class="row"><span>ouija learn "fact"</span><span>save project knowledge for the chat and the task totem</span></div>
+      <div class="row"><span>ouija mcp install</span><span>register ouija in Claude Code, Cursor or OpenCode</span></div>
+      <div class="row"><span>ouija doctor</span><span>diagnose config, provider key and harness wiring</span></div>
+      <p class="note">flags, slash commands, shortcuts and exit codes: <a href="https://github.com/discorgento/ouija/blob/main/docs/reference/cli.md">CLI reference</a></p>
+    </fieldset>
+  </div>
+</section>
+
+<section id="agent" data-win="agent">
+  <div class="wrap">
+    <div class="prompt reveal"><span class="path">~/your-agents</span><span class="sym">❯</span><span class="cmd">ouija generate totem sentinel</span></div>
+    <h2 class="reveal">A Go type in your repo. That's the whole agent.</h2>
+    <p class="sub reveal"><code>engine</code>, <code>registry</code>, <code>schema</code> and <code>bootstrap</code> are public Go packages — no fork, no upstream rebuild. Your totem inherits the budget, the sandbox, the tracing and MCP.</p>
+    <div class="split" style="grid-template-columns: 1.35fr 1fr;">
+      <fieldset class="pane hi reveal"><legend>code</legend>
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-tab="totem">totems/sentinel/sentinel.go</button>
+          <button role="tab" aria-selected="false" data-tab="host">cmd/my-totem/main.go</button>
+        </div>
+        <div class="panel" data-panel="totem">
+<pre class="code"><button class="copy">copy</button><span class="k">package</span> sentinel
+
+<span class="k">import</span> (
+    <span class="s">"context"</span>
+
+    <span class="s">"github.com/discorgento/ouija/engine"</span>
+    <span class="s">"github.com/discorgento/ouija/registry"</span>
+)
+
+<span class="k">type</span> Totem <span class="k">struct</span>{}
+
+<span class="k">func</span> (t *Totem) <span class="f">Name</span>() <span class="k">string</span>    { <span class="k">return</span> <span class="s">"sentinel"</span> }
+<span class="k">func</span> (t *Totem) <span class="f">Summary</span>() <span class="k">string</span> { <span class="k">return</span> <span class="s">"Example external totem"</span> }
+<span class="k">func</span> (t *Totem) <span class="f">Run</span>(ctx context.Context, eng *engine.Engine, args registry.Args) (<span class="k">any</span>, <span class="k">error</span>) {
+    res, err := eng.<span class="f">Run</span>(ctx, engine.RunRequest{Label: <span class="s">"sentinel"</span>, Prompt: args.Task})
+    <span class="k">if</span> err != <span class="k">nil</span> {
+        <span class="k">return</span> <span class="k">nil</span>, err
+    }
+    <span class="k">return</span> <span class="k">map</span>[<span class="k">string</span>]<span class="k">string</span>{<span class="s">"summary"</span>: res.Text}, <span class="k">nil</span>
+}
+
+<span class="k">func</span> <span class="f">init</span>() { registry.<span class="f">Register</span>(&amp;Totem{}) }</pre>
+        </div>
+        <div class="panel" data-panel="host" hidden>
+<pre class="code"><button class="copy">copy</button><span class="k">package</span> main
+
+<span class="k">import</span> (
+    <span class="s">"os"</span>
+
+    <span class="s">"github.com/discorgento/ouija/bootstrap"</span>
+    _ <span class="s">"github.com/you/your-agents/totems/sentinel"</span>
+)
+
+<span class="k">func</span> <span class="f">main</span>() { os.<span class="f">Exit</span>(bootstrap.<span class="f">Main</span>(bootstrap.<span class="f">WithName</span>(<span class="s">"my-totem"</span>))) }</pre>
+        </div>
+      </fieldset>
+      <div style="display: grid; gap: 18px;">
+        <fieldset class="pane reveal"><legend>build &amp; run</legend>
+<pre class="code"><button class="copy">copy</button><span class="p">$ </span>go build -o my-totem ./cmd/my-totem
+<span class="p">$ </span>my-totem sentinel "audit the auth flow"
+<span class="p">$ </span>my-totem mcp   <span class="cm"># tools in your editor</span></pre>
+        </fieldset>
+        <fieldset class="pane reveal"><legend>inherited for free</legend>
+          <ul class="check">
+            <li>5 providers and their keys</li>
+            <li>cost budget and token ceilings</li>
+            <li>sandbox and permission levels</li>
+            <li>tracing of every call</li>
+            <li>CLI, typed inputs and MCP server</li>
+          </ul>
+          <p class="note"><a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/add-totem.md">add a totem</a> · <a href="https://github.com/discorgento/ouija/blob/main/docs/explanation/totems.md">why totems</a></p>
+        </fieldset>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section data-win="exit">
+  <div class="wrap">
+    <fieldset class="pane hi final reveal"><legend>the board</legend>
+      <img class="planchette" src="assets/logo.svg" alt="">
+      <h3 class="g">Ask the board.</h3>
+      <p>Install ouija, run it in a project and watch it spell out the answer — every tool, diff and cent on screen.</p>
+      <div class="actions">
+        <a class="key-btn primary" href="#install"><kbd>i</kbd> install ouija</a>
+        <a class="key-btn" href="https://github.com/discorgento/ouija/tree/main/docs"><kbd>d</kbd> read the docs</a>
+      </div>
+      <div class="goodbye">GOOD BYE</div>
+    </fieldset>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>MIT · © 2026 <a href="https://discorgento.com/">discorgento</a></span>
+    <nav>
+      <a href="https://github.com/discorgento/ouija">github</a>
+      <a href="https://github.com/discorgento/ouija/releases">releases</a>
+      <a href="https://github.com/discorgento/ouija/tree/main/docs">docs</a>
+      <a href="https://github.com/discorgento/ouija/blob/main/CHANGELOG.md">changelog</a>
+      <a href="https://github.com/discorgento/ouija/blob/main/SECURITY.md">security</a>
+    </nav>
+  </div>
+</footer>
+
+<div class="status" role="navigation" aria-label="sections">
+  <span class="sess">ouija</span>
+  <div class="wins">
+    <a href="#top" data-for="top">0:home</a>
+    <a href="#why" data-for="why">1:why</a>
+    <a href="#seance" data-for="seance">2:séance</a>
+    <a href="#chat" data-for="chat">3:chat</a>
+    <a href="#install" data-for="install">4:install</a>
+    <a href="#commands" data-for="commands">5:help</a>
+    <a href="#agent" data-for="agent">6:agent</a>
+  </div>
+  <div class="right"><span class="hide-sm">press <span class="o">i</span> install · <span class="o">c</span> chat · <span class="o">a</span> agent</span><span class="ok">● online</span><span id="clock">--:--</span></div>
+</div>
+
+<script>
+(function () {
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // hero: type the command, then print its output line by line
+  var cmd = 'ouija task "add a cache to the API client"';
+  var el = document.getElementById('typed-cmd');
+  var rows = document.querySelectorAll('#typed-out .row');
+  function showRows() { rows.forEach(function (r, i) { setTimeout(function () { r.classList.add('on'); }, still ? 0 : 450 + i * 520); }); }
+  if (still) { el.textContent = cmd; showRows(); }
+  else {
+    var i = 0;
+    (function type() {
+      el.textContent = cmd.slice(0, ++i);
+      if (i < cmd.length) setTimeout(type, 38 + Math.random() * 50); else showRows();
+    })();
+  }
+
+  // spinners on the passes, the same one-cell frames as the TUI
+  var frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+  var spins = document.querySelectorAll('[data-spin]');
+  var f = 0;
+  spins.forEach(function (s) { s.textContent = frames[0]; });
+  if (!still) setInterval(function () { f++; spins.forEach(function (s, k) { s.textContent = frames[(f + k * 3) % frames.length]; }); }, 90);
+
+  // tabs: each tab list switches the panels beside it
+  document.querySelectorAll('.tabs').forEach(function (list) {
+    var panels = list.parentElement.querySelectorAll('.panel');
+    list.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      list.querySelectorAll('button').forEach(function (x) { x.setAttribute('aria-selected', x === b); });
+      panels.forEach(function (p) { p.hidden = p.dataset.panel !== b.dataset.tab; });
+    });
+  });
+  if (!/Win/.test(navigator.platform || navigator.userAgent)) {
+    var nix = document.querySelector('[data-tab="nix"]'); if (nix) nix.click();
+  }
+
+  // copy: the block's commands, without comments, prompts or the button
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = btn.parentElement.cloneNode(true);
+      pre.querySelectorAll('.copy, .cm, .p').forEach(function (n) { n.remove(); });
+      var text = pre.textContent.split('\n').map(function (l) { return l.replace(/\s+$/, ''); })
+        .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = 'copied ✓'; setTimeout(function () { btn.textContent = 'copy'; }, 1400);
+      }).catch(function () {});
+    });
+  });
+
+  // keys, like the TUI: i install · c chat · a agent
+  var jump = { i: 'install', c: 'chat', a: 'agent', h: 'commands', g: 'top' };
+  document.addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey || /input|textarea/i.test(e.target.tagName)) return;
+    var id = jump[e.key]; if (id) document.getElementById(id).scrollIntoView();
+  });
+
+  // status bar: mark the section on screen
+  var links = document.querySelectorAll('.status .wins a');
+  function mark(id) { links.forEach(function (a) { a.classList.toggle('on', a.dataset.for === id); }); }
+  mark('top');
+  if ('IntersectionObserver' in window) {
+    var secs = ['top', 'why', 'seance', 'chat', 'install', 'commands', 'agent'].map(function (id) { return document.getElementById(id); });
+    var so = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) mark(e.target.id); });
+    }, { rootMargin: '-45% 0px -50% 0px' });
+    secs.forEach(function (s) { so.observe(s); });
+
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -40px 0px' });
+    document.querySelectorAll('.reveal').forEach(function (r) { io.observe(r); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function (r) { r.classList.add('in'); });
+  }
+
+  // clock on the status bar
+  function tick() { var d = new Date(); document.getElementById('clock').textContent = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+  tick(); setInterval(tick, 15000);
+
+  // the latest release's version
+  fetch('https://api.github.com/repos/discorgento/ouija/releases/latest')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { if (j && j.tag_name) document.getElementById('ver').textContent = j.tag_name + ' out now'; })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>
