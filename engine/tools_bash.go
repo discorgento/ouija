@@ -686,7 +686,9 @@ func isRootish(t string) bool {
 	}
 	// Spelling variants of the same targets: `${home}/`, `//`, `/.`, and the
 	// expanded home directory itself (expandedCalls substitutes $HOME).
-	c := strings.TrimSuffix(t, "*")
+	// filepath.ToSlash: on Windows $HOME expands to C:\Users\…, which only
+	// compares with the home directory once both are slash-separated.
+	c := filepath.ToSlash(strings.TrimSuffix(t, "*"))
 	if c == "" {
 		return false
 	}
