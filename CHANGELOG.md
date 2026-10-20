@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/discorgento/ouija/compare/v0.2.0...v0.3.0) (2026-10-20)
+
+
+### Features
+
+* **install:** add install.sh for Linux and macOS ([1dd1d71](https://github.com/discorgento/ouija/commit/1dd1d719bfbe1111e92bec5c186659d9c723d43c))
+* **site:** add a live terminal demo and animate the séance ([27f8f32](https://github.com/discorgento/ouija/commit/27f8f321cf480c014d5c2be74757f2d87ae1833b))
+* **site:** add a terminal-styled landing page published to GitHub Pages ([733fcb8](https://github.com/discorgento/ouija/commit/733fcb8f604ee6942ed7e9010b03a25b5f54eee1))
+* **site:** compare a prompt with a totem, add a first-five-minutes guide and a light theme ([4c53dc6](https://github.com/discorgento/ouija/commit/4c53dc6d8e4b2eafb0fb982214a615147c644d6d))
+
+
+### Bug Fixes
+
+* **install:** fall back to the newest release that has its Windows archive ([17ff28f](https://github.com/discorgento/ouija/commit/17ff28fd8c9afc1367d410918b82138433c6c3a7))
+
 ## [0.2.0](https://github.com/discorgento/ouija/compare/v0.1.0...v0.2.0) (2026-10-20)
 
 
