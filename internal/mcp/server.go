@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/discorgento/ouija/engine"
@@ -68,6 +69,20 @@ type Server struct {
 // inflightCall is a running tools/call the client can cancel.
 type inflightCall struct {
 	cancel context.CancelFunc
+	// byClient records that notifications/cancelled stopped the call. The
+	// call's context alone cannot tell: the server's own shutdown (EOF)
+	// cancels it too, and may land between the client's cancel and the check.
+	byClient atomic.Bool
+}
+
+// inflightKey carries a call's *inflightCall in its context.
+type inflightKey struct{}
+
+// cancelledByClient reports whether the client cancelled the call ctx runs
+// under — the one case MCP says must get no response.
+func cancelledByClient(ctx context.Context) bool {
+	c, _ := ctx.Value(inflightKey{}).(*inflightCall)
+	return c != nil && c.byClient.Load()
 }
 
 // New resolves the sandbox root (the config's ProjectRoot when it points
@@ -307,8 +322,8 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 	args := registry.Args{Task: task, Params: p.Arguments}
 	s.startCall(ctx, req.ID, func(callCtx context.Context) {
 		result, runErr := s.runTotem(callCtx, module, args)
-		if callCtx.Err() != nil && ctx.Err() == nil {
-			// Cancelled by the client: MCP says not to answer a cancelled request.
+		if cancelledByClient(callCtx) {
+			// MCP says not to answer a cancelled request.
 			s.logf("tools/call %s stopped", p.Name)
 			return
 		}
@@ -342,6 +357,7 @@ func (s *Server) runTotem(ctx context.Context, totem string, args registry.Args)
 func (s *Server) startCall(ctx context.Context, id json.RawMessage, fn func(ctx context.Context)) {
 	ctx, cancel := context.WithCancel(ctx)
 	call := &inflightCall{cancel: cancel}
+	ctx = context.WithValue(ctx, inflightKey{}, call)
 	key := callKey(id)
 
 	s.callsMu.Lock()
@@ -373,6 +389,7 @@ func (s *Server) cancelCall(id json.RawMessage) bool {
 	call, ok := s.calls[callKey(id)]
 	s.callsMu.Unlock()
 	if ok {
+		call.byClient.Store(true) // before cancel: the call checks it once it stops
 		call.cancel()
 	}
 	return ok
