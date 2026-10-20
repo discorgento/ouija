@@ -116,27 +116,6 @@ func renderWelcomeBanner(shift, width, reveal int, info welcomeInfo) string {
 	return b.String()
 }
 
-// totemsPanel lists the registered totems — agents written in Go that run
-// several independent passes and reconcile them — with what each does and
-// how to run it here.
-func totemsPanel(width int) string {
-	totems := listTotems()
-	if len(totems) == 0 {
-		return ""
-	}
-	nameW := 0
-	for _, t := range totems {
-		nameW = max(nameW, len(t.name)+1)
-	}
-	var body strings.Builder
-	body.WriteString(panelTitle.Render("◆ totems") + panelHint.Render("  agents in Go: several hands on the board, one answer"))
-	for _, t := range totems {
-		row := panelCmd.Render(fmt.Sprintf("%-*s", nameW, "/"+t.name)) + "  " + panelKey.Render(t.summary)
-		fmt.Fprintf(&body, "\n%s", ansi.Truncate(row, max(width-4, 20), "…"))
-	}
-	return panelBorder.Width(width).Render(body.String())
-}
-
 // renderLogo paints the figlet logo with a diagonal gradient sheen, or just the
 // name when the screen is narrower than the logo.
 func renderLogo(shift, width, reveal int) string {
