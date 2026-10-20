@@ -3,6 +3,7 @@ package totems
 
 import (
 	_ "github.com/discorgento/ouija/totems/doc"
+	_ "github.com/discorgento/ouija/totems/review"
 	_ "github.com/discorgento/ouija/totems/sticker"
 	_ "github.com/discorgento/ouija/totems/task"
 )

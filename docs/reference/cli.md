@@ -172,14 +172,15 @@ project config.
 ### `ouija <totem> [task] [--set <key>=<value>]… [--config <file>] [--trace-file <file>] [--json]`
 
 Run a registered totem. Whether the task is required comes from the totem's
-input schema: `sticker` runs without one, while `task` and `doc` reject a
+input schema: `sticker` and `review` run without one, while `task` and `doc` reject a
 missing task before running. `--set key=value` (repeatable) passes a named input
 the totem declares, typed by its input schema: a `string` input keeps the text
 as typed (`--set ticket=1234`), others are read as JSON (`3`, `true`,
 `["a","b"]`) when they parse, else as a string.
 
-Registered totems: `task` (analysis → plan), `doc` (code-verified client
-document), `sticker` (laptop sticker from project metrics). `ouija help` lists
+Registered totems: `task` (analysis → plan), `review` (the branch's changes →
+verified findings), `doc` (code-verified client document), `sticker` (laptop
+sticker from project metrics). `ouija help` lists
 them all.
 
 | Flag | Default | Description |
@@ -220,7 +221,7 @@ starting the server.
 | Feature | Detail |
 |---|---|
 | Protocol | JSON-RPC 2.0 over stdin/stdout |
-| Tool prefix | `ouija_<totem>` (e.g. `ouija_task`, `ouija_doc`, `ouija_sticker`) |
+| Tool prefix | `ouija_<totem>` (e.g. `ouija_task`, `ouija_review`, `ouija_doc`, `ouija_sticker`) |
 | Transport | stdio |
 | Budget | Engine budget applies per call |
 

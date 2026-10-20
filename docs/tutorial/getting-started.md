@@ -34,7 +34,7 @@ Two binaries, one engine:
 
 | Binary | What it is for |
 |---|---|
-| `ouija` | The CLI: totems (`task`, `doc`, `sticker`), `chat`, `setup`, `mcp`, … |
+| `ouija` | The CLI: totems (`task`, `review`, `doc`, `sticker`), `chat`, `setup`, `mcp`, … |
 | `ouija-mcp` | The same MCP server, as a standalone binary for hosts that launch it by name |
 
 You almost always use `ouija`.

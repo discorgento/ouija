@@ -12,7 +12,7 @@
 The ouija MCP server (`ouija mcp`) exposes totems as MCP **tools** and project
 files as MCP **resources** over stdio using JSON-RPC 2.0.
 
-- **Tools**: named `ouija_<totem>` — e.g. `ouija_task`, `ouija_doc`, `ouija_sticker`
+- **Tools**: named `ouija_<totem>` — e.g. `ouija_task`, `ouija_review`, `ouija_doc`, `ouija_sticker`
 - **Resources**: URI scheme `ouija://project/{path}` — sandboxed file access
   within the project root
 - **Transport**: JSON-RPC 2.0 over stdio, newline-delimited. The `initialize`

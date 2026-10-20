@@ -13,7 +13,7 @@ import (
 // Every registered totem is a slash command and is listed on the welcome.
 func TestTotemsAreOffered(t *testing.T) {
 	cmds := slashCommands()
-	for _, name := range []string{"/task <what>", "/doc", "/sticker [what]"} {
+	for _, name := range []string{"/task <what>", "/doc", "/review [what]", "/sticker [what]"} {
 		found := false
 		for _, c := range cmds {
 			found = found || strings.HasPrefix(c.cmd, name)
@@ -24,14 +24,14 @@ func TestTotemsAreOffered(t *testing.T) {
 	}
 	// The welcome names every totem on one line; /help says what each does.
 	out := ansi.Strip(renderWelcomeBanner(0, 120, -1, welcomeInfo{}))
-	if !strings.Contains(out, "totems  /doc · /sticker · /task — agents in Go: several hands, one answer") {
+	if !strings.Contains(out, "totems  /doc · /review · /sticker · /task — agents in Go: several hands, one answer") {
 		t.Errorf("welcome lacks the totems line:\n%s", out)
 	}
 	if narrow := ansi.Strip(renderWelcomeBanner(0, 40, -1, welcomeInfo{})); !strings.Contains(narrow, "/doc") {
 		t.Errorf("narrow welcome lacks the totems:\n%s", narrow)
 	}
 	help := ansi.Strip(renderHelp(slashCommands(), 160))
-	for _, want := range []string{"/task", "/doc", "/sticker"} {
+	for _, want := range []string{"/task", "/doc", "/review", "/sticker"} {
 		if !strings.Contains(help, want) {
 			t.Errorf("/help lacks %q:\n%s", want, help)
 		}
