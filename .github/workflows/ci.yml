@@ -107,6 +107,29 @@ jobs:
           ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija5" -NoPath
           & "$env:RUNNER_TEMP\ouija5\ouija.exe" version
 
+  # The same for install.sh, on Linux and macOS (Apple silicon), in the
+  # POSIX sh it is written for.
+  installer-unix:
+    name: install.sh (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: install.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          sh scripts/install.sh --dir "$RUNNER_TEMP/ouija"
+          "$RUNNER_TEMP/ouija/ouija" version
+          test -x "$RUNNER_TEMP/ouija/ouija-mcp"
+
   # Separate job: a vulnerability published today should be visible on its own,
   # not hidden inside the lint/test gate.
   vuln:

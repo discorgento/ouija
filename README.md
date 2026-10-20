@@ -174,6 +174,13 @@ Walkthrough: [Add a totem](docs/how-to/add-totem.md) · Design rationale:
 
 ## Install
 
+A release, no Go needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh       # Linux, macOS
+irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex           # Windows (PowerShell)
+```
+
 From a checkout:
 
 ```sh
