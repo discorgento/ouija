@@ -78,6 +78,35 @@ jobs:
       - name: test
         run: go test ./...
 
+  # The Windows installer end to end, against the latest release: download,
+  # checksum, install, `ouija version` — in PowerShell 7 and in the 5.1 that
+  # Windows ships. Its own job, and not a required check: it needs the network
+  # and a published release, which a PR does not control.
+  installer:
+    name: install.ps1 (windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: PowerShell 7
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija7" -NoPath
+          & "$env:RUNNER_TEMP\ouija7\ouija.exe" version
+
+      - name: Windows PowerShell 5.1
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija5" -NoPath
+          & "$env:RUNNER_TEMP\ouija5\ouija.exe" version
+
   # Separate job: a vulnerability published today should be visible on its own,
   # not hidden inside the lint/test gate.
   vuln:

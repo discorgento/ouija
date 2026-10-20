@@ -23,17 +23,43 @@ The full list with rationale is in [Conventions](contribute.md#dependencies).
 
 ## Pre-built archives (no Go needed)
 
-Starting with the first release, every
-[GitHub Release](https://github.com/discorgento/ouija/releases) is built by CI
-and carries `ouija-<os>-<arch>.tar.gz` archives (linux, macOS and Windows
-— amd64/arm64) plus a `SHA256SUMS` file. Verify, then extract:
+Every [GitHub Release](https://github.com/discorgento/ouija/releases) is built
+by CI and carries one archive per platform, named after the version —
+`ouija_<version>_<os>_<arch>.tar.gz` for Linux and macOS (amd64, arm64),
+`ouija_<version>_windows_amd64.zip` for Windows — plus a `SHA256SUMS` file.
+(`v0.1.0` used `ouija-<os>-<arch>.tar.gz`.)
+
+ouija is a terminal program: there is no installer window or app icon —
+"installed" means `ouija` is on your `PATH`, and you run it from a terminal.
+
+### Linux and macOS
 
 ```sh
-sha256sum -c SHA256SUMS --ignore-missing   # macOS: shasum -a 256 -c
-tar -xzf ouija-linux-amd64.tar.gz          # ouija + ouija-mcp inside
+sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c --ignore-missing
+tar -xzf ouija_0.2.0_linux_amd64.tar.gz       # ouija + ouija-mcp inside
 ```
 
 Put both binaries on your `PATH` (see the last step below).
+
+### Windows
+
+In PowerShell — no administrator rights needed:
+
+```powershell
+irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
+```
+
+It downloads the latest release's zip, checks it against `SHA256SUMS`, puts
+`ouija.exe` and `ouija-mcp.exe` in `%LOCALAPPDATA%\Programs\ouija` and adds
+that folder to your user's `PATH`. Then open a **new** terminal (Windows
+Terminal or PowerShell) and run `ouija setup`, then `ouija` in a project
+folder. Saved as a file, the script takes `-Version 0.2.0`, `-InstallDir <dir>`
+and `-NoPath`.
+
+By hand: download the zip, extract it (Explorer opens it), and add the folder
+holding `ouija.exe` to your `PATH` — *Settings → System → About → Advanced
+system settings → Environment Variables*. The `bash` tool also needs
+[Git for Windows](https://gitforwindows.org) (see the requirements above).
 
 ## Install the CLI
 
