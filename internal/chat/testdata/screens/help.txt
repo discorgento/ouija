@@ -1,8 +1,8 @@
  ● ouija 0.0.0 │ ⎇ main │ /proj                                                               claude-sonnet-5-5 · anthropic │ ctx ▱▱▱▱▱▱ 0%
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
    ◆ commands
    /doc <what>                    totem · Generate a code-verified client document: scout → verify → compose → .html/.pdf/.md
+   /review [what]                 totem · Review the branch's changes: find problems → verify each one → report what holds
    /sticker [what]                totem · Generate a laptop sticker with real project metrics
    /task <what>                   totem · Analyze a task: scout → N passes x dimensions → reconcile → plan
    /clear                         Clear chat history

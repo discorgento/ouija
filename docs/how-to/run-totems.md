@@ -4,7 +4,7 @@
 
 # Run a totem
 
-> Running `task`, `doc`, `sticker` and `learn` from the terminal. Audience: user
+> Running `task`, `review`, `doc`, `sticker` and `learn` from the terminal. Audience: user
 
 Totems are ouija's workflows. Each one is a command: `ouija <totem> "<task>"`.
 Full flag and exit-code tables live in the [CLI reference](../reference/cli.md) —
@@ -40,6 +40,26 @@ The reconcile step also saves the plan to `docs/task-plan.md`.
 
 Run it from inside the module you're analyzing — no extra flags needed. Config
 discovery walks up from the current directory.
+
+## `ouija review` — review the branch before the PR
+
+```sh
+ouija review                          # everything the branch changed since main
+ouija review "concurrency"            # with a focus
+ouija review --set base=develop       # against another branch or commit
+```
+
+Pipeline: **the diff → find → a skeptic verifies each finding → report**.
+The diff is read by Go (`git diff --merge-base <base>`: commits and uncommitted
+changes), not guessed by the model. Each finding then goes to an independent
+verify pass that rereads the code; only the confirmed ones are reported, and
+the dropped ones are listed with the skeptic's reason. Without `base` it
+compares against `main`, else `master`.
+
+Style and naming are left out on purpose: it reports bugs, unhandled errors,
+races, leaks, security holes and broken contracts. The repository's own git
+config cannot make it run a command — external diffs, `textconv` filters and
+`core.fsmonitor` are turned off for its git calls.
 
 ## `ouija doc` — code-verified client documents
 

@@ -27,7 +27,7 @@ accomplish, look up, understand. Every page follows
 |---|---|
 | [Install](how-to/install.md) | Installing ouija from source, requirements, `PATH` |
 | [Configure](how-to/configure.md) | `ouija setup`, `ouija init`, config layers, API keys |
-| [Run a totem](how-to/run-totems.md) | `task`, `doc`, `sticker`, `learn`, per-run stats |
+| [Run a totem](how-to/run-totems.md) | `task`, `review`, `doc`, `sticker`, `learn`, per-run stats |
 | [Use the chat TUI](how-to/chat.md) | Approvals, permissions, queueing, sessions |
 | [MCP integration](how-to/integrate-mcp.md) | Using ouija from OpenCode, Claude Code, Cursor |
 | [Add a totem](how-to/add-totem.md) | Create a new totem — in the ouija repo or your own |
