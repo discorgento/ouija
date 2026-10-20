@@ -184,7 +184,9 @@ h2::before { content: "## "; color: var(--violet); }
 .keys kbd { display: inline-block; font: inherit; font-weight: 600; color: var(--text); padding: 0 7px; margin-right: 6px; border: 1px solid var(--line); border-bottom-width: 3px; border-radius: 5px; background: var(--pane-2); }
 
 /* install */
-.split { display: grid; grid-template-columns: 1fr 1.2fr; gap: 28px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 24px; align-items: start; }
+.agent { display: grid; gap: 20px; }
+.agent .side { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
 .steps { list-style: none; margin: 0; padding: 0; }
 .steps li { padding: 0 0 16px; color: var(--muted); }
 .steps li .n { color: var(--orchid); font-weight: 800; margin-right: 8px; }
@@ -202,7 +204,7 @@ h2::before { content: "## "; color: var(--violet); }
 .tabs button[aria-selected="true"]::before { content: "▸ "; color: var(--orchid); }
 .panel[hidden] { display: none; }
 pre.code {
-  position: relative; margin: 0; padding: 14px 16px; overflow-x: auto;
+  position: relative; margin: 0; padding: 14px 76px 14px 16px; overflow-x: auto;
   border-radius: 8px; background: #08040f; border: 1px solid var(--line);
   font: 13.5px/1.75 var(--mono); color: #d9d0f5;
 }
@@ -260,6 +262,22 @@ footer a { color: var(--muted); text-decoration: none; }
 .reveal { opacity: 0; transform: translateY(14px); transition: opacity .6s ease, transform .6s ease; }
 .reveal.in { opacity: 1; transform: none; }
 
+/* ── the live terminal ─────────────────────────── */
+fieldset.term { margin-top: 56px; padding-bottom: 14px; cursor: text; }
+.term-out { min-height: 13.5em; max-height: 22em; overflow-y: auto; font-size: 14px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.term-out .ln { min-height: 1.65em; }
+.term-in { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 15px; }
+.term-in .path { color: var(--lilac); }
+.term-in .sym { color: var(--orchid); font-weight: 800; }
+.term-in input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; caret-color: var(--orchid); }
+.bar { color: var(--violet); letter-spacing: -1px; }
+.bar .f { color: var(--lilac); }
+
+/* séance pane, finished */
+.pane.done { border-color: var(--ok); box-shadow: 0 0 0 1px rgba(126, 226, 184, .3), 0 0 40px rgba(126, 226, 184, .18); }
+.pane.done legend { color: var(--ok); }
+.pass .bar { margin-left: 8px; }
+
 @media (prefers-reduced-motion: reduce) {
   .planchette, .g, .cursor { animation: none; }
   .reveal { opacity: 1; transform: none; transition: none; }
@@ -269,6 +287,7 @@ footer a { color: var(--muted); text-decoration: none; }
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr 1fr; }
   .split { grid-template-columns: 1fr; }
+  .agent .side { grid-template-columns: 1fr; }
   .keys { grid-template-columns: 1fr 1fr; }
   .seance { grid-template-columns: 1fr; }
   .flow { transform: rotate(90deg); }
@@ -286,6 +305,7 @@ footer a { color: var(--muted); text-decoration: none; }
   .titlebar .t { font-size: 12px; }
   .titlebar .links { display: none; }
   .status .right { display: none; }
+  .term legend .d { display: none; }
 }
 </style>
 </head>
@@ -301,7 +321,7 @@ footer a { color: var(--muted); text-decoration: none; }
   <div class="wrap">
     <div class="hero-grid">
       <img class="planchette" src="assets/logo.svg" alt="ouija planchette">
-      <div>
+      <div class="hero-text">
         <h1 class="wordmark g">ouija</h1>
         <p class="tagline">AI agents you <span class="o">write in Go</span> — not prompt files.</p>
         <p class="lede">A shared engine — <b>providers, sandbox, cost budget, tracing, MCP</b> — under <b>totems</b> you own: real code with types, tests and golden files. And a terminal chat that shows every tool, every diff and every cent.</p>
@@ -311,20 +331,19 @@ footer a { color: var(--muted); text-decoration: none; }
           <span class="badge">Go 1.26+</span>
           <span class="badge">linux · macos · windows</span>
         </div>
+        <div class="actions">
+          <a class="key-btn primary" href="#install"><kbd>i</kbd> install</a>
+          <a class="key-btn" href="#chat"><kbd>c</kbd> see the chat</a>
+          <a class="key-btn" href="https://github.com/discorgento/ouija">★ star on github</a>
+        </div>
       </div>
     </div>
 
-    <div class="typed">
-      <div class="prompt"><span class="path">~/your-project</span><span class="branch">on main</span><span class="sym">❯</span><span class="cmd" id="typed-cmd"></span><span class="cursor"></span></div>
-      <div class="typed-out" id="typed-out"><div class="row"><span class="l">◆ scout</span>     <span class="d">mapped 14 files · internal/api, internal/cache</span></div><div class="row"><span class="nw"><span class="l">◆ pass 1</span> <span class="ok">done</span> <span class="d">· 6 steps</span></span><span class="nw"><span class="l">◆ pass 2</span> <span class="ok">done</span> <span class="d">· 7 steps</span></span><span class="nw"><span class="l">◆ pass 3</span> <span class="ok">done</span> <span class="d">· 6 steps</span></span></div><div class="row"><span class="l">◆ reconcile</span> <span class="ok">✓ verified plan</span> <span class="d">· 6 steps · 3 risks · checklist ready</span></div><div class="row"><span class="d">  42s · 31.2k tokens · $0.08</span></div></div>
-    </div>
-
-    <div class="actions">
-      <a class="key-btn primary" href="#install"><kbd>i</kbd> install</a>
-      <a class="key-btn" href="#chat"><kbd>c</kbd> see the chat</a>
-      <a class="key-btn" href="#agent"><kbd>a</kbd> write your agent</a>
-      <a class="key-btn" href="https://github.com/discorgento/ouija">★ star on github</a>
-    </div>
+    <fieldset class="pane hi term" id="term">
+      <legend>~/your-project <span class="d">· a live demo — click and type</span> <span class="o">help</span></legend>
+      <div class="term-out" id="term-out" aria-live="polite"></div>
+      <label class="term-in"><span class="path">~/your-project</span><span class="sym">❯</span><input id="term-input" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="type a command, or help"></label>
+    </fieldset>
 
     <div class="window demo reveal">
       <div class="titlebar"><i></i><i></i><i></i><span class="t">ouija chat</span></div>
@@ -376,9 +395,9 @@ footer a { color: var(--muted); text-decoration: none; }
       <fieldset class="pane"><legend>01 scout</legend><p>Reads the code that matters for the task and maps it.</p></fieldset>
       <div class="flow">→</div>
       <fieldset class="pane hi"><legend>02 passes <span class="d">· in parallel</span></legend>
-        <span class="pass"><span class="spin l" data-spin></span> <b>pass 1</b> <span class="d">· independent plan</span></span>
-        <span class="pass"><span class="spin l" data-spin></span> <b>pass 2</b> <span class="d">· independent plan</span></span>
-        <span class="pass"><span class="spin l" data-spin></span> <b>pass N</b> <span class="d">· independent plan</span></span>
+        <span class="pass"><span class="l">⠋</span> <b>pass 1</b><span class="bar">░░░░░░░░░░░░░░</span></span>
+        <span class="pass"><span class="l">⠋</span> <b>pass 2</b><span class="bar">░░░░░░░░░░░░░░</span></span>
+        <span class="pass"><span class="l">⠋</span> <b>pass N</b><span class="bar">░░░░░░░░░░░░░░</span></span>
       </fieldset>
       <div class="flow">→</div>
       <fieldset class="pane"><legend>03 reconcile</legend><p>Merges the passes into one <span class="ok">verified plan</span> and a checklist.</p></fieldset>
@@ -458,14 +477,14 @@ footer a { color: var(--muted); text-decoration: none; }
           <p class="note">installs to %LOCALAPPDATA%\Programs\ouija and adds it to PATH · the bash tool needs <a href="https://gitforwindows.org">Git for Windows</a></p>
         </div>
         <div class="panel" data-panel="nix" hidden>
-<pre class="code"><button class="copy">copy</button><span class="cm"># grab your archive + SHA256SUMS from the latest release</span>
-<span class="p">$ </span>sha256sum -c SHA256SUMS --ignore-missing   <span class="cm"># macOS: shasum -a 256 -c</span>
+<pre class="code"><button class="copy">copy</button><span class="cm"># your archive + SHA256SUMS, from the release</span>
+<span class="p">$ </span>sha256sum -c SHA256SUMS --ignore-missing
 <span class="p">$ </span>tar -xzf ouija_*_linux_amd64.tar.gz
 <span class="p">$ </span>sudo mv ouija ouija-mcp /usr/local/bin/
 
 <span class="p">$ </span>ouija setup
 <span class="p">$ </span>ouija</pre>
-          <p class="note">linux and macos, amd64 and arm64, on every <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
+          <p class="note">on macOS check with shasum -a 256 -c · linux and macos, amd64 and arm64, on every <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
         </div>
         <div class="panel" data-panel="go" hidden>
 <pre class="code"><button class="copy">copy</button><span class="cm"># Go 1.26+</span>
@@ -509,7 +528,7 @@ footer a { color: var(--muted); text-decoration: none; }
     <div class="prompt reveal"><span class="path">~/your-agents</span><span class="sym">❯</span><span class="cmd">ouija generate totem sentinel</span></div>
     <h2 class="reveal">A Go type in your repo. That's the whole agent.</h2>
     <p class="sub reveal"><code>engine</code>, <code>registry</code>, <code>schema</code> and <code>bootstrap</code> are public Go packages — no fork, no upstream rebuild. Your totem inherits the budget, the sandbox, the tracing and MCP.</p>
-    <div class="split" style="grid-template-columns: 1.35fr 1fr;">
+    <div class="agent">
       <fieldset class="pane hi reveal"><legend>code</legend>
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected="true" data-tab="totem">totems/sentinel/sentinel.go</button>
@@ -552,7 +571,7 @@ footer a { color: var(--muted); text-decoration: none; }
 <span class="k">func</span> <span class="f">main</span>() { os.<span class="f">Exit</span>(bootstrap.<span class="f">Main</span>(bootstrap.<span class="f">WithName</span>(<span class="s">"my-totem"</span>))) }</pre>
         </div>
       </fieldset>
-      <div style="display: grid; gap: 18px;">
+      <div class="side">
         <fieldset class="pane reveal"><legend>build &amp; run</legend>
 <pre class="code"><button class="copy">copy</button><span class="p">$ </span>go build -o my-totem ./cmd/my-totem
 <span class="p">$ </span>my-totem sentinel "audit the auth flow"
@@ -619,26 +638,210 @@ footer a { color: var(--muted); text-decoration: none; }
 (function () {
   var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // hero: type the command, then print its output line by line
-  var cmd = 'ouija task "add a cache to the API client"';
-  var el = document.getElementById('typed-cmd');
-  var rows = document.querySelectorAll('#typed-out .row');
-  function showRows() { rows.forEach(function (r, i) { setTimeout(function () { r.classList.add('on'); }, still ? 0 : 450 + i * 520); }); }
-  if (still) { el.textContent = cmd; showRows(); }
-  else {
-    var i = 0;
-    (function type() {
-      el.textContent = cmd.slice(0, ++i);
-      if (i < cmd.length) setTimeout(type, 38 + Math.random() * 50); else showRows();
-    })();
+  // the same one-cell spinner frames as the TUI
+  var frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+
+  // ── the live terminal ──
+  var out = document.getElementById('term-out'), input = document.getElementById('term-input');
+  var term = document.getElementById('term');
+  var busy = false, demo = true, hist = [], hi = 0;
+  function esc(s) { return s.replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function line(html) {
+    var d = document.createElement('div'); d.className = 'ln'; d.innerHTML = html || '';
+    out.appendChild(d);
+    while (out.children.length > 80) out.removeChild(out.firstChild);
+    out.scrollTop = out.scrollHeight;
+    return d;
+  }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, still ? 0 : ms); }); }
+  function bar(p) { var n = Math.round(p * 14); return '<span class="bar"><span class="f">' + '█'.repeat(n) + '</span>' + '░'.repeat(14 - n) + '</span>'; }
+  function spinFor(el, label, ms) {
+    return new Promise(function (r) {
+      if (still) { r(); return; }
+      var k = 0, t = setInterval(function () { el.innerHTML = '<span class="l">' + frames[k++ % frames.length] + '</span> ' + label; }, 80);
+      setTimeout(function () { clearInterval(t); r(); }, ms);
+    });
+  }
+  function count(el, to, fmt, ms) {
+    return new Promise(function (r) {
+      var t0 = performance.now();
+      (function f(now) {
+        var p = still ? 1 : Math.min(1, (now - t0) / ms);
+        el.textContent = fmt(to * (1 - Math.pow(1 - p, 3)));
+        if (p < 1) requestAnimationFrame(f); else r();
+      })(t0);
+    });
   }
 
-  // spinners on the passes, the same one-cell frames as the TUI
-  var frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
-  var spins = document.querySelectorAll('[data-spin]');
-  var f = 0;
-  spins.forEach(function (s) { s.textContent = frames[0]; });
-  if (!still) setInterval(function () { f++; spins.forEach(function (s, k) { s.textContent = frames[(f + k * 3) % frames.length]; }); }, 90);
+  var cmds = {
+    help: function () {
+      [
+        '<span class="b">a few things to try</span> <span class="d">(this is a demo — the real thing runs on your code)</span>',
+        '  <span class="o">task "add a cache"</span>   a verified plan: scout → passes → reconcile',
+        '  <span class="o">will it work?</span>        ask the board anything ending in ?',
+        '  <span class="o">install</span>              how to get it',
+        '  <span class="o">why</span> · <span class="o">totems</span> · <span class="o">doctor</span> · <span class="o">clear</span> · <span class="o">goodbye</span>'
+      ].forEach(line);
+    },
+    task: async function (arg) {
+      var what = arg.replace(/^["']|["']$/g, '') || 'add a cache to the API client';
+      line('<span class="d">◆ séance · task · "' + esc(what) + '"</span>');
+      var s = line(); await spinFor(s, 'scout <span class="d">reading the code…</span>', 1100);
+      s.innerHTML = '<span class="ok">✓</span> scout     <span class="d">mapped 14 files · 1.1s</span>';
+      var rows = [1, 2, 3].map(function (n) { return { el: line(), n: n, p: 0, v: .012 + Math.random() * .02 }; });
+      await new Promise(function (r) {
+        (function tick() {
+          var all = true;
+          rows.forEach(function (x) {
+            x.p = still ? 1 : Math.min(1, x.p + x.v);
+            if (x.p < 1) all = false;
+            x.el.innerHTML = (x.p < 1 ? '<span class="l">' + frames[Math.floor(x.p * 60) % frames.length] + '</span>' : '<span class="ok">✓</span>') +
+              ' pass ' + x.n + '    ' + bar(x.p) + ' <span class="d">' + (x.p < 1 ? Math.round(x.p * 100) + '%' : (5 + x.n % 3) + ' steps') + '</span>';
+          });
+          if (all) r(); else setTimeout(tick, 60);
+        })();
+      });
+      var rc = line(); await spinFor(rc, 'reconcile <span class="d">keeping what the passes agree on…</span>', 900);
+      rc.innerHTML = '<span class="ok">✓</span> reconcile <span class="ok">verified plan</span> <span class="d">· 6 steps · 2 risks · checklist ready</span>';
+      line('');
+      ['find every call site the change touches', 'put the change behind a small interface', 'cover it with unit tests and a golden file', 'run the gate: gofmt · vet · go test -race']
+        .forEach(function (t, k) { line('  <span class="o">' + (k + 1) + '.</span> ' + t); });
+      var m = line('<span class="d">  </span>');
+      var a = document.createElement('span'), b = document.createElement('span'), c = document.createElement('span');
+      a.className = b.className = 'd'; c.className = 'ok';
+      m.append(a, document.createTextNode('  '), b, document.createTextNode('  '), c);
+      await Promise.all([
+        count(a, 38, function (v) { return Math.round(v) + 's'; }, 900),
+        count(b, 31.2, function (v) { return v.toFixed(1) + 'k tokens'; }, 900),
+        count(c, 0.08, function (v) { return '$' + v.toFixed(2); }, 900)
+      ]);
+    },
+    install: function () {
+      var win = /Win/.test(navigator.platform || navigator.userAgent);
+      line('<span class="d"># ' + (win ? 'PowerShell' : 'from a checkout, Go 1.26+') + '</span>');
+      line(win ? 'irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex' : 'git clone https://github.com/discorgento/ouija.git && cd ouija && make install');
+      line('ouija setup <span class="d">   # keys + default model — or ollama, local and free</span>');
+      line('<span class="d">every platform → </span><a href="#install">#install</a>');
+    },
+    why: function () {
+      line('"do A, then verify B, then reconcile" in a prompt is a <span class="w">request</span>.');
+      line('in Go it is the <span class="ok">next line</span> — and you can test it.');
+    },
+    totems: function () {
+      line('  <span class="o">task</span>     verified plan from N independent passes');
+      line('  <span class="o">doc</span>      code-verified client document · HTML + PDF');
+      line('  <span class="o">sticker</span>  laptop sticker from real project metrics');
+      line('  <span class="o">yours</span>    <span class="d">ouija generate totem → a Go type in your repo</span>');
+    },
+    doctor: async function () {
+      var checks = ['config ~/.config/ouija/config.json', 'provider key', 'sandbox · project root', 'mcp wiring'];
+      for (var k = 0; k < checks.length; k++) { var d = line(); await spinFor(d, checks[k], 260); d.innerHTML = '<span class="ok">✓</span> ' + checks[k]; }
+      line('<span class="ok">all good</span> <span class="d">— the board is listening</span>');
+    },
+    clear: function () { out.innerHTML = ''; },
+    goodbye: function () { line('<span class="d">the planchette drifts to</span> <span class="o">GOOD BYE</span>'); },
+    ls: function () { line('<span class="l">bootstrap/  cmd/  engine/  registry/  schema/  totems/</span>  README.md  go.mod'); },
+    ouija: function () { line('the chat lives in your terminal — <a href="#install">install it</a> and run <span class="o">ouija</span> in a project.'); },
+    echo: function (arg) { line(esc(arg)); }
+  };
+  cmds.exit = cmds.bye = cmds.goodbye; cmds.chat = cmds.ouija; cmds['?'] = cmds.help;
+
+  async function run(raw) {
+    var s = raw.trim();
+    line('<span class="l">~/your-project</span> <span class="o b">❯</span> ' + esc(s));
+    if (!s) return;
+    hist.push(s); hi = hist.length;
+    var low = s.toLowerCase().replace(/^ouija\s+(?=\S)/, '');
+    var name = low.split(/\s+/)[0], arg = s.replace(/^(ouija\s+)?\S+\s*/i, '');
+    busy = true;
+    try {
+      if (/^(sudo|rm|chmod|curl|dd|mkfs)\b/.test(name)) {
+        line('<span class="e">✗ denied</span> <span class="d">— protected by the bash denylist; ouija fails closed</span>');
+      } else if (/\?$/.test(s)) {
+        var d = line(); await spinFor(d, '<span class="d">hands on the planchette… it moves</span>', 1600);
+        var h = 0; for (var k = 0; k < s.length; k++) h = (h * 31 + s.charCodeAt(k)) | 0;
+        var ans = (h & 1) ? 'YES' : 'NO';
+        d.innerHTML = '◆ the board says <span class="' + (ans === 'YES' ? 'ok' : 'e') + ' b">' + ans + '</span> <span class="d">· for real answers: ouija chat</span>';
+      } else if (cmds[name]) {
+        await cmds[name](arg);
+      } else {
+        line('ouija: unknown command "' + esc(name) + '" <span class="d">— try</span> <span class="o">help</span>');
+      }
+    } finally { busy = false; }
+  }
+
+  function typeInto(s) {
+    return new Promise(function (r) {
+      var k = 0;
+      (function t() {
+        if (!demo) { input.value = ''; r(false); return; }
+        input.value = s.slice(0, ++k);
+        if (k < s.length) setTimeout(t, still ? 0 : 45 + Math.random() * 55); else setTimeout(function () { r(true); }, still ? 0 : 350);
+      })();
+    });
+  }
+  // until someone types, the terminal plays a short demo on a loop
+  var script = ['help', 'task "add a cache to the API client"', 'will this ship on friday?', 'sudo rm -rf /'];
+  async function play() {
+    // without motion every wait is 0: show the help once instead of looping
+    if (still) { demo = false; run('help'); return; }
+    for (var k = 0; demo; k = (k + 1) % script.length) {
+      if (k === 0) { out.innerHTML = ''; }
+      var ok = await typeInto(script[k]); if (!ok) return;
+      input.value = ''; await run(script[k]);
+      await wait(k === script.length - 1 ? 4200 : 1500);
+    }
+  }
+  function takeOver() {
+    if (!demo) return;
+    demo = false; input.value = '';
+    setTimeout(function () { out.innerHTML = ''; line('<span class="d">your turn — type</span> <span class="o">help</span>'); }, 0);
+  }
+  term.addEventListener('click', function () { input.focus({ preventScroll: true }); });
+  input.addEventListener('focus', takeOver);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); if (busy) return; var v = input.value; input.value = ''; run(v); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (hi > 0) input.value = hist[--hi]; }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); hi = Math.min(hist.length, hi + 1); input.value = hist[hi] || ''; }
+    else if (e.key === 'Tab') {
+      e.preventDefault();
+      var m = Object.keys(cmds).filter(function (c) { return c.indexOf(input.value) === 0 && c !== '?'; });
+      if (m.length === 1) input.value = m[0] + ' ';
+    } else if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); out.innerHTML = ''; }
+  });
+  // start the demo when the terminal is first seen
+  if ('IntersectionObserver' in window) {
+    var started = false;
+    new IntersectionObserver(function (es, o) { if (es[0].isIntersecting && !started) { started = true; o.disconnect(); play(); } }).observe(term);
+  } else play();
+
+  // ── the séance section: the passes fill in parallel, then reconcile lights up ──
+  var seance = document.querySelector('.seance');
+  var passEls = seance.querySelectorAll('.pass');
+  var recon = seance.querySelector('.pane:last-of-type');
+  var running = false, seen = false;
+  function seanceLoop() {
+    if (running) return; running = true;
+    recon.classList.remove('done');
+    var ps = Array.prototype.map.call(passEls, function (el, k) { return { el: el, p: 0, v: .006 + k * .003 + Math.random() * .004 }; });
+    var names = ['pass 1', 'pass 2', 'pass N'];
+    (function tick() {
+      var all = true;
+      ps.forEach(function (x, k) {
+        x.p = still ? 1 : Math.min(1, x.p + x.v);
+        if (x.p < 1) all = false;
+        x.el.innerHTML = (x.p < 1 ? '<span class="l">' + frames[Math.floor(x.p * 80 + k * 3) % frames.length] + '</span>' : '<span class="ok">✓</span>') +
+          ' <b>' + names[k] + '</b>' + bar(x.p);
+      });
+      if (!all) { setTimeout(tick, 50); return; }
+      recon.classList.add('done');
+      running = false;
+      if (!still) setTimeout(function () { if (seen) seanceLoop(); }, 3800);
+    })();
+  }
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (es) { seen = es[0].isIntersecting; if (seen) seanceLoop(); }, { threshold: .4 }).observe(seance);
+  } else seanceLoop();
 
   // tabs: each tab list switches the panels beside it
   document.querySelectorAll('.tabs').forEach(function (list) {
