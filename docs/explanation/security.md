@@ -6,213 +6,234 @@
 
 > What ouija refuses to do, in which order, and why. Audience: explanation
 
-ouija has **multiple layers** of defense — filesystem sandbox, permission
-config, interactive approval, bash denylist and allowlist, budget ceilings,
-environment sanitization, doom-loop detection, and protected paths that are
-always denied.
+ouija defends in **several layers**: a filesystem sandbox, protected paths that
+are always denied, a permission config with interactive approval, a bash
+denylist and allowlist, doom-loop detection, budget ceilings, and a sanitized
+environment for subprocesses.
 
-The organizing principle is **fail closed**: when a check is inconclusive, the
-answer is no. Every layer below is a hard rule *before* it is a preference.
+Every layer **fails closed**: when a check cannot reach a clear answer, the
+answer is no. Each layer below is a hard rule first and a preference second.
 
 ## Layer 1: Filesystem sandbox
 
-Every file tool is confined to the project root via `SafeJoin()` — a lexical
-check that rejects `../` traversal. Symlinks are resolved component by component
-(not via `EvalSymlinks` on the full path) to detect escapes even when the final
-target doesn't exist yet (closing the TOCTOU window) — including a dangling
-symlink, which is followed to the missing target a write would create. The `delete_file` tool
-resolves symlinks before `os.RemoveAll`. The `doc` output dir and MCP resources
-use the same mechanism — the MCP server calls `engine.SafeResolve()` rather than
-re-implementing the join, so it inherits both the symlink and protected-path
-checks.
+Every file tool stays inside the project root. `SafeJoin()` checks the path
+lexically and rejects `../` traversal. ouija then resolves symlinks one path
+component at a time, rather than calling `EvalSymlinks` on the full path, so it
+detects an escape even when the final target does not exist yet. This closes
+the TOCTOU (time-of-check to time-of-use) window, and it covers a dangling
+symlink too: ouija follows it to the missing target that a write would create.
+The `delete_file` tool resolves symlinks before it calls `os.RemoveAll`. The
+`doc` output dir and MCP resources use the same mechanism: the MCP server calls
+`engine.SafeResolve()` instead of re-implementing the join, so it inherits both
+the symlink and the protected-path checks.
 
-An auto-discovered `.ouija.json` is clamped to its own directory, so a planted
-config can't grant reads above it. An explicit `--config` is trusted (your
-choice).
+ouija clamps an auto-discovered `.ouija.json` to its own directory, so a planted
+config cannot grant reads above that directory. An explicit `--config` is
+trusted, because you chose it.
 
 ### Project trust
 
-A project config found by walking up from the working directory
-(`.ouija/config.json`, `.ouija.json`, `ouija.json`) may come from a repository
-someone else wrote. Its security-sensitive keys — `permission`, `tools` (the
-bash allowlist), `apiKey`, a non-default `systemPrompt` and a `projectRoot`
-other than `.` (it moves the sandbox) — are **ignored**, whatever their
-capitalization (`"Permission"` applies like `"permission"`),
-with a warning, until you run `ouija trust` in the project. Trust is the file's
-SHA-256, stored in the global config (a protected path), so any change to the
-file lapses it; `ouija trust --revoke` forgets it. Files ouija writes itself
-(`ouija init`, chat saves) are trusted automatically, and ouija never rewrites
-an untrusted file that sets those keys. Without this, cloning a repository that
-commits `{"permission":{"default":"allow"}}` would hand a prompt-injected model
+ouija finds a project config (`.ouija/config.json`, `.ouija.json`,
+`ouija.json`) by walking up from the working directory, so the file may come
+from a repository someone else wrote. Until you run `ouija trust` in the
+project, ouija ignores the file's security-sensitive keys and prints a warning.
+These keys are `permission`, `tools` (the bash allowlist), `apiKey`, a
+non-default `systemPrompt`, and a `projectRoot` other than `.` (which moves the
+sandbox). Capitalization does not matter: `"Permission"` counts as
+`"permission"`.
+
+ouija records trust as the file's SHA-256 hash in the global config, itself a
+protected path, so any change to the file invalidates the trust.
+`ouija trust --revoke` forgets it. Files that ouija writes itself (`ouija init`,
+chat saves) are trusted automatically, and ouija never rewrites an untrusted
+file that sets those keys.
+
+Without this check, cloning a repository that commits
+`{"permission":{"default":"allow"}}` would give a prompt-injected model
 unattended `bash`, and an `apiKey` override would send your prompts and code to
-an account the repository author controls.
+an account the repository's author controls.
 
 ## Layer 2: Protected paths (always denied)
 
-Certain paths are **always blocked** regardless of the permission level:
-`/etc/*`, `/var/lib/*`, `.env*`, `.netrc`, `.gitconfig`, `.ssh/*`, `.gnupg/*`,
-`.aws/*`, `.ouija/*`, `.ouija.json`, `ouija.json`, ouija's global config
-(`~/.config/ouija/*`, i.e. `os.UserConfigDir()/ouija`, with every API key and
-the trusted-project list), `.config/gcloud/*`, and similar sensitive locations.
-(Path matching uses exact directory match — `/etc` matches `/etc` but not
-`/etcetera`.)
+Some paths are **always blocked**, whatever the permission level: `/etc/*`,
+`/var/lib/*`, `.env*`, `.netrc`, `.gitconfig`, `.ssh/*`, `.gnupg/*`, `.aws/*`,
+`.ouija/*`, `.ouija.json`, `ouija.json`, ouija's global config
+(`~/.config/ouija/*`, that is `os.UserConfigDir()/ouija`, which holds every API
+key and the trusted-project list), `.config/gcloud/*`, and similar sensitive
+locations. Directories match exactly: `/etc` matches `/etc` but not
+`/etcetera`.
 
-The policy is enforced at every entry point, not only on the `path` argument:
-`resolve()` rejects a protected path inside the root — checked both on the name
-and on where the path physically lands, so a symlink in the project
-(`notes.txt → .env`, `cfg → .ouija`) cannot read or write what the name hides —
-the `grep` walk skips protected files and never follows symlinks, and a bash
-command that merely *names* a protected path
-(`cat .env`, `~/.ssh/id_rsa`) is refused with an explanatory message. Each word
-is judged by its value after the shell's quote removal (`cat .e""nv` is
-`cat .env`) and by where it physically lands from the project root, so a
-symlink (`cat notes.txt` with `notes.txt → .env`) is refused too. The bash
-scan accepts occasional false positives (e.g. a commit message that literally
-contains `.env`) — it fails closed, never open. An explicit sandbox-escape
-approval still outranks the policy: that is a per-path user consent shown in
-full. On macOS and Windows, whose filesystems ignore case, every spelling of a
-protected name (`.ENV`, `.SSH/`) is protected too.
+ouija enforces this policy at every entry point, not only on a tool's `path`
+argument:
 
-The bash scan judges the words of the command as text; a path built while the
-command runs (`cat "$(printf ~/.ss)h/id_rsa"`) cannot be read from the text.
-Under `ask` the human sees that command in full; the boundary that holds
-whatever the command computes is the [OS sandbox](#os-sandbox-opt-in).
+- `resolve()` rejects a protected path inside the root. It checks both the name
+  and where the path physically lands, so a symlink in the project
+  (`notes.txt → .env`, `cfg → .ouija`) cannot read or write what its name hides.
+- The `grep` walk skips protected files and never follows symlinks.
+- A bash command that merely *names* a protected path (`cat .env`,
+  `~/.ssh/id_rsa`) is refused with a message that explains why. ouija judges
+  each word by its value after the shell removes quotes (`cat .e""nv` is
+  `cat .env`) and by where it physically lands from the project root, so it
+  also refuses a symlink (`cat notes.txt` with `notes.txt → .env`).
+
+The bash scan accepts occasional false positives, such as a commit message that
+contains the literal text `.env`: it fails closed, never open. An explicit
+sandbox-escape approval still outranks the policy, because it is your consent
+for one path, shown to you in full. On macOS and Windows, whose filesystems
+ignore case, every spelling of a protected name (`.ENV`, `.SSH/`) is protected
+too.
+
+The bash scan reads the command's words as text, so it cannot see a path that
+the command builds while it runs (`cat "$(printf ~/.ss)h/id_rsa"`). Under `ask`
+you see that command in full before it runs. The boundary that holds, whatever
+the command computes, is the [OS sandbox](#os-sandbox-opt-in).
 
 ## Layer 3: Permission config
 
-Every tool call is gated by a `PermissionConfig` with three levels:
+A `PermissionConfig` gates every tool call with one of three levels:
 
 | Level | Behaviour |
 |---|---|
-| `deny` | Tool is blocked — model gets an error |
-| `ask` | Requires interactive approval (TUI) or prompts for confirmation |
+| `deny` | The tool is blocked and the model gets an error |
+| `ask` | Needs your approval, in the TUI or through a confirmation prompt |
 | `allow` | Runs automatically |
 
-In the chat TUI the default comes from `NewDefaultPermissionConfig`: read-only
-tools (`read_file`, `grep`, `glob`, `list_dir`) run without approval; write/exec
-tools (`write_file`, `edit_file`, `delete_file`, `bash`) ask. Editable at runtime
-via `/permit <tool> <allow|ask|deny>` or set statically in the project config.
-Once a tool is rejected during a generation, all subsequent calls to that same
-tool are auto-rejected — the model is told to try a different approach.
+In the chat TUI, `NewDefaultPermissionConfig` sets the defaults: read-only
+tools (`read_file`, `grep`, `glob`, `list_dir`) run without approval, and the
+tools that write or execute (`write_file`, `edit_file`, `delete_file`, `bash`)
+ask. Change a level at runtime with `/permit <tool> <allow|ask|deny>`, or set
+it in the project config. Once you reject a tool during a generation (the
+model's whole response to one message), ouija rejects every later call to that
+tool automatically and tells the model to try a different approach.
 
 ## Layer 4: Bash allowlist and denylist
 
-Two independent mechanisms:
+Two independent mechanisms check bash commands:
 
-- **Denylist** (always on, before any prompt): a curated list of catastrophic
-  commands plus semantic analysis — flag-order variants (`rm -fr /`), execution
-  wrappers (`sudo rm -fr /`, `bash -c 'rm -fr /'`, `eval`), raw device writes
-  (`dd of=/dev/sda`, `fdisk /dev/sdb`), recursive `chmod`/`chown` on `/`, and
-  fork bombs. It is a hard rule: a user "yes" cannot override it.
-- **Allowlist** (opt-in): base commands the user has pre-approved, e.g. `git`,
-  `npm`. A matching command runs with no prompt. With `bash` set to `allow`
-  (unattended runs) the allowlist is the guard rail — a command outside it is
-  refused. An empty allowlist means "nothing pre-approved yet", not "everything
-  approved": at `ask` level every command still prompts. A multi-word pattern
-  is an exact action, extended only with bare switches: `npm run build` also
-  allows `npm run build --prod -v`, but not `npm run build ./dist`,
-  `--out=x`, or anything after `--` — so a pattern learned from one harmless
-  `find . -name '*.go'` never pre-approves `find . -name '*.go' -exec …`.
+- **Denylist** (always on, checked before any prompt): a curated list of
+  catastrophic commands, plus analysis that catches their variants: reordered
+  flags (`rm -fr /`), execution wrappers (`sudo rm -fr /`, `bash -c 'rm -fr /'`,
+  `eval`), raw device writes (`dd of=/dev/sda`, `fdisk /dev/sdb`), recursive
+  `chmod`/`chown` on `/`, and fork bombs. It is a hard rule: even your "yes"
+  cannot override it.
+- **Allowlist** (opt-in): base commands you have pre-approved, such as `git` or
+  `npm`. A matching command runs without a prompt. When `bash` is set to
+  `allow` (unattended runs), the allowlist is the guard rail: ouija refuses any
+  command outside it. An empty allowlist means "nothing pre-approved yet", not
+  "everything approved": at `ask` level every command still prompts. A
+  multi-word pattern names an exact action, which only bare switches may
+  extend: `npm run build` also allows `npm run build --prod -v`, but not
+  `npm run build ./dist`, `--out=x`, or anything after `--`. So a pattern
+  learned from one harmless `find . -name '*.go'` never pre-approves
+  `find . -name '*.go' -exec …`.
 
-  The command is parsed as shell and **every** simple command in it must match
-  on its own: with `git` allowed, `git log | head` needs `head` too, and
-  `git status; curl … | sh` is not pre-approved. A command whose effect the text
-  alone does not determine — `$(…)`/backticks, `<(…)`, `$VAR`, env prefixes
-  (`GIT_SSH_COMMAND=… git fetch`), `export`, functions, or output redirection
-  other than to `/dev/null` — is never pre-approved: it prompts (`ask`) or is
-  refused (`allow`). A single-word pattern trusts everything that program can do
-  (`git -c core.pager=…`, `find -exec`), so prefer multi-word patterns for
-  unattended runs.
+  ouija parses the command as shell, and **every** simple command in it must
+  match on its own. With `git` allowed, `git log | head` also needs `head`, and
+  `git status; curl … | sh` is not pre-approved. ouija never pre-approves a
+  command whose effect the text alone does not determine: `$(…)` or backticks,
+  `<(…)`, `$VAR`, environment prefixes (`GIT_SSH_COMMAND=… git fetch`),
+  `export`, functions, or output redirection to anything but `/dev/null`. Such
+  a command prompts under `ask` and is refused under `allow`. A single-word
+  pattern trusts everything that program can do (`git -c core.pager=…`,
+  `find -exec`), so prefer multi-word patterns for unattended runs.
 
-Configured statically in `.ouija/config.json` (applied only when the project is
-trusted, see [Project trust](#project-trust)), or learned interactively: a bash
-command approved with **Session** adds one pattern per simple command and
-persists them to disk — a command that is not fully static (`echo $(whoami)`)
-teaches nothing. A plain **Yes** runs the command once and is *not* persisted.
-Thread-safe via `sync.RWMutex`.
+You set the allowlist statically in `.ouija/config.json` (applied only when the
+project is trusted; see [Project trust](#project-trust)), or ouija learns it as
+you approve commands. Approving a bash command with **Session** adds one
+pattern per simple command and saves them to disk; a command that is not fully
+static (`echo $(whoami)`) adds nothing. A plain **Yes** runs the command once
+and saves nothing. A `sync.RWMutex` makes the allowlist safe for concurrent
+use.
 
 ### OS sandbox (opt-in)
 
-The checks above read the command's *text*, and a path built at run time
-(`cat $(printf '.%s' env)`) is beyond any reading of text. With
-`tools.bash.sandbox.enabled`, the kernel enforces the boundary instead: each
-command runs in a re-executed copy of the ouija binary that confines itself
-with Linux Landlock — write only inside the project and the temp dir, read
-only system directories, the project and the paths the config lists — and then
-execs the shell; every process it starts inherits the confinement, which cannot
-be lifted. `/proc` (other processes' environments) and `/run` (ssh-agent and
-docker sockets) are left out on purpose; connecting to a Unix socket outside
-the granted paths (an ssh-agent or tmux socket under `/tmp`), connecting to
-abstract Unix sockets (an X11 display) and signalling processes outside the
-sandbox are confined too. That needs Landlock ABI v9: on an older kernel those
-sockets would stay reachable, so if the sandbox is enabled but cannot be
-enforced (not Linux, or Landlock older than ABI v9), bash refuses to run.
-A grant that would cover a credential directory — the home directory,
-`~/.config`, `/`, or a project root there — is refused. Network access is not
-restricted. See [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
+The checks above read the command's *text*, and no reading of text can see a
+path built at run time (`cat $(printf '.%s' env)`). With
+`tools.bash.sandbox.enabled`, the kernel enforces the boundary instead. Each
+command runs in a re-executed copy of the ouija binary, which confines itself
+with Linux Landlock and then execs the shell. The confined process can write
+only inside the project and the temp dir, and read only system directories,
+the project and the paths the config lists. Every process it starts inherits
+the confinement, and none can lift it.
 
-What the sandbox does **not** cover, by design of a project-scoped boundary:
+The read grants leave out `/proc` (other processes' environments) and `/run`
+(ssh-agent and docker sockets) on purpose. The sandbox also confines
+connections to Unix sockets outside the granted paths (an ssh-agent or tmux
+socket under `/tmp`), connections to abstract Unix sockets (an X11 display),
+and signals to processes outside the sandbox. Those confinements need Landlock
+ABI v9; on an older kernel the sockets would stay reachable. So if the sandbox
+is enabled but cannot be enforced (not Linux, or Landlock older than ABI v9),
+bash refuses to run. ouija also refuses a grant that would cover a credential
+directory: the home directory, `~/.config`, `/`, or a project root at one of
+those locations. Network access is not restricted. See
+[`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
 
-- **The project itself is readable and writable**, its `.env` files included —
-  the protected-path checks above still refuse naming them, but code that
-  builds the path at run time can read them. Keep real secrets out of the
-  repository, or out of the sandbox's reach.
+A boundary scoped to the project does **not** cover the following, by design:
+
+- **The project itself is readable and writable**, its `.env` files included.
+  The protected-path checks above still refuse commands that name them, but
+  code that builds the path at run time can read them. Keep real secrets out of
+  the repository, or out of the sandbox's reach.
 - **`.git` is writable**, so a command can plant a hook or a `core.fsmonitor`
-  that runs, unconfined, the next time *you* run git there (Landlock cannot
-  carve a read-only subtree out of a writable one). ouija fingerprints
-  `.git/hooks` and `.git/config` around every bash command — sandboxed or not
-  — and when one changes, the tool result says so and the chat shows a
-  **git guard** banner: review the change before running git in that project.
+  setting that runs, unconfined, the next time *you* run git there. (Landlock
+  cannot carve a read-only subtree out of a writable one.) ouija fingerprints
+  `.git/hooks` and `.git/config` around every bash command, sandboxed or not.
+  When one changes, the tool result says so and the chat shows a **git guard**
+  banner: review the change before you run git in that project.
 
 ## Layer 5: Doom-loop detection
 
-Encapsulated in `DoomDetector`. If the model calls the same tool with the
-identical input **3+ times in a row**, it's blocked. Fresh agent runs and user
-approvals reset the counter.
+A doom loop is a model stuck repeating one call. `DoomDetector` blocks the
+model when it calls the same tool with identical input **3+ times in a row**. A
+fresh agent run or a user approval resets the counter.
 
 ## The order of checks
 
-One path decides everything — `ToolRunner.Run`. Static bash gates run *before*
-any prompt, then permission level, then allowlist, then execution. The full
-order, with the code path for each step, is in
-[Architecture → Tool gating](architecture.md#tool-gating-permissions).
+One function, `ToolRunner.Run`, decides every tool call. It runs the static
+bash gates *before* any prompt, then the permission level, then the allowlist,
+then execution.
+[Architecture → Tool gating](architecture.md#tool-gating-permissions) lists the
+full order, with the code path for each step.
 
 ## Approval workflow (chat TUI)
 
 When a tool requires approval (`ask` level), the TUI shows:
 
-- Tool icon + name + call number (e.g. `[#2]`)
-- All input arguments
-- Five options navigable with arrow keys: **Yes** (`y`), **No** (`n`),
+- the tool's icon, name and call number (e.g. `[#2]`)
+- all input arguments
+- five options, chosen with the arrow keys: **Yes** (`y`), **No** (`n`),
   **Session** (`s`, approves for the rest of the session), **Edit** (`e`, opens
   the proposed content in `$EDITOR`), **Cancel** (`esc`). For `delete_file` the
-  destructive button is **Delete** (`d`) instead of Yes, so a stray `y` can't
-  delete a file.
+  destructive button reads **Delete** (`d`) instead of **Yes**, so a stray `y`
+  cannot delete a file.
 
-Approvals are scoped to the tool's **target**, not just the tool name: choosing
+Approvals apply to the tool's **target**, not only to its name: choosing
 **Session** on `write_file` for `src/a.php` does not pre-approve `src/b.php`,
 and **Session** on a bash command does not pre-approve a different command. For
-bash, **Session** also adds one allowlist pattern per simple command (nothing
-for a command with substitutions or variables) and persists them to the config
-file; **Yes** never persists. Rejecting a tool blocks that
-tool for the rest of the generation.
+bash, **Session** also adds one allowlist pattern per simple command (none for
+a command with substitutions or variables) and saves them to the config file;
+**Yes** never saves. Rejecting a tool blocks it for the rest of the generation.
 
 ## Cost and egress controls
 
-Cost is bounded by the token/step/USD budget, with sanity checks (rejects
-negative token counts). Secrets come from config file (`0600`) and are never
-logged or traced. The bash tool sanitizes environment: `sanitizeEnv()` strips
-credential-like env vars (`AWS_*`, `*API_KEY*`, `*SECRET*`, `*TOKEN*`, etc.)
-before passing to subprocesses. Subprocesses have `WaitDelay = 3s` as a safety
-net against runaway children. PDF rendering runs headless Chrome with argv only,
-controlled paths, and a throwaway `--user-data-dir`. The model-written HTML
-gets a Content-Security-Policy as the first element of `<head>` (inline styles,
-Google Fonts and `data:` images only): no scripts, frames, remote images or
-requests, so content injected through the repository cannot use the render —
-or a later look at the HTML — to send data out. The totems' fixed outputs
-(`docs/task-plan.md`, `docs/<slug>.*`, `docs/sticker/`) and `docs/knowledge.md`
-go through `engine.SafeResolve()`, so a symlink planted in the repository cannot
-redirect them outside the project or onto a protected file.
+A token, step and USD budget bounds cost, and its sanity checks reject negative
+token counts. Secrets come from the config file (`0600`), and ouija never logs
+or traces them. The bash tool sanitizes the environment: `sanitizeEnv()` strips
+credential-like variables (`AWS_*`, `*API_KEY*`, `*SECRET*`, `*TOKEN*`, etc.)
+before it passes the environment to subprocesses. Subprocesses get
+`WaitDelay = 3s` as a safety net against runaway children.
+
+Egress controls stop data from leaving the machine through ouija's outputs. PDF
+rendering runs headless Chrome with argv only, controlled paths, and a
+throwaway `--user-data-dir`. The model-written HTML gets a
+Content-Security-Policy as the first element of its `<head>`, which allows
+inline styles, Google Fonts and `data:` images only: no scripts, frames, remote
+images or requests. Content injected through the repository therefore cannot
+use the render, or a later look at the HTML, to send data out. The totems
+(ouija's agent workflows) write to fixed outputs (`docs/task-plan.md`,
+`docs/<slug>.*`, `docs/sticker/`). Those outputs and `docs/knowledge.md` go
+through `engine.SafeResolve()`, so a symlink planted in the repository cannot redirect
+them outside the project or onto a protected file.
 
 ## Tool categories
 
@@ -222,24 +243,27 @@ redirect them outside the project or onto a protected file.
 | Write | `write_file`, `edit_file`, `delete_file` |
 | Exec | `bash` |
 
-The permission system applies across all categories.
+The permission system applies to all three categories.
 
 ## Accepted risks
 
-Prompt injection can still skew *analysis content* — the model might produce a
-misleading report based on malicious code comments. The layered defenses contain
-the blast radius (no exfiltration, no modification without approval). An explicit
-`--config`, a project you ran `ouija trust` on, and the MCP host are trust
-boundaries you own. The bash checks read the command's text: a path built at run
-time (`cat $(printf '.%s' env)`, a variable set earlier in the same command) is
-beyond them, which is why such commands are never pre-approved by the
-allowlist — under `allow` with an empty allowlist nothing but the static gates
-stands in the way, so reserve that for trusted projects.
+Prompt injection, meaning text in the repository that tries to steer the model,
+can still skew *analysis content*: malicious code comments might lead the model
+to write a misleading report. The layered defenses limit the damage to that: no
+exfiltration, and no modification without approval. You own three trust
+boundaries: an explicit `--config`, a project you ran `ouija trust` on, and the
+MCP host.
+
+The bash checks read the command's text, so a path built at run time
+(`cat $(printf '.%s' env)`, or a variable set earlier in the same command)
+escapes them. That is why the allowlist never pre-approves such commands. Under
+`allow` with an empty allowlist, only the static gates stand in the way, so
+reserve that setting for trusted projects.
 
 ## Reporting a vulnerability
 
-See [SECURITY.md](../../SECURITY.md) — private reporting via GitHub Security
-Advisories. Security-sensitive code changes have extra rules in
+See [SECURITY.md](../../SECURITY.md) to report privately through GitHub
+Security Advisories. Changes to security-sensitive code follow extra rules in
 [Contribute](../how-to/contribute.md#security-sensitive-code).
 
 ---

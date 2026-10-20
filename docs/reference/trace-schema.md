@@ -6,15 +6,16 @@
 
 > Chrome Trace Event (Perfetto) format for `--trace-file <file.json>`. Audience: reference
 
-`--trace-file <file>` writes a **Chrome Trace Event** JSON document — a single
-JSON array of complete events, viewable in `chrome://tracing` or
-[ui.perfetto.dev](https://ui.perfetto.dev). It works on any totem and on
-`ouija chat`. Every run also renders the span tree to stderr; the file is an
-additional export.
+`--trace-file <file>` writes a **Chrome Trace Event** JSON document: one JSON
+array of complete events that you can open in `chrome://tracing` or
+[ui.perfetto.dev](https://ui.perfetto.dev). Each event is a span, one timed
+step of a run (a model call, a tool call, an agent). It works with any totem
+and with `ouija chat`. Every run also prints the span tree to stderr; the file
+is an extra export.
 
 ## Event format
 
-The file is one JSON array; each element is a complete (`ph: "X"`) event.
+The file is one JSON array, and each element is a complete (`ph: "X"`) event.
 
 | Field | Type | Always | Description |
 |---|---|---|---|
@@ -24,15 +25,15 @@ The file is one JSON array; each element is a complete (`ph: "X"`) event.
 | `ts` | `int` | Yes | Start time, microseconds since the Unix epoch |
 | `dur` | `int` | No | Duration in microseconds (omitted when zero) |
 | `pid` | `int` | Yes | Process id (always `1`) |
-| `tid` | `int` | Yes | Track id — encodes nesting (root `0`, child `tid*100 + i + 1`) |
+| `tid` | `int` | Yes | Track id, which encodes nesting (root `0`, child `tid*100 + i + 1`) |
 | `args` | `map[string]string` | No | Attributes (omitted when empty) |
 
 Attribute values are always strings. A `chat`/`phase2` span carries
 `input_tokens` and `output_tokens`; a `tool.*` span carries `tool` and, for file
 tools, `path`; a failed span adds `error`.
 
-The category is derived from the name: `chat`/`phase2` → `chat`, a `tool.` prefix
-→ `tool`, anything else → `agent`.
+The category follows from the name: `chat` and `phase2` get `chat`, a name with
+the `tool.` prefix gets `tool`, and anything else gets `agent`.
 
 ## Example
 
@@ -61,7 +62,7 @@ The category is derived from the name: `chat`/`phase2` → `chat`, a `tool.` pre
 ]
 ```
 
-Open the file with `chrome://tracing` (Load) or drag it onto ui.perfetto.dev.
+Open the file in `chrome://tracing` (Load) or drag it onto ui.perfetto.dev.
 
 ---
 

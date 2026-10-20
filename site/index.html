@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ouija — AI agents you write in Go</title>
-<meta name="description" content="An AI harness for agents you write in Go: a shared engine (providers, sandbox, cost budget, tracing, MCP) under totems you own. A terminal chat that shows every tool, diff and cent.">
+<meta name="description" content="Write AI agents as Go code instead of prompt files. A shared engine gives them model providers, a sandbox, a cost budget, tracing and editor integration (MCP), and a terminal chat shows every tool, diff and cent.">
 <meta property="og:title" content="ouija — AI agents you write in Go">
-<meta property="og:description" content="A shared engine under agents you own: real Go code with types and tests, not prompt files.">
+<meta property="og:description" content="Write AI agents as real Go code, with types and tests, instead of prompt files. A shared engine handles the rest.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://discorgento.github.io/ouija/">
 <meta property="og:image" content="https://discorgento.github.io/ouija/assets/social.png">
@@ -396,7 +396,7 @@ footer a { color: var(--muted); text-decoration: none; }
       <div class="hero-text">
         <h1 class="wordmark g">ouija</h1>
         <p class="tagline">AI agents you <span class="o">write in Go</span> — not prompt files.</p>
-        <p class="lede">A shared engine — <b>providers, sandbox, cost budget, tracing, MCP</b> — under <b>totems</b> you own: real code with types, tests and golden files. And a terminal chat that shows every tool, every diff and every cent.</p>
+        <p class="lede">You write each agent, called a <b>totem</b>, as Go code in your own repo, with types, tests and golden files. A shared engine gives every totem <b>model providers, a sandbox, a cost budget, tracing and editor integration (MCP)</b>. A terminal chat shows every tool, every diff and every cent.</p>
         <div class="badges">
           <span class="badge live" id="ver">latest release</span>
           <span class="badge" id="stars" hidden></span>
@@ -423,32 +423,32 @@ footer a { color: var(--muted); text-decoration: none; }
 <section id="why" data-win="why">
   <div class="wrap">
     <div class="prompt reveal"><span class="path">~/ouija</span><span class="sym">❯</span><span class="cmd">cat WHY.md</span></div>
-    <h2 class="reveal">Your workflow, as code the model can't skip</h2>
-    <p class="sub reveal">"Do A, then verify B, then reconcile" written in prose is a request the model may ignore. In Go it is the next line — and you can test it.</p>
+    <h2 class="reveal">Write your workflow as code the model cannot skip</h2>
+    <p class="sub reveal">Write "do A, then check B, then merge the results" in a prompt, and the model may skip a step. Write it in Go, and each step is the next line of code: it always runs, and you can test it.</p>
     <div class="grid">
       <fieldset class="pane reveal"><legend>totems <span class="d">· go</span></legend>
         <p class="lead">Agents are Go types</p>
-        <p>A totem lives in <em>your</em> repo, with types, unit tests and golden files. <code>go build</code> gives you a standalone binary.</p>
+        <p>A totem is an agent written as a Go type. It lives in <em>your</em> repo with unit tests and golden files, and <code>go build</code> turns it into a standalone binary.</p>
       </fieldset>
       <fieldset class="pane reveal"><legend>sandbox <span class="d">· fail closed</span></legend>
-        <p class="lead">An unsure check means deny</p>
-        <p>Filesystem sandbox, protected paths, permission levels, bash allowlist, doom-loop detection, env sanitization.</p>
+        <p class="lead">When in doubt, it denies</p>
+        <p>A filesystem sandbox, protected paths, permission levels and a bash allowlist limit what an agent can touch. The engine also stops an agent that repeats the same call in a loop and sanitizes the environment that commands see.</p>
       </fieldset>
       <fieldset class="pane reveal"><legend>budget <span class="d">· $</span></legend>
         <p class="lead">Every cent on screen</p>
-        <p>Token and cost ceilings per run; every reply tells you its time, tokens and cost.</p>
+        <p>Each run has a token and cost ceiling, and every reply shows its time, tokens and cost.</p>
       </fieldset>
       <fieldset class="pane reveal"><legend>trace <span class="d">· json</span></legend>
         <p class="lead">Traced end to end</p>
-        <p>Every model call and tool run lands in a trace you can read back: what was asked, what ran, what it cost.</p>
+        <p>ouija records every model call and tool run in a trace you can read later: what was asked, what ran and what it cost.</p>
       </fieldset>
       <fieldset class="pane reveal"><legend>chat <span class="d">· tui</span></legend>
         <p class="lead">Shows its work</p>
-        <p>Tools live, diffs side by side, approval before writes, <code>/undo</code>, <code>@file</code>, search, themes, resume.</p>
+        <p>The chat shows each tool as it runs and each diff side by side, and asks before it writes a file. It also has <code>/undo</code>, <code>@file</code>, search, themes and resume.</p>
       </fieldset>
       <fieldset class="pane reveal"><legend>mcp <span class="d">· editors</span></legend>
         <p class="lead">Plugs into your editor</p>
-        <p><code>ouija mcp install</code> registers every totem as a tool in Claude Code, Cursor or OpenCode.</p>
+        <p>MCP is the protocol editors use to call outside tools. <code>ouija mcp install</code> registers every totem as a tool in Claude Code, Cursor or OpenCode.</p>
       </fieldset>
     </div>
   </div>
@@ -458,7 +458,7 @@ footer a { color: var(--muted); text-decoration: none; }
   <div class="wrap">
     <div class="prompt reveal"><span class="path">~/ouija</span><span class="sym">❯</span><span class="cmd">diff AGENT.md totems/plan/plan.go</span></div>
     <h2 class="reveal">A prompt asks. A totem does.</h2>
-    <p class="sub reveal">The same three steps, twice. On the left the model decides whether to follow them; on the right they are the program.</p>
+    <p class="sub reveal">The same three steps, written twice. On the left, the model decides whether to follow them. On the right, the steps are the program, so they always run.</p>
     <div class="vs">
       <fieldset class="pane vs-l reveal"><legend>AGENT.md <span class="d">· a request</span></legend>
 <pre class="code"><span class="cm">## Planning</span>
@@ -468,9 +468,9 @@ footer a { color: var(--muted); text-decoration: none; }
 
 <span class="w">IMPORTANT: never skip step 3!!</span></pre>
         <ul class="xs">
-          <li>the model may skip a step — "IMPORTANT" is a hope</li>
-          <li>nothing to unit-test, nothing to diff in review</li>
-          <li>cost and tools: whatever happens, happens</li>
+          <li>the model may still skip a step; "IMPORTANT" is only a hope</li>
+          <li>no code to unit-test or to review</li>
+          <li>cost and tool use are left to chance</li>
         </ul>
       </fieldset>
       <fieldset class="pane hi vs-r reveal"><legend>plan.go <span class="d">· a program</span></legend>
@@ -497,8 +497,8 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 <span class="cm">// 3. the next line: it always runs</span>
 <span class="k">return</span> <span class="f">reconcile</span>(ctx, eng, plans)</pre>
         <ul class="check">
-          <li>step 3 is the next line — it cannot be skipped</li>
-          <li><code>go test</code> and golden files cover the flow</li>
+          <li>step 3 is the next line, so it always runs</li>
+          <li><code>go test</code> and golden files check the whole flow</li>
           <li>budget, sandbox and trace come from the engine</li>
         </ul>
       </fieldset>
@@ -510,9 +510,9 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
   <div class="wrap">
     <div class="prompt reveal"><span class="path">~/ouija</span><span class="sym">❯</span><span class="cmd">ouija task <span class="s ok">"add a cache"</span></span></div>
     <h2 class="reveal">Several hands spell one answer</h2>
-    <p class="sub reveal">A ouija board needs several hands. So does a good plan: the <code>task</code> totem runs independent passes and keeps what they agree on.</p>
+    <p class="sub reveal">A ouija board needs several hands, and so does a good plan. The <code>task</code> totem first scouts the code, then asks the model for several independent plans, called passes, and finally reconciles them, keeping what they agree on.</p>
     <div class="seance reveal">
-      <fieldset class="pane"><legend>01 scout</legend><p>Reads the code that matters for the task and maps it.</p></fieldset>
+      <fieldset class="pane"><legend>01 scout</legend><p>Reads the code the task touches and maps it.</p></fieldset>
       <div class="flow">→</div>
       <fieldset class="pane hi"><legend>02 passes <span class="d">· in parallel</span></legend>
         <span class="pass"><span class="l">⠋</span> <b>pass 1</b><span class="bar">░░░░░░░░░░░░░░</span></span>
@@ -522,7 +522,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
       <div class="flow">→</div>
       <fieldset class="pane"><legend>03 reconcile</legend><p>Merges the passes into one <span class="ok">verified plan</span> and a checklist.</p></fieldset>
     </div>
-    <p class="note reveal">the engine knows nothing about tasks or documents — every totem defines its own flow on top of the same budget, sandbox and tracing</p>
+    <p class="note reveal">the engine knows nothing about tasks or documents; each totem defines its own steps and shares the engine's budget, sandbox and tracing</p>
   </div>
 </section>
 
@@ -530,7 +530,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
   <div class="wrap">
     <div class="prompt reveal"><span class="path">~/your-project</span><span class="sym">❯</span><span class="cmd">ouija</span></div>
     <h2 class="reveal">Every reply says what it did</h2>
-    <p class="sub reveal">The turn's tools on one line — a failed command shows its last lines — the time, tokens and cost, and every file change as a diff.</p>
+    <p class="sub reveal">Each reply lists its tools on one line, with the last output lines of any command that failed, followed by its time, tokens and cost. Every file change appears as a diff.</p>
     <fieldset class="pane reveal" style="margin-bottom: 22px;"><legend>last turn</legend>
       <div class="turn"><span class="tool">✓ read</span> cache.go · <span class="tool">✓ grep</span> "Client" · <span class="e">✗ bash</span> go test ./... · <span class="tool">✓ edit</span> client.go <span class="d">+18 −4</span></div>
       <div class="turn d">  12s · 8.4k tokens · $0.02 · /undo to take it back</div>
@@ -542,15 +542,15 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
       </figure>
       <figure class="reveal">
         <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">conversation</span></div><img src="assets/screens/chat-conversation.png" width="1008" height="776" alt="A reply with its tools, a failed test's output and the diff it applied" loading="lazy"></div>
-        <figcaption>tools, a failed test's tail, the diff it applied</figcaption>
+        <figcaption>the tools, the end of a failed test's output and the diff it applied</figcaption>
       </figure>
       <figure class="wide reveal">
         <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">diff</span></div><img src="assets/screens/chat-diff.png" width="1458" height="434" alt="A diff side by side, syntax-highlighted" loading="lazy"></div>
-        <figcaption>side by side on a wide terminal, syntax-highlighted, approved before it is written</figcaption>
+        <figcaption>on a wide terminal, diffs appear side by side with syntax highlighting; you approve each one before it is written</figcaption>
       </figure>
       <figure class="wide reveal">
         <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">/task</span></div><img src="assets/screens/chat-task.png" width="1008" height="586" alt="/task in the chat: the scout and the passes drawn live" loading="lazy"></div>
-        <figcaption>totems right in the chat: <code>/task "add a cache"</code> draws the séance live</figcaption>
+        <figcaption>run totems from the chat: <code>/task "add a cache"</code> draws the scout and the passes live</figcaption>
       </figure>
     </div>
     <div class="keys reveal">
@@ -581,7 +581,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 <span class="cm"># then, in a new terminal</span>
 <span class="p">PS&gt; </span>ouija setup
 <span class="p">PS&gt; </span>ouija</pre>
-          <p class="note">installs to %LOCALAPPDATA%\Programs\ouija and adds it to PATH · the bash tool needs <a href="https://gitforwindows.org">Git for Windows</a></p>
+          <p class="note">installs to %LOCALAPPDATA%\Programs\ouija and adds it to PATH · the agent's bash tool needs <a href="https://gitforwindows.org">Git for Windows</a></p>
         </div>
         <div class="panel" data-panel="nix" hidden>
 <pre class="code"><button class="copy">copy</button><span class="cm"># no sudo: it goes to ~/.local/bin</span>
@@ -589,7 +589,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 
 <span class="p">$ </span>ouija setup
 <span class="p">$ </span>ouija</pre>
-          <p class="note">checks the archive against SHA256SUMS · linux and macos, amd64 and arm64 · by hand: the archives on every <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
+          <p class="note">checks the archive against SHA256SUMS · linux and macos, amd64 and arm64 · to install by hand, download an archive from the latest <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
         </div>
         <div class="panel" data-panel="go" hidden>
 <pre class="code"><button class="copy">copy</button><span class="cm"># Go 1.26+</span>
@@ -605,13 +605,13 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
       <fieldset class="pane reveal"><legend>3 steps</legend>
         <ol class="steps">
           <li><span class="n">1</span><b>install</b> — pick your platform</li>
-          <li><span class="n">2</span><b>ouija setup</b> — API keys + default provider and model</li>
-          <li><span class="n">3</span><b>cd your-project &amp;&amp; ouija</b> — and start talking</li>
+          <li><span class="n">2</span><b>ouija setup</b> — add your API keys and pick a default provider and model</li>
+          <li><span class="n">3</span><b>cd your-project &amp;&amp; ouija</b> — then start chatting</li>
         </ol>
         <ul class="check">
           <li>pick <code>ollama</code> to run fully local and free</li>
-          <li>something off? <code>ouija doctor</code> tells you what</li>
-          <li>archives checked against <code>SHA256SUMS</code>, built with provenance</li>
+          <li>if something is wrong, <code>ouija doctor</code> tells you what</li>
+          <li>release archives ship with <code>SHA256SUMS</code> checksums and build provenance</li>
         </ul>
         <div class="chips"><span>anthropic</span><span>openai</span><span>openrouter</span><span>opencode</span><span class="free">ollama (local)</span></div>
       </fieldset>
@@ -627,11 +627,11 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
     <fieldset class="pane timeline reveal"><legend>history</legend>
       <div class="tl"><span class="at">0:00</span><span class="cmd">ouija setup</span><span>pick a provider and a model — <code>ollama</code> runs local and free</span></div>
       <div class="tl"><span class="at">0:40</span><span class="cmd">cd your-project &amp;&amp; ouija</span><span>the chat opens on the welcome screen</span></div>
-      <div class="tl"><span class="at">1:00</span><span class="cmd">@internal/api/client.go why is this slow?</span><span>it reads and greps, then answers — the tools, time and cost on one line</span></div>
-      <div class="tl"><span class="at">2:30</span><span class="cmd">add a cache there</span><span>it proposes a diff; nothing is written until you approve it</span></div>
-      <div class="tl"><span class="at">3:30</span><span class="cmd">/undo</span><span>changed your mind? the change is taken back</span></div>
-      <div class="tl"><span class="at">4:00</span><span class="cmd">/task "add a cache"</span><span>the séance: independent passes, one verified plan</span></div>
-      <div class="tl"><span class="at">4:45</span><span class="cmd">ouija learn "we use sqlc"</span><span>it remembers the project for next time</span></div>
+      <div class="tl"><span class="at">1:00</span><span class="cmd">@internal/api/client.go why is this slow?</span><span>it reads and searches the code, then answers, with the tools, time and cost on one line</span></div>
+      <div class="tl"><span class="at">2:30</span><span class="cmd">add a cache there</span><span>it proposes a diff and writes nothing until you approve it</span></div>
+      <div class="tl"><span class="at">3:30</span><span class="cmd">/undo</span><span>changed your mind? it reverts the change</span></div>
+      <div class="tl"><span class="at">4:00</span><span class="cmd">/task "add a cache"</span><span>independent passes agree on one verified plan</span></div>
+      <div class="tl"><span class="at">4:45</span><span class="cmd">ouija learn "we use sqlc"</span><span>it saves the fact and uses it in later chats</span></div>
       <p class="note">every key and slash command: <a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/chat.md">chat guide</a> · <a href="https://github.com/discorgento/ouija/blob/main/docs/tutorial/getting-started.md">getting started</a></p>
     </fieldset>
   </div>
@@ -646,14 +646,14 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
       <div class="row"><span>ouija chat -c</span><span>resume the last conversation</span></div>
       <div class="head">Totems</div>
       <div class="row"><span>ouija task "…"</span><span>verified plan: scout → N passes → reconcile → checklist</span></div>
-      <div class="row"><span>ouija doc "…"</span><span>code-verified client document — HTML + PDF + technical Markdown</span></div>
+      <div class="row"><span>ouija doc "…"</span><span>client-facing document checked against the code — HTML + PDF + technical Markdown</span></div>
       <div class="row"><span>ouija sticker</span><span>laptop sticker SVG from real project metrics</span></div>
       <div class="row"><span>ouija generate totem</span><span>scaffold a new totem</span></div>
       <div class="head">Project</div>
       <div class="row"><span>ouija setup · ouija init</span><span>global defaults · per-project config</span></div>
       <div class="row"><span>ouija learn "fact"</span><span>save project knowledge for the chat and the task totem</span></div>
       <div class="row"><span>ouija mcp install</span><span>register ouija in Claude Code, Cursor or OpenCode</span></div>
-      <div class="row"><span>ouija doctor</span><span>diagnose config, provider key and harness wiring</span></div>
+      <div class="row"><span>ouija doctor</span><span>check the config, the provider key and which editors are connected</span></div>
       <p class="note">flags, slash commands, shortcuts and exit codes: <a href="https://github.com/discorgento/ouija/blob/main/docs/reference/cli.md">CLI reference</a></p>
     </fieldset>
   </div>
@@ -662,8 +662,8 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 <section id="agent" data-win="agent">
   <div class="wrap">
     <div class="prompt reveal"><span class="path">~/your-agents</span><span class="sym">❯</span><span class="cmd">ouija generate totem --external</span></div>
-    <h2 class="reveal">Go decides the path. The model only judges.</h2>
-    <p class="sub reveal">A code reviewer in ~50 lines: Go reads the diff, the model finds problems — told how to work in <code>System</code>, given the data in <code>Prompt</code>, bound to an answer shape by <code>Schema</code> — and a skeptic checks each one, because the loop says so. A Go type in your repo: no fork, and it inherits the budget, the sandbox, the tracing and MCP. <a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/add-totem.md#walkthrough-a-useful-totem-piece-by-piece">Piece by piece →</a></p>
+    <h2 class="reveal">Go decides the steps. The model only judges.</h2>
+    <p class="sub reveal">A code reviewer in about 50 lines. Go reads the diff, and the model looks for problems: <code>System</code> tells it how to work, <code>Prompt</code> gives it the data, and <code>Schema</code> fixes the shape of its answer. Then a second call, the skeptic, checks each finding, because the Go loop says so. The totem is a Go type in your own repo, so you need no fork, and it inherits the engine's budget, sandbox, tracing and MCP. <a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/add-totem.md#walkthrough-a-useful-totem-piece-by-piece">Piece by piece →</a></p>
     <div class="agent">
       <fieldset class="pane hi reveal"><legend>code</legend>
         <div class="tabs" role="tablist">
@@ -774,7 +774,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
     <fieldset class="pane hi final reveal"><legend>the board</legend>
       <img class="planchette" src="assets/logo.svg" alt="">
       <h3 class="g">Ask the board.</h3>
-      <p>Install ouija, run it in a project and watch it spell out the answer — every tool, diff and cent on screen.</p>
+      <p>Install ouija, run it in a project and watch it spell out the answer, with every tool, diff and cent on screen.</p>
       <div class="actions">
         <a class="key-btn primary" href="#install"><kbd>i</kbd> install ouija</a>
         <a class="key-btn" href="https://github.com/discorgento/ouija/tree/main/docs"><kbd>d</kbd> read the docs</a>

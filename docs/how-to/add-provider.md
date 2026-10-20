@@ -4,7 +4,8 @@
 
 # Adding a provider
 
-> Implementing a new LLM backend provider. Audience: developer
+> How to add a provider, the backend that sends ouija's requests to an LLM
+> API. Audience: developer
 
 ## The Provider interface
 
@@ -16,9 +17,10 @@ type Provider interface {
 }
 ```
 
-- **Name** — unique identifier (e.g. `"anthropic"`, `"openai"`)
-- **Chat** — streaming call that yields events and then stops
-- **Capabilities** — declares optional provider features (e.g. `StructuredOutput`)
+- **Name** — a unique identifier (e.g. `"anthropic"`, `"openai"`).
+- **Chat** — a streaming call that yields events, then stops.
+- **Capabilities** — declares which optional features the provider supports
+  (e.g. `StructuredOutput`).
 
 ## Stream events
 
@@ -103,8 +105,9 @@ func (m *Mistral) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[en
 
 ### 4. Use the shared HTTP client
 
-`providers/client.go` provides a `*Client` (created with `NewClient(timeout)`)
-that wraps retry/backoff on 429/5xx, a circuit breaker, and SSE parsing:
+`providers/client.go` provides a `*Client`, created with `NewClient(timeout)`.
+It retries with backoff on 429 and 5xx responses, includes a circuit breaker
+and parses SSE (server-sent events):
 
 ```go
 // PostJSON POSTs a body and returns (responseBytes, statusCode, error).
@@ -114,22 +117,25 @@ func (c *Client) PostJSON(ctx context.Context, url string, headers map[string]st
 func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]string, body []byte, onEvent func(eventType string, data []byte) error) error
 ```
 
-Retry/backoff helpers (honouring `Retry-After`) live in `providers/http.go`.
+The retry and backoff helpers, which honour `Retry-After`, live in
+`providers/http.go`.
 
 ### 5. API key plumbing
 
-The registry holds no keys. `app.DiscoverConfig` resolves the effective key for
-the active provider (global config → project override) into `cfg.APIKey`, and
-`app.BuildProvider(name, key)` passes it to the constructor. Your constructor
-receives the key as its `apiKey` argument — keyless providers (e.g. `ollama`)
-ignore it and register with `Register("ollama", func(string) engine.Provider { … })`.
-Keys come from the config file, not the environment.
+The registry holds no keys. `app.DiscoverConfig` puts the active provider's
+key in `cfg.APIKey`, taking the global config's key unless the project config
+overrides it. `app.BuildProvider(name, key)` then passes the key to your
+constructor as its `apiKey` argument. A provider that needs no key, such as
+`ollama`, ignores the argument and registers with
+`Register("ollama", func(string) engine.Provider { … })`. Keys always come
+from the config file, never from the environment.
 
 ### 6. Register the provider and its models
 
-The setup wizard and the `/model` picker read from `internal/models/store.go`.
-Add an entry for the provider (label + models with context windows) to
-`defaultModels()` so it appears in `ouija setup` and the model picker.
+The setup wizard and the `/model` picker read their lists from
+`internal/models/store.go`. To make the provider appear in `ouija setup` and
+the model picker, add an entry to `defaultModels()` with its label and its
+models' context windows.
 
 ## Existing providers as reference
 
@@ -139,7 +145,7 @@ Add an entry for the provider (label + models with context windows) to
 | `openai.go` | `/chat/completions` + SSE; also registers `openrouter` and `ollama` (OpenAI-compatible shims) |
 | `opencode.go` | OpenAI-compatible shim (OpenCode Zen) |
 
-Study `openai.go` for a clean example of the streaming pattern.
+`openai.go` is the cleanest example of the streaming pattern.
 
 ---
 

@@ -8,6 +8,10 @@
 
 ## Layers
 
+ouija is a harness: it runs a model in a loop and executes the tool calls the
+model asks for. The engine does that work; each totem is an agent, written in
+Go, that decides which model calls to make and in what order.
+
 ```
 cmd/              → Entry points (ouija CLI + `ouija mcp`, ouija-mcp standalone MCP server)
   └─ imports _ "github.com/discorgento/ouija/totems"  → auto-registered via go generate
@@ -67,14 +71,17 @@ Engine.Run(ctx, req) / Engine.Chat(ctx, req)
             └─ repeat until a final answer or budget ceiling
 ```
 
-Every `Engine.Run` / `Engine.Chat` call goes through `runAgent` once, which
-gives the run its own doom-loop detector (carried in the context, so the
-concurrent passes of a totem never share loop state) and delegates to the loop
-strategy (`ReAct`); the turns
-themselves loop inside `ReAct.Run`. The permission/approval wiring is a single
-`gateState` value shared **by pointer** between `Engine` and its `ToolRunner`, so
-the setters (`SetPermissionConfig`, `SetApprovalManager`, `SetToolCallback`) can
-never leave the runner holding stale state.
+Every `Engine.Run` or `Engine.Chat` call goes through `runAgent` once.
+`runAgent` gives the run its own doom-loop detector, which catches an agent
+stuck repeating the same tool call. The detector travels in the context, so the
+concurrent passes of a totem never share loop state. `runAgent` then hands off
+to the loop strategy (`ReAct`), and the turns themselves loop inside
+`ReAct.Run`.
+
+The permission and approval settings live in a single `gateState` value that
+`Engine` and its `ToolRunner` share **by pointer**. As a result, the setters
+(`SetPermissionConfig`, `SetApprovalManager`, `SetToolCallback`) can never leave
+the runner holding stale state.
 
 ## Tool gating (permissions)
 
@@ -89,33 +96,35 @@ which applies its checks in a fixed order:
      (`rm -rf /`, fork bombs, raw-device writes, …), with a semantic pass that
      catches flag-order, `sudo`/`sh -c`, and device variants;
    - `commandRefsProtectedPath` rejects any command that names a protected path.
-   These are hard rules — approving the call in the TUI cannot override them.
+   These are hard rules: approving the call in the TUI cannot override them.
 4. **Permission check** — `PermissionConfig.Check(tool, path)` returns a `Level`
    (`Deny` / `Ask` / `Allow`). Protected paths always return `Deny`
    (fail-closed). On `Ask`, a `bash` command already on the allowlist skips the
    prompt; otherwise the approval prompt runs (no approval UI configured ⇒
    denied).
-5. **Bash allowlist** — under `Allow`, a *non-empty* allowlist is the guard rail
-   for unattended runs; an *empty* allowlist means "nothing pre-approved", not
-   "everything allowed" (`Restricts()` is false, so nothing is restricted beyond
-   the static gates above).
+5. **Bash allowlist** — under `Allow`, a *non-empty* allowlist limits which
+   commands an unattended run may execute. An *empty* allowlist means "nothing
+   pre-approved", not "everything allowed": `Restricts()` is false, so only the
+   static gates above restrict commands.
 6. **Execute** — the built-in tool or the extra `CustomTool.Fn`.
 7. **Trace** — the call is recorded as a child span.
 
 `NewDefaultPermissionConfig` is the interactive (chat TUI) default: `Default` is
 `Ask`, with `read_file`, `list_dir`, `grep`, and `glob` set to `Allow` and
-`write_file`, `edit_file`, `delete_file`, and `bash` left at `Ask`. So only
-potentially destructive calls prompt; the user can change any level with
-`/permit` or project config.
+`write_file`, `edit_file`, `delete_file`, and `bash` left at `Ask`. Only calls
+that could change or destroy something prompt the user, who can change any
+level with `/permit` or in the project config.
 
-Without a `PermissionConfig`, the legacy risk tier applies (`toolRisk`):
-`RiskReadOnly` tools run, while `RiskWrite`/`RiskDraft` are denied. Unknown tools
-default to `RiskWrite`, so they fail closed until classified.
+Without a `PermissionConfig`, the legacy risk tiers apply (`toolRisk`):
+`RiskReadOnly` tools run, and `RiskWrite` and `RiskDraft` tools are denied. An
+unknown tool defaults to `RiskWrite`, so it stays denied until someone
+classifies it.
 
 ### Protected paths
 
-`isProtectedPath` (`permission.go`) is checked for both file tools (via the
-resolved absolute path) and bash commands. It always yields `Deny`:
+ouija checks `isProtectedPath` (`permission.go`) for both file tools, against
+the resolved absolute path, and bash commands. A protected path always yields
+`Deny`:
 
 - filenames: `.env*`, `.gitconfig`, `.netrc`, `.npmrc`,
   `.dockercfg`/`.dockerconfigjson`, `.ouija.json`, `ouija.json`;
@@ -133,14 +142,14 @@ providers/client.go     → Shared *Client: PostJSON, PostSSE, circuit breaker
 providers/http.go       → Retry/backoff helpers (429/5xx, Retry-After)
 ```
 
-Each provider registers itself via `init()` and implements the full `Provider`
+Each provider registers itself in `init()` and implements the full `Provider`
 interface (`Name()`, `Chat()`, `Capabilities()`). Registration lives in
 `anthropic.go`, `openai.go` (OpenAI plus the OpenRouter and Ollama shims), and
-`opencode.go`. The registry is stateless: `app.DiscoverConfig` resolves the
-active provider's API key into `cfg.APIKey` and `app.BuildProvider(name, key)`
-passes it to the constructor. The shared `*Client` wraps
-retry/backoff on 429/5xx, SSE parsing, a circuit breaker, streaming timeout, and
-context-aware cleanup (no race windows, no timer leaks).
+`opencode.go`. The registry holds no keys: `app.DiscoverConfig` resolves the
+active provider's API key into `cfg.APIKey`, and `app.BuildProvider(name, key)`
+passes it to the constructor. The shared `*Client` handles retry with backoff
+on 429 and 5xx responses, SSE parsing, a circuit breaker, a streaming timeout,
+and cleanup tied to the context, with no race windows and no timer leaks.
 
 ## Totem lifecycle
 
@@ -152,8 +161,9 @@ registry.Invoke(ctx, eng, totem, args)   ← app.Run, the MCP server, bootstrap.
   └─ Cleanup()              → optional Cleaner; always runs, even on Init/Run error
 ```
 
-A totem's own settings live under `totems.<name>` in the project config and
-are read with `Config.TotemConfig`; the engine never interprets them.
+A totem keeps its own settings under
+`totems.<name>` in the project config and reads them with `Config.TotemConfig`;
+the engine never interprets them.
 
 ---
 

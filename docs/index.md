@@ -4,15 +4,18 @@
 
 # ouija docs
 
-Documentation for [ouija](https://github.com/discorgento/ouija) — a multi-totem
-AI harness that is generic across projects and across LLMs.
+Documentation for [ouija](https://github.com/discorgento/ouija), a harness for
+AI agents you write in Go. A harness runs a model in a loop and executes the
+tool calls it asks for; each agent you write for it is called a *totem*. ouija
+works with any project and with several LLM providers.
 
-New to ouija? Start with the [README](../README.md) for the pitch, or go
-straight to [Getting started](tutorial/getting-started.md) and run your first
-task in 10 minutes.
+New to ouija? Read the [README](../README.md) for an overview, or go straight
+to [Getting started](tutorial/getting-started.md) and run your first task in 10
+minutes.
 
-Docs are organized by **what the reader is trying to do** (Diátaxis): learn,
-accomplish, look up, understand. Every page follows
+The docs are grouped by **what you are trying to do**, following the Diátaxis
+scheme: learn, accomplish a task, look something up, or understand a design.
+Every page follows
 [`_style-guide.md`](_style-guide.md).
 
 ## Tutorial — "teach me"
