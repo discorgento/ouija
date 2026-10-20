@@ -11,10 +11,9 @@
 #
 # Artifacts run in the SAME workflow on purpose: releases created with the
 # default GITHUB_TOKEN do not trigger other workflows (`on: release` would
-# never fire). For the same reason a push to the release PR starts no CI —
-# and main's ruleset requires CI's checks — so this workflow dispatches CI on
-# the release branch itself (workflow_dispatch is the one event the
-# GITHUB_TOKEN may start). Step 4 still gates the tag before any upload.
+# never fire). For the same reason GitHub holds the CI runs of the release PR
+# for approval — and main's ruleset requires CI's checks — so this workflow
+# approves them (below). Step 4 still gates the tag before any upload.
 #
 # Repo settings needed once: Settings → Actions → General →
 #   "Allow GitHub Actions to create and approve pull requests".
@@ -41,7 +40,7 @@ jobs:
       contents: write
       pull-requests: write
       issues: write # release-please labels its PR
-      actions: write # dispatch CI on the release PR (below)
+      actions: write # approve CI on the release PR (below)
     outputs:
       created: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
@@ -53,22 +52,37 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # The release PR needs CI's required checks on its head commit, and
-      # GitHub runs no workflow for a push the GITHUB_TOKEN made: without this
-      # the PR could never be merged. No release PR (or the release itself
-      # being cut): nothing to run.
-      - name: Run CI on the release PR
+      # The release PR needs CI's checks to merge, but GitHub holds the runs
+      # of a PR the GITHUB_TOKEN pushed as "action required" until someone
+      # approves them — and a separately dispatched run is not linked to the
+      # PR, so it does not count. Approve those held runs: they run as the
+      # PR's own checks. GitHub creates them a few seconds after the push,
+      # hence the wait. A failure here only means approving them by hand
+      # (the run's "Approve and run" button); it never fails the release.
+      - name: Approve CI on the release PR
         if: steps.release.outputs.release_created != 'true'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           BRANCH: release-please--branches--main--components--ouija
         run: |
-          if gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" --silent 2>/dev/null; then
-            gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
-            echo "CI dispatched on $BRANCH"
-          else
+          if ! gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" --silent 2>/dev/null; then
             echo "no release PR open"
+            exit 0
           fi
+          head="$(gh api "repos/$GITHUB_REPOSITORY/branches/$BRANCH" -q .commit.sha)"
+          for _ in $(seq 1 12); do
+            ids="$(gh run list --repo "$GITHUB_REPOSITORY" --branch "$BRANCH" --status action_required \
+              --json databaseId,headSha -q ".[] | select(.headSha == \"$head\") | .databaseId")"
+            if [ -n "$ids" ]; then
+              for id in $ids; do
+                gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" --silent && echo "approved run $id"
+              done
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "no run held for approval on $head (CI may have started on its own)"
 
   artifacts:
     name: gate + cross-compile + attest + attach binaries
