@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/discorgento/ouija/compare/v0.1.0...v0.2.0) (2026-10-20)
+
+
+### Features
+
+* **release:** name the archives after the version, zip for Windows, add install.ps1 ([63f3af9](https://github.com/discorgento/ouija/commit/63f3af9dfe77d801256204a350db47550df3e72e))
+
 ## 0.1.0 (2026-10-20)
 
 
