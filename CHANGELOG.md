@@ -18,7 +18,7 @@
 * **chat:** name the totems on the welcome again ([f218297](https://github.com/discorgento/ouija/commit/f21829715883936253a2d08e01dd97f51bd7b3a0))
 * **chat:** redesign the TUI — welcome, tools, diffs, approvals, search ([e15f34c](https://github.com/discorgento/ouija/commit/e15f34cb8015b4cac77a52bafbd69bf893e5e2a4))
 * **chat:** run every totem, /learn, command output and golden screens ([bb40b5c](https://github.com/discorgento/ouija/commit/bb40b5caf88c7ebec2ff05a1dd84263c39562b01))
-* **chat:** smooth streaming, [@files](https://github.com/files), /undo, /task, sessions and themes ([4b64c28](https://github.com/discorgento/ouija/commit/4b64c28875ccdaec799143f58bcb0bb4cef5286b))
+* **chat:** smooth streaming, `@file` mentions, /undo, /task, sessions and themes ([4b64c28](https://github.com/discorgento/ouija/commit/4b64c28875ccdaec799143f58bcb0bb4cef5286b))
 * **chat:** trim the welcome to the logo and four places to start ([ff1be74](https://github.com/discorgento/ouija/commit/ff1be748cea5dbf09274a49263edfe49232c340a))
 * **cli:** add a shared palette and restyle doctor, setup and init ([e66bcd8](https://github.com/discorgento/ouija/commit/e66bcd83e9b49aa10a7eb8be53d2d254ec741612))
 * **cli:** draw totem runs live on the terminal ([ab58dbb](https://github.com/discorgento/ouija/commit/ab58dbb2d10842602c79c41af1d666a2c8e86341))
