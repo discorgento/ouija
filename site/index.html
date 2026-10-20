@@ -661,56 +661,97 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 
 <section id="agent" data-win="agent">
   <div class="wrap">
-    <div class="prompt reveal"><span class="path">~/your-agents</span><span class="sym">❯</span><span class="cmd">ouija generate totem sentinel</span></div>
-    <h2 class="reveal">A Go type in your repo. That's the whole agent.</h2>
-    <p class="sub reveal"><code>engine</code>, <code>registry</code>, <code>schema</code> and <code>bootstrap</code> are public Go packages — no fork, no upstream rebuild. Your totem inherits the budget, the sandbox, the tracing and MCP.</p>
+    <div class="prompt reveal"><span class="path">~/your-agents</span><span class="sym">❯</span><span class="cmd">ouija generate totem --external</span></div>
+    <h2 class="reveal">Go decides the path. The model only judges.</h2>
+    <p class="sub reveal">A code reviewer in ~50 lines: Go reads the diff, the model finds problems — told how to work in <code>System</code>, given the data in <code>Prompt</code>, bound to an answer shape by <code>Schema</code> — and a skeptic checks each one, because the loop says so. A Go type in your repo: no fork, and it inherits the budget, the sandbox, the tracing and MCP. <a href="https://github.com/discorgento/ouija/blob/main/docs/how-to/add-totem.md#walkthrough-a-useful-totem-piece-by-piece">Piece by piece →</a></p>
     <div class="agent">
       <fieldset class="pane hi reveal"><legend>code</legend>
         <div class="tabs" role="tablist">
-          <button role="tab" aria-selected="true" data-tab="totem">totems/sentinel/sentinel.go</button>
+          <button role="tab" aria-selected="true" data-tab="totem">totems/review/review.go</button>
           <button role="tab" aria-selected="false" data-tab="host">cmd/my-totem/main.go</button>
         </div>
         <div class="panel" data-panel="totem">
-<pre class="code"><button class="copy">copy</button><span class="k">package</span> sentinel
+<pre class="code"><button class="copy">copy</button><span class="k">package</span> review
 
 <span class="k">import</span> (
-    <span class="s">"context"</span>
+    <span class="s">&quot;context&quot;</span>
+    <span class="s">&quot;encoding/json&quot;</span>
+    <span class="s">&quot;os/exec&quot;</span>
 
-    <span class="s">"github.com/discorgento/ouija/engine"</span>
-    <span class="s">"github.com/discorgento/ouija/registry"</span>
+    <span class="s">&quot;github.com/discorgento/ouija/engine&quot;</span>
+    <span class="s">&quot;github.com/discorgento/ouija/registry&quot;</span>
+    <span class="s">&quot;github.com/discorgento/ouija/schema&quot;</span>
 )
 
 <span class="k">type</span> Totem <span class="k">struct</span>{}
 
-<span class="k">func</span> (t *Totem) <span class="f">Name</span>() <span class="k">string</span>    { <span class="k">return</span> <span class="s">"sentinel"</span> }
-<span class="k">func</span> (t *Totem) <span class="f">Summary</span>() <span class="k">string</span> { <span class="k">return</span> <span class="s">"Example external totem"</span> }
-<span class="k">func</span> (t *Totem) <span class="f">Run</span>(ctx context.Context, eng *engine.Engine, args registry.Args) (<span class="k">any</span>, <span class="k">error</span>) {
-    res, err := eng.<span class="f">Run</span>(ctx, engine.RunRequest{Label: <span class="s">"sentinel"</span>, Prompt: args.Task})
-    <span class="k">if</span> err != <span class="k">nil</span> {
-        <span class="k">return</span> <span class="k">nil</span>, err
+<span class="k">func</span> (t *Totem) Name() <span class="k">string</span>    { <span class="k">return</span> <span class="s">&quot;review&quot;</span> }
+<span class="k">func</span> (t *Totem) Summary() <span class="k">string</span> { <span class="k">return</span> <span class="s">&quot;Review the branch: find problems, verify each one&quot;</span> }
+
+<span class="k">func</span> (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (<span class="k">any</span>, <span class="k">error</span>) {
+    <span class="cm">// 1. Go gathers the context — what changed since main. Nothing to guess.</span>
+    cmd := exec.<span class="f">CommandContext</span>(ctx, <span class="s">&quot;git&quot;</span>, <span class="s">&quot;diff&quot;</span>, <span class="s">&quot;--no-ext-diff&quot;</span>, <span class="s">&quot;--merge-base&quot;</span>, <span class="s">&quot;main&quot;</span>)
+    cmd.Dir = eng.<span class="f">Config</span>().ProjectRoot
+    diff, <span class="k">err</span> := cmd.<span class="f">Output</span>()
+    <span class="k">if</span> <span class="k">err</span> != <span class="k">nil</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="k">err</span>
     }
-    <span class="k">return</span> <span class="k">map</span>[<span class="k">string</span>]<span class="k">string</span>{<span class="s">"summary"</span>: res.Text}, <span class="k">nil</span>
+
+    <span class="cm">// 2. The model judges. System: how to work. Prompt: this call&#x27;s data.</span>
+    <span class="cm">//    UseTools: it may open files. Schema: the shape the answer must have.</span>
+    found, <span class="k">err</span> := eng.<span class="f">Run</span>(ctx, engine.RunRequest{
+        Label:    <span class="s">&quot;find&quot;</span>,
+        System:   <span class="s">&quot;You review code changes. Report real bugs only, never style.&quot;</span>,
+        Prompt:   <span class="s">&quot;Focus: &quot;</span> + args.Task + <span class="s">&quot;\n\nDIFF:\n&quot;</span> + <span class="k">string</span>(diff),
+        UseTools: true,
+        Schema:   schema.<span class="f">Obj</span>(<span class="k">map</span>[<span class="k">string</span>]<span class="k">any</span>{<span class="s">&quot;findings&quot;</span>: schema.<span class="f">Arr</span>(<span class="s">&quot;one problem each: file, line, why&quot;</span>)}, <span class="s">&quot;findings&quot;</span>),
+    })
+    <span class="k">if</span> <span class="k">err</span> != <span class="k">nil</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="k">err</span>
+    }
+    <span class="k">var</span> out <span class="k">struct</span>{ Findings []<span class="k">string</span> }
+    <span class="k">if</span> <span class="k">err</span> := json.<span class="f">Unmarshal</span>([]byte(found.Text), &amp;out); <span class="k">err</span> != <span class="k">nil</span> {
+        <span class="k">return</span> <span class="k">nil</span>, <span class="k">err</span>
+    }
+
+    <span class="cm">// 3. A rule in Go, not a request in a prompt: a skeptic checks every</span>
+    <span class="cm">//    finding, and only the confirmed ones are kept.</span>
+    <span class="k">var</span> confirmed []<span class="k">string</span>
+    <span class="k">for</span> _, f := <span class="k">range</span> out.Findings {
+        v, <span class="k">err</span> := eng.<span class="f">Run</span>(ctx, engine.RunRequest{
+            Label:    <span class="s">&quot;verify&quot;</span>,
+            System:   <span class="s">&quot;You are a skeptic. Read the code; say yes only if the problem is real.&quot;</span>,
+            Prompt:   f,
+            UseTools: true,
+            Schema:   schema.<span class="f">Obj</span>(<span class="k">map</span>[<span class="k">string</span>]<span class="k">any</span>{<span class="s">&quot;real&quot;</span>: schema.<span class="f">Enum</span>(<span class="s">&quot;is it real&quot;</span>, <span class="s">&quot;yes&quot;</span>, <span class="s">&quot;no&quot;</span>)}, <span class="s">&quot;real&quot;</span>),
+        })
+        <span class="k">var</span> verdict <span class="k">struct</span>{ Real <span class="k">string</span> }
+        <span class="k">if</span> <span class="k">err</span> == <span class="k">nil</span> &amp;&amp; json.<span class="f">Unmarshal</span>([]byte(v.Text), &amp;verdict) == <span class="k">nil</span> &amp;&amp; verdict.Real == <span class="s">&quot;yes&quot;</span> {
+            confirmed = append(confirmed, f)
+        }
+    }
+    <span class="k">return</span> <span class="k">map</span>[<span class="k">string</span>]<span class="k">any</span>{<span class="s">&quot;confirmed&quot;</span>: confirmed}, <span class="k">nil</span>
 }
 
-<span class="k">func</span> <span class="f">init</span>() { registry.<span class="f">Register</span>(&amp;Totem{}) }</pre>
+<span class="k">func</span> init() { registry.<span class="f">Register</span>(&amp;Totem{}) }</pre>
         </div>
         <div class="panel" data-panel="host" hidden>
 <pre class="code"><button class="copy">copy</button><span class="k">package</span> main
 
 <span class="k">import</span> (
-    <span class="s">"os"</span>
+    <span class="s">&quot;os&quot;</span>
 
-    <span class="s">"github.com/discorgento/ouija/bootstrap"</span>
-    _ <span class="s">"github.com/you/your-agents/totems/sentinel"</span>
+    <span class="s">&quot;github.com/discorgento/ouija/bootstrap&quot;</span>
+    _ <span class="s">&quot;github.com/you/your-agents/totems/review&quot;</span>
 )
 
-<span class="k">func</span> <span class="f">main</span>() { os.<span class="f">Exit</span>(bootstrap.<span class="f">Main</span>(bootstrap.<span class="f">WithName</span>(<span class="s">"my-totem"</span>))) }</pre>
+<span class="k">func</span> main() { os.<span class="f">Exit</span>(bootstrap.<span class="f">Main</span>(bootstrap.<span class="f">WithName</span>(<span class="s">&quot;my-totem&quot;</span>))) }</pre>
         </div>
       </fieldset>
       <div class="side">
         <fieldset class="pane reveal"><legend>build &amp; run</legend>
 <pre class="code"><button class="copy">copy</button><span class="p">$ </span>go build -o my-totem ./cmd/my-totem
-<span class="p">$ </span>my-totem sentinel "audit the auth flow"
+<span class="p">$ </span>my-totem review "concurrency"
 <span class="p">$ </span>my-totem mcp   <span class="cm"># tools in your editor</span></pre>
         </fieldset>
         <fieldset class="pane reveal"><legend>inherited for free</legend>
