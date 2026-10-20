@@ -11,9 +11,9 @@
 
 ### `ouija`
 
-On a terminal, opens the chat (`ouija chat`); the first time — no global
-config yet — it runs `ouija setup` first. Piped or scripted, it prints the
-help, as `ouija help` does.
+On a terminal, opens the chat (`ouija chat`), running `ouija setup` first if
+no global config exists yet. When piped or scripted, it prints the help, like
+`ouija help`.
 
 ### `ouija help`
 
@@ -29,31 +29,31 @@ ouija 1.2.3   # 0.0.0 for a build from source before the first release
 
 ### `ouija setup`
 
-Interactive global config wizard. Prompts for:
+Interactive wizard for the global config. Prompts for:
 
-1. API keys per provider (Ollama skipped)
+1. API keys per provider (not for Ollama, which needs none)
 2. Default provider and model
 
-Writes to the global config (`0600`): `~/.config/ouija/config.json` on Linux,
+Writes the global config (`0600`): `~/.config/ouija/config.json` on Linux,
 `~/Library/Application Support/ouija/config.json` on macOS,
 `%AppData%\ouija\config.json` on Windows.
 
 ### `ouija init`
 
-Interactive per-project config wizard. Reads global defaults and lets you
-override provider, model, and API key. Requires an existing global config —
-run `ouija setup` first.
+Interactive wizard for the project config. Reads the global defaults and lets
+you override the provider, model and API key. Needs an existing global config,
+so run `ouija setup` first.
 
-Writes to `.ouija/config.json` in the current directory, and trusts it (see
+Writes `.ouija/config.json` in the current directory and trusts it (see
 `ouija trust`).
 
 ### `ouija trust [--revoke] [<path>]`
 
-Trusts the project config discovery finds from the current directory (or
-`<path>`), after printing the security-sensitive keys it sets (`permission`,
-`tools` bash allowlist, `apiKey`, a non-default `systemPrompt`, a `projectRoot`
-other than `.`). Until then
-those keys are ignored with a warning; any change to the file needs
+Trusts the project config that discovery finds from the current directory (or
+from `<path>`). It first prints the security-sensitive keys the file sets
+(`permission`, the `tools` bash allowlist, `apiKey`, a non-default
+`systemPrompt`, a `projectRoot` other than `.`). Until you trust the file,
+ouija ignores those keys with a warning, and any change to the file needs
 `ouija trust` again. `--revoke` forgets the trust. Files written by
 `ouija init` and by the chat are trusted automatically. See
 [Project trust](../explanation/security.md#project-trust).
@@ -64,14 +64,15 @@ Alias for `ouija setup`.
 
 ### `ouija generate totem`
 
-Interactive scaffold for a new totem. Prompts for name and description, writes
+Interactive scaffold for a new totem (an agent workflow you run with
+`ouija <totem>`). Prompts for a name and description, writes
 `totems/<name>/<name>.go`, then runs `go generate ./totems/` and
 `go install ./cmd/ouija`.
 
-With `--external [dir]` it scaffolds a standalone Go module instead — `go.mod`,
-the totem, a one-line `cmd/<name>/main.go` host on `bootstrap.Main`, `README.md` and
-`.gitignore` — then runs `go mod tidy` and builds the binary. For agents that
-live in your own repo, not in ouija's.
+With `--external [dir]`, it scaffolds a standalone Go module instead, for
+agents that live in your own repository rather than in ouija's: `go.mod`, the
+totem, a one-line `cmd/<name>/main.go` host on `bootstrap.Main`, `README.md`
+and `.gitignore`. It then runs `go mod tidy` and builds the binary.
 
 ```sh
 ouija generate totem --external [dir]
@@ -79,13 +80,13 @@ ouija generate totem --external [dir]
 
 ### `ouija learn [<fact>]`
 
-With a fact, saves it to `docs/knowledge.md`; without arguments, prints the
-current knowledge. Facts are injected into the chat's system prompt and the
-`task` totem's scout.
+With a fact, saves it to `docs/knowledge.md`; with no argument, prints the
+current knowledge. ouija injects the facts into the chat's system prompt and
+into the `task` totem's scout (the agent that first surveys the code).
 
 ### `ouija doctor`
 
-Diagnoses the local setup: binary location, global and project config files,
+Checks the local setup: binary location, global and project config files,
 resolved provider/model, API key presence, registered totems, and harness
 registration status.
 
@@ -93,14 +94,16 @@ registration status.
 ouija doctor
 ```
 
-Output is a checklist with ✓ (ok), ! (warning), ✗ (problem). Exit code is 0
-when there are no problems; 1 when at least one problem is found (e.g. missing
-API key for a non-keyless provider, invalid config, no totems registered).
+The output is a checklist with ✓ (ok), ! (warning) and ✗ (problem). The exit
+code is 0 when there are no problems, and 1 when it finds at least one (e.g. a
+missing API key for a provider that needs one, an invalid config, no totems
+registered).
 
 ### `ouija chat [--config <file>] [--trace-file <file>]`
 
-Interactive Bubble Tea TUI. Project-aware chat with file tools, write/exec
-tools (subject to approval), token streaming, and conversation history.
+Interactive terminal UI (TUI, built with Bubble Tea): a chat that knows the
+project, with file tools, write and exec tools (subject to approval), token
+streaming and conversation history.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -108,14 +111,15 @@ tools (subject to approval), token streaming, and conversation history.
 | `--trace-file` | `""` | Write a Perfetto/Chrome Trace JSON file |
 | `--continue`, `-c` | `false` | Resume this project's latest conversation (`/sessions` picks an older one) |
 
-Each conversation is saved after every reply, 0600, under the user cache
-directory (`ouija/sessions/`, one directory per project, the latest 30 kept):
-it holds what the tools read, so it is never written into the project.
+ouija saves each conversation after every reply, with mode 0600, under the
+user cache directory (`ouija/sessions/`, one directory per project, keeping the
+latest 30). A conversation holds what the tools read, so ouija never writes it
+into the project.
 
-After the TUI exits, the session span tree is always rendered to stderr, followed
-by a card summing the session up (time, messages, tokens, model, cost when
-pricing is set, the files changed).
-`--trace-file` additionally writes the Perfetto JSON file.
+When the TUI exits, ouija always prints the session's span tree (the timed
+steps of the session) to stderr, followed by a summary card: time, messages,
+tokens, model, cost (when pricing is set) and the files changed.
+`--trace-file` also writes the Perfetto JSON file.
 
 #### Slash commands (inside the TUI)
 
@@ -124,15 +128,15 @@ pricing is set, the files changed).
 | `/clear` | Clear chat history |
 | `/retry` | Ask the last message again; the new reply replaces the last one (files already changed stay changed) |
 | `/changes` | List the files ouija changed in this session, with their `+N −M` |
-| `/<totem> [what]` | Run a totem inside the chat — `/task <what>`, `/doc <what>`, `/sticker`, and any totem you register — its runs drawn live, then its result (`task` also saves the plan to `docs/task-plan.md`) |
+| `/<totem> [what]` | Run a totem inside the chat: `/task <what>`, `/doc <what>`, `/sticker`, or any totem you register. The chat draws its runs live, then shows the result (`task` also saves the plan to `docs/task-plan.md`) |
 | `/learn [fact]` | Teach ouija a fact about the project (saved to `docs/knowledge.md` at the project root, read by every later chat and `/task`); alone, list what it knows |
 | `/sessions` | Resume an earlier conversation of this project |
-| `/theme [name]` | Pick the color theme (`ouija`, `catppuccin`, `dracula`, `mono`) from a list with each one's colors. It applies at once: the chat restarts with the conversation restored (on Windows, at the next start) |
-| `/undo` | Take back ouija's latest file change — `write_file`, `edit_file`, `delete_file` on a file, an edit from the editor; not `bash` commands nor a deleted directory. Repeat to go further back |
-| `/save [file]` | Export conversation to Markdown |
-| `/model [name]` | Show or switch model (with interactive picker) |
-| `/provider [name] [model]` | Show or switch provider and model; Enter on `/provider` or `/provider <name>` opens a picker, so you always choose the model |
-| `/permit [tool] [allow\|ask\|deny]` | Show or set permission level |
+| `/theme [name]` | Pick the color theme (`ouija`, `catppuccin`, `dracula`, `mono`) from a list with each one's colors. It applies at once: the chat restarts and restores the conversation (on Windows, it applies at the next start) |
+| `/undo` | Undo ouija's latest file change: a `write_file`, `edit_file` or `delete_file` on a file, or an edit made in the editor. It cannot undo `bash` commands or a deleted directory. Repeat to go further back |
+| `/save [file]` | Export the conversation to Markdown |
+| `/model [name]` | Show or switch the model (with an interactive picker) |
+| `/provider [name] [model]` | Show or switch the provider and model; Enter on `/provider` or `/provider <name>` opens a picker, so you always choose the model |
+| `/permit [tool] [allow\|ask\|deny]` | Show or set a tool's permission level |
 | `/debug` | Toggle debug logging |
 | `/help` | Show all commands and keyboard shortcuts |
 
@@ -140,15 +144,15 @@ pricing is set, the files changed).
 
 | Shortcut | Action |
 |---|---|
-| `Esc` | Cancel generation / clear pending queue |
-| `Ctrl+Y` | Copy last assistant response to clipboard |
+| `Esc` | Cancel the generation / clear the queue of pending messages |
+| `Ctrl+Y` | Copy the last assistant response to the clipboard |
 | `Ctrl+T` | Show or hide each turn's tool calls one per line, with the span tree |
-| `Alt+Y` | Copy the last code block to clipboard |
+| `Alt+Y` | Copy the last code block to the clipboard |
 | `Ctrl+F` | Search the conversation: matches highlighted, `Enter`/`↓` next, `↑` previous, `Esc` close |
 | `Ctrl+R` | Search the messages you sent; `Enter` puts one back in the input box |
 | `@` | Attach a project file to the message: a picker of the project's files, filtered as you type |
-| `Ctrl+S` | Select mode: release the mouse to select text (again to scroll with the wheel) |
-| `Up` (empty input) | Load last user message for editing |
+| `Ctrl+S` | Select mode: release the mouse so you can select text (press again to scroll with the wheel) |
+| `Up` (empty input) | Load your last message for editing |
 | `Alt+Up` / `Alt+Down` | Cycle through input history |
 | `Shift+Enter` / `Alt+Enter` | Insert a newline |
 | `Tab` | Accept the highlighted slash-command/autocomplete entry |
@@ -166,34 +170,34 @@ pricing is set, the files changed).
 
 Default permission: **allow** for the read-only tools (`read_file`, `grep`,
 `glob`, `list_dir`) and **ask** for the write/exec tools (`write_file`,
-`edit_file`, `delete_file`, `bash`). Configurable per-tool via `/permit` or the
-project config.
+`edit_file`, `delete_file`, `bash`). Configure it per tool with `/permit` or in
+the project config.
 
 ### `ouija <totem> [task] [--set <key>=<value>]… [--config <file>] [--trace-file <file>] [--json]`
 
-Run a registered totem. Whether the task is required comes from the totem's
-input schema: `sticker` and `review` run without one, while `task` and `doc` reject a
-missing task before running. `--set key=value` (repeatable) passes a named input
-the totem declares, typed by its input schema: a `string` input keeps the text
-as typed (`--set ticket=1234`), others are read as JSON (`3`, `true`,
-`["a","b"]`) when they parse, else as a string.
+Runs a registered totem. The totem's input schema decides whether the task
+is required: `sticker` and `review` run without one, while `task` and `doc`
+reject a missing task before running. `--set key=value` (repeatable) passes a
+named input that the totem declares, typed by its input schema. A `string`
+input keeps the text as typed (`--set ticket=1234`); other inputs are read as
+JSON (`3`, `true`, `["a","b"]`) when they parse, and as a string otherwise.
 
-Registered totems: `task` (analysis → plan), `review` (the branch's changes →
-verified findings), `doc` (code-verified client document), `sticker` (laptop
-sticker from project metrics). `ouija help` lists
-them all.
+Registered totems: `task` (analyses the code, then writes a plan), `review`
+(turns the branch's changes into verified findings), `doc` (a client document
+verified against the code), `sticker` (a laptop sticker from project metrics).
+`ouija help` lists them all.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--config` | `""` | Explicit config path |
 | `--trace-file` | `""` | Write a Perfetto/Chrome Trace JSON file |
-| `--json` | `false` | Print raw JSON result |
+| `--json` | `false` | Print the raw JSON result |
 
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Success (also `<command> --help`, which only prints the usage) |
+| `0` | Success (also for `<command> --help`, which only prints the usage) |
 | `1` | Config error or run failure |
 | `2` | Usage error: unknown command or totem (with a suggestion for a typo), invalid flag, unexpected argument |
 
@@ -201,12 +205,13 @@ them all.
 
 - Config path: `[ouija] config: /path/to/.ouija/config.json`
 - Error: `[ouija] error: <message>`
-- Stats: `\n[ouija] <provider> · <model> · <tokens> tokens · <steps> steps` — the ` · $<cost>` suffix appears only when cost pricing is tracked
+- Stats: `\n[ouija] <provider> · <model> · <tokens> tokens · <steps> steps` — the ` · $<cost>` suffix appears only when cost pricing is set
 
 ## ouija mcp
 
-Serves MCP over stdio (JSON-RPC 2.0), or wires the server into the agent
-harnesses found on this machine.
+Serves MCP (Model Context Protocol) over stdio as JSON-RPC 2.0, or registers
+the server with the agent harnesses (OpenCode, Claude Code, Cursor) it finds
+on this machine.
 
 ```sh
 ouija mcp            # serve MCP over stdio (what a harness launches)
@@ -223,32 +228,32 @@ starting the server.
 | Protocol | JSON-RPC 2.0 over stdin/stdout |
 | Tool prefix | `ouija_<totem>` (e.g. `ouija_task`, `ouija_review`, `ouija_doc`, `ouija_sticker`) |
 | Transport | stdio |
-| Budget | Engine budget applies per call |
+| Budget | The engine budget applies to each call |
 
-`ouija mcp install` only touches harnesses it detects (OpenCode, Claude Code,
-Cursor), writes a `.bak` before editing any config file, and never overwrites an
-existing entry. Both `install` and `status` are safe to re-run.
+`ouija mcp install` touches only the harnesses it detects (OpenCode, Claude
+Code, Cursor), writes a `.bak` before it edits any config file, and never
+overwrites an existing entry. You can safely re-run both `install` and
+`status`.
 
 ### Tools exposed
 
-Each registered totem becomes an MCP tool named `ouija_<name>` with a single
+Each registered totem becomes an MCP tool named `ouija_<name>`, with a single
 `task` string argument. Config discovery follows the same rules as the CLI.
 
 ### Resources exposed
 
-The server exposes a `ouija://project/{path}` resource for reading any file
-within the project root. Use it to give editor agents direct access to project
-files:
+The server exposes a `ouija://project/{path}` resource that reads any file
+within the project root, giving editor agents direct access to project files:
 
 | URI pattern | Example | Returns |
 |---|---|---|
 | `ouija://project/{path}` | `ouija://project/src/main.go` | File contents |
 | `ouija://project/` | `ouija://project/` | Project root listing |
 
-The resource is sandboxed — paths are resolved via `engine.SafeResolve`, which
-blocks both lexical escapes (`../../etc/passwd`) and symlinks pointing out of the
-project root, and refuses protected paths (`.env`, `.ssh/*`, `/etc/*`) the same
-way the built-in tools do.
+The resource is sandboxed: `engine.SafeResolve` resolves its paths, blocking
+both lexical escapes (`../../etc/passwd`) and symlinks that point out of the
+project root, and it refuses protected paths (`.env`, `.ssh/*`, `/etc/*`) the
+same way the built-in tools do.
 
 ### MCP server configuration
 

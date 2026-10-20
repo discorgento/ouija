@@ -4,15 +4,17 @@
 
 # Adding a totem
 
-> Creating a new totem from scratch. Audience: developer
+> How to write a new totem, an AI agent written as ordinary Go code, from
+> scratch. Audience: developer
 
-**Prerequisite:** [Install ouija](../../README.md#install) first — you need
-`ouija generate totem`, which creates, registers, and installs the new totem
-in one step.
+**Prerequisite:** [Install ouija](../../README.md#install) first. You need its
+`ouija generate totem` command, which creates, registers and installs a new
+totem in one step.
 
 ## Where to put your totem
 
-Two valid homes, same interface:
+A totem can live in the ouija repo or in your own. Both use the same
+interface:
 
 | | In the ouija repo | In **your** repo |
 |---|---|---|
@@ -23,9 +25,9 @@ Two valid homes, same interface:
 | Engine features | all | all (budget, trace, sandbox, MCP) |
 
 You never have to fork ouija. `engine`, `registry` and `schema` are public Go
-packages — import them into your own module, register your totems, and build a
+packages: import them into your own module, register your totems, and build a
 standalone binary. If you also want the standard ouija CLI (`setup`, `chat`,
-`mcp`), you can either ship it alongside or call `ouija task` as a subprocess.
+`mcp`), ship it alongside your binary or call `ouija task` as a subprocess.
 
 ## The Totem interface
 
@@ -37,14 +39,15 @@ type Totem interface {
 }
 ```
 
-- **Name** — CLI command name (e.g. `"review"` becomes `ouija review`)
-- **Summary** — one-line description shown in `ouija help`
-- **Run** — main logic. Use `eng.Run()` or `eng.Chat()` for agentic work. The
-  project config is `eng.Config()`.
+- **Name** — the CLI command name (e.g. `"review"` becomes `ouija review`).
+- **Summary** — the one-line description shown in `ouija help`.
+- **Run** — the main logic. Call `eng.Run()` or `eng.Chat()` whenever you need
+  the model. `eng.Config()` returns the project config.
 
-Hosts run a totem through `registry.Invoke`, which checks its required inputs
-and drives the optional hooks below — the ouija CLI, the MCP server and
-`bootstrap.Main` all do, so a totem behaves the same everywhere.
+A host is any program that runs totems: the ouija CLI, the MCP server and
+`bootstrap.Main` are all hosts. Each runs a totem through `registry.Invoke`,
+which checks the totem's required inputs and calls the optional hooks below,
+so a totem behaves the same in every host.
 
 ### Optional: lifecycle hooks
 
@@ -53,24 +56,25 @@ type Initializer interface { Init(ctx context.Context, eng *engine.Engine) error
 type Cleaner     interface { Cleanup() error }
 ```
 
-- **Init** — called before Run: open connections, validate the config. An
-  error aborts the run.
-- **Cleanup** — called after Run, and after a failed Init too. Close files,
-  release resources.
+- **Init** — runs before Run. Open connections and validate the config here.
+  If Init returns an error, the run stops.
+- **Cleanup** — runs after Run, and also after a failed Init. Close files and
+  release resources here.
 
-Implement them only when you need them. One registered value serves every
-call, and the MCP server runs calls concurrently: a totem with `Init` or
-`Cleanup` keeps per-run state, so `Invoke` runs its calls one at a time; a
-totem without them runs concurrently and must not keep per-run state in its
-struct. A panic in `Run` is returned as an error instead of crashing the
-host. (`Init` used to take a third
-`*engine.Config` argument; a totem still on that signature is refused at
-`registry.Register` with a message saying what to change.)
+Implement them only when you need them, because they change how calls run.
+One registered value serves every call, and the MCP server runs calls
+concurrently. `Invoke` treats a totem with `Init` or `Cleanup` as holding
+per-run state, so it runs that totem's calls one at a time. A totem without
+them runs concurrently, so it must not keep per-run state in its struct. If
+`Run` panics, the host gets an error instead of crashing.
+
+`Init` used to take a third `*engine.Config` argument. `registry.Register`
+refuses a totem that still uses that signature and says what to change.
 
 ### Optional: typed inputs
 
-`args.Task` is the free-text request — the CLI's first argument, the MCP
-tool's `task`. For named inputs, declare a JSON Schema and decode
+`args.Task` holds the free-text request: the CLI's first argument, or the MCP
+tool's `task` argument. For named inputs, declare a JSON Schema and decode
 `args.Params` into a struct:
 
 ```go
@@ -92,23 +96,28 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 }
 ```
 
-The schema is the MCP tool's `inputSchema`, and the CLI takes the inputs as
-`--set key=value`, typed by the schema: a `string` property keeps the text as
-typed (`--set ticket=1234` is `"1234"`), anything else is read as JSON (`3`,
-`true`, `["a","b"]`): `ouija review "the auth flow" --set depth=2`. A missing
-required input is an error before Init or Run; a `task` given as
-`--set task=…` fills `Args.Task`. Without `InputSchema`, the input is a
+The MCP server publishes this schema as the tool's `inputSchema`. The CLI
+takes each input as `--set key=value`, for example
+`ouija review "the auth flow" --set depth=2`, and types the value by the
+schema. A `string` property keeps the text as typed (`--set ticket=1234` is
+`"1234"`); any other property is read as JSON (`3`, `true`, `["a","b"]`).
+
+A missing required input fails before Init or Run. A `task` given as
+`--set task=…` fills `Args.Task`. A totem without `InputSchema` takes a single
 required `task` string.
 
-A result is printed with its `Render()` (a `Renderer`) or as indented JSON;
-one JSON cannot encode (a `NaN`, a channel) fails the run instead of printing
-nothing — `registry.Format` returns that error for a host of your own.
+The host prints a result with its `Render()` method (see
+[Renderer](#optional-renderer)) or, without one, as indented JSON. A result
+that JSON cannot encode, such as a `NaN` or a channel, fails the run instead
+of printing nothing. In a host of your own, `registry.Format` returns that
+error.
 
 ### Optional: settings
 
-A totem's own settings live in the project config under `totems.<name>`; read
-them with `eng.Config().TotemConfig(name, &v)`, after filling `v` with your
-defaults (an absent section leaves `v` untouched):
+A totem's own settings live in the project config under `totems.<name>`. Fill
+a struct `v` with your defaults, then read the settings with
+`eng.Config().TotemConfig(name, &v)`. If the section is absent, `v` keeps your
+defaults:
 
 ```json
 { "totems": { "review": { "maxFiles": 40 } } }
@@ -123,8 +132,8 @@ if err := eng.Config().TotemConfig("review", &c); err != nil {
 
 ### Optional: Renderer
 
-If your result type implements `Render() string`, the CLI uses it for terminal
-output. Otherwise it falls back to JSON.
+If your result type implements `Render() string`, the CLI prints its output in
+the terminal. Otherwise the CLI prints JSON.
 
 ```go
 type Renderer interface {
@@ -140,23 +149,25 @@ type Renderer interface {
 ouija generate totem
 ```
 
-You will be prompted for:
-- **Name** — short command name (e.g. `"review"` becomes `ouija review`)
-- **Description** — one-line summary for `ouija help`
+The command asks for:
 
-This creates `totems/<name>/<name>.go` with the full boilerplate (package,
-`init()`, all interface methods, a `result` struct with JSON tags, and a
-`Render()` method), then auto-runs `go generate ./totems/` and
-`go install ./cmd/ouija`.
+- **Name** — a short command name (e.g. `"review"` becomes `ouija review`).
+- **Description** — a one-line summary for `ouija help`.
 
-Your new command is ready to use immediately:
+It creates `totems/<name>/<name>.go` with the full boilerplate: the package,
+`init()`, every interface method, a `result` struct with JSON tags and a
+`Render()` method. Then it runs `go generate ./totems/` and
+`go install ./cmd/ouija` for you.
+
+Your new command works right away:
 
 ```sh
 ouija review "review the last commit"
 ```
 
-To scaffold a **standalone module** in your own repo instead (go.mod + totem +
-`cmd/` host on `bootstrap`), add `--external`:
+To scaffold a **standalone module** in your own repo instead, add
+`--external`. You get a `go.mod`, the totem and a `cmd/` host built on
+`bootstrap`:
 
 ```sh
 ouija generate totem --external [dir]
@@ -165,17 +176,21 @@ ouija generate totem --external [dir]
 ### 2. Implement the logic
 
 Replace the placeholder `Run()` body with your totem's logic. The walkthrough
-below builds a useful one piece by piece; the [Engine
-API](#engine-api-for-totems) lists everything else.
+below builds a useful totem piece by piece, and the [Engine
+API](#engine-api-for-totems) table lists everything else.
 
 ## Walkthrough: a useful totem, piece by piece
 
-We build `review`: it reviews what a branch changed before the PR — finds
-problems, has each one checked by a skeptic, and reports only what holds. The
-finished totem ships with ouija: [`totems/review/review.go`](../../totems/review/review.go),
-with its [tests](../../totems/review/review_test.go).
+This walkthrough builds `review`, a totem that reviews a branch's changes
+before you open a pull request. It asks the model to find problems, asks a
+second, skeptical model call to check each one, and reports only the problems
+the skeptic confirms. The finished totem ships with ouija:
+[`totems/review/review.go`](../../totems/review/review.go), with its
+[tests](../../totems/review/review_test.go).
 
 ### The one question: what is Go's job, what is the model's?
+
+Before writing any code, split the work between Go and the model:
 
 | Go decides | The model judges |
 |---|---|
@@ -184,23 +199,27 @@ with its [tests](../../totems/review/review_test.go).
 | what to do with each answer | |
 | what is reported | |
 
-Anything certain and repeatable — running `git`, reading a file, filtering,
-counting, saving — is Go. The model is called only for judgment, through
-`eng.Run`. That is the whole difference from a prompt file: "then verify each
-finding" is not a request the model may skip, it is a `for` loop.
+Go does everything certain and repeatable: running `git`, reading a file,
+filtering, counting, saving. Your code calls the model, through `eng.Run`,
+only when a step needs judgment. This split is what sets a totem apart from a
+prompt file. A prompt can only ask the model to "verify each finding", and the
+model may skip it; a totem verifies each finding in a `for` loop.
 
 ### 1. Draw the steps
+
+Write the steps down in order, and mark who does each one:
 
 ```
 git diff (Go) → find (model) → verify each finding (model, one call each) → keep the confirmed (Go)
 ```
 
-Each arrow is a line of Go; each model step is one `eng.Run`.
+Each arrow becomes a line of Go, and each model step becomes one `eng.Run`
+call.
 
 ### 2. Gather the context in Go
 
-Do not ask the model to discover what you can just read. The diff is one
-command:
+Do not ask the model to discover what your code can read directly. Getting the
+diff takes one command:
 
 ```go
 cmd := exec.CommandContext(ctx, "git", "diff", "--no-ext-diff", "--merge-base", base)
@@ -208,14 +227,18 @@ cmd.Dir = eng.Config().ProjectRoot
 diff, err := cmd.Output()
 ```
 
-Other context you get for free: `eng.Config().Rules` (the project's rules,
-from `.ouija/config.json`), `knowledge.Load(root)` inside this repo (the facts
-saved with `ouija learn`), and `engine.ReadProjectFile(ctx, root, path)` for a
-file, through the sandbox.
+ouija hands you more context ready-made:
+
+- `eng.Config().Rules` — the project's rules, from `.ouija/config.json`.
+- `knowledge.Load(root)` — the facts saved with `ouija learn` (available
+  inside this repo).
+- `engine.ReadProjectFile(ctx, root, path)` — reads a file through the
+  sandbox.
 
 ### 3. Tell the model how to work — `System`, `Prompt`, tools
 
-`eng.Run` takes a `RunRequest`; four fields are where context goes:
+`eng.Run` takes a `RunRequest`. You pass context to the model through four of
+its fields:
 
 | Field | What goes there | In `review` |
 |---|---|---|
@@ -236,10 +259,10 @@ found, err := eng.Run(ctx, engine.RunRequest{
 
 ### 4. Make it answer in a shape — `Schema`
 
-Without a schema the model answers in prose and you parse guesses. With one,
-the answer **is** a JSON object with the fields you declared (the model hands
-it in through a `submit_result` call), and `res.Text` decodes straight into a
-struct:
+Without a schema, the model answers in prose, and your code has to guess at
+its meaning. With a schema, the answer **is** a JSON object with the fields
+you declared. The model hands it in through a `submit_result` tool call, and
+`res.Text` decodes straight into a struct:
 
 ```go
 func findingsSchema() map[string]any {
@@ -258,12 +281,14 @@ var out struct{ Findings []finding }
 if err := json.Unmarshal([]byte(found.Text), &out); err != nil { … }
 ```
 
-`schema.Enum` is how you make the model choose instead of improvise: the
-verify step answers `"yes"` or `"no"`, and Go branches on it.
+Use `schema.Enum` to make the model pick from fixed answers instead of
+improvising. In the next step, the verify call must answer `"yes"` or `"no"`,
+and Go branches on that answer.
 
 ### 5. Enforce the order in Go
 
-The step a prompt would *ask for* is code here — it always runs:
+A prompt can only *ask* the model to verify each finding. Here the
+verification is code, so it always runs:
 
 ```go
 for _, f := range out.Findings {
@@ -278,11 +303,14 @@ for _, f := range out.Findings {
 }
 ```
 
-Independent calls can run in parallel — the built-in `review` uses the same
-helper as `task`'s passes; in your own repo, `errgroup` does it. The budget,
-the sandbox and the trace apply to every call without a line of yours.
+Calls that do not depend on each other can run in parallel. The built-in
+`review` uses the same helper as the `task` totem's passes; in your own repo,
+`errgroup` does the job. The engine applies the budget, the sandbox and the
+trace to every call, with no extra code from you.
 
 ### 6. Take inputs — `InputSchema` + `args.Decode`
+
+Declare the inputs your totem accepts, then decode them in `Run`:
 
 ```go
 func (t *Totem) InputSchema() map[string]any {
@@ -296,18 +324,20 @@ var in struct{ Base string `json:"base"` }
 if err := args.Decode(&in); err != nil { … }
 ```
 
-The same schema becomes `--set base=develop` on the command line, the tool's
-arguments over MCP, and its required fields are checked before `Run`.
+This one schema serves every host. On the command line it becomes
+`--set base=develop`; over MCP it defines the tool's arguments. The host checks
+its required fields before `Run` starts.
 
 ### 7. Show the result — `Render()`
 
-Return a struct; give it a `Render() string` and the CLI prints that (markdown)
-instead of JSON. `--json` still prints the struct.
+Return a struct from `Run`. If the struct has a `Render() string` method, the
+CLI prints its markdown output instead of JSON. `--json` still prints the
+struct.
 
 ### 8. Test it without a model
 
-`engine/enginetest` is a scripted provider: you decide what "the model"
-answers, by step, and assert what your Go does with it:
+`engine/enginetest` provides a scripted provider: you decide what "the model"
+answers at each step, then assert what your Go code does with those answers:
 
 ```go
 p := &enginetest.Provider{Respond: func(req engine.ChatRequest) enginetest.Reply {
@@ -320,10 +350,13 @@ out, err := registry.Invoke(ctx, enginetest.NewEngine(p, root), &Totem{}, regist
 ```
 
 `review`'s tests check that the diff reaches the find step, that each finding
-gets its own verify call, that only the confirmed one is reported — no API
-key, no cost, the same result every run.
+gets its own verify call, and that the report holds only the confirmed
+finding. They need no API key, cost nothing and give the same result every
+run.
 
 ### Run it
+
+The finished totem runs in three places:
 
 ```sh
 ouija review "concurrency"      # terminal
@@ -403,10 +436,11 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 
 ### Custom tools (ExtraTools)
 
-Totems can inject tools scoped to a single agent call — no global registration,
-no two-step setup, no side effects between calls.
+A totem can give the model tools of its own for a single agent call. These
+tools need no global registration or separate setup, and they leave nothing
+behind for the next call.
 
-Use `RunRequest.ExtraTools` with `[]engine.CustomTool`:
+Pass them in `RunRequest.ExtraTools` as a `[]engine.CustomTool`:
 
 ```go
 type CustomTool struct {
@@ -419,10 +453,11 @@ type CustomTool struct {
 type ToolFn func(ctx context.Context, root string, input map[string]any) ToolResult
 ```
 
-`ToolDef.Risk` controls the permission tier (defaults to `RiskReadOnly`). When a
-`PermissionConfig` is set (chat TUI default), all tools are subject to the
-config's `deny` / `ask` / `allow` levels. Without a config, `RiskReadOnly` tools
-run automatically; `RiskWrite` and `RiskDraft` are denied.
+`ToolDef.Risk` sets the tool's permission tier and defaults to `RiskReadOnly`.
+When a `PermissionConfig` is set, as it is by default in the chat TUI, every
+tool follows the config's `deny` / `ask` / `allow` levels. Without a config,
+`RiskReadOnly` tools run automatically, and `RiskWrite` and `RiskDraft` tools
+are denied.
 
 `ToolDef.Risk` constants:
 
@@ -432,14 +467,14 @@ run automatically; `RiskWrite` and `RiskDraft` are denied.
 | `RiskDraft` | Simulate, no external effect | Denied | Subject to permission level |
 | `RiskWrite` | Mutates files / state | Denied | Subject to permission level |
 
-In the **chat TUI**, the default permission config (`NewDefaultPermissionConfig`)
-sets `Default` to `ask`, but allows the read-only tools (`read_file`, `list_dir`,
-`grep`, `glob`) without approval and keeps `write_file`, `edit_file`,
-`delete_file`, and `bash` at `ask` — so only potentially destructive calls
-prompt. The user can change any level with `/permit` or project config. For
-**totems** using `eng.Run()`, the risk-tier default applies unless
-`SetPermissionConfig` is called explicitly (or the project config sets
-`permission`).
+In the **chat TUI**, the default permission config
+(`NewDefaultPermissionConfig`) sets `Default` to `ask`. It allows the
+read-only tools (`read_file`, `list_dir`, `grep`, `glob`) without approval and
+keeps `write_file`, `edit_file`, `delete_file` and `bash` at `ask`, so only
+calls that could do damage prompt the user. The user can change any level with
+`/permit` or in the project config. **Totems** that call `eng.Run()` get the
+risk-tier default unless they call `SetPermissionConfig` or the project config
+sets `permission`.
 
 #### Example: write_plan (from the task totem)
 
@@ -494,19 +529,19 @@ eng.Run(ctx, engine.RunRequest{
 ```
 
 **Key behaviors:**
-- Extra tools are **scoped to one call** — each `Run` starts fresh.
-- `submit_result` is always deferred: extra tools run first, then `submit_result` is processed last. This lets the model call a side-effect tool and signal completion in the same turn.
-- Resolve every path you read **or write** with `engine.SafeResolve(ctx, root, ...)`: it keeps the path in the project root, rejects symlinks that point out of it (dangling ones included, so a planted `docs -> ~/.ssh` cannot redirect a write) and protected paths (`.env`, `.ssh/*`, `/etc/*`). The path need not exist yet. `engine.SafeJoin` is only the lexical check — not enough for a write into a repository you did not write.
-- The `root` parameter is the engine's sandbox root — don't use `os.Getwd()` or hardcoded paths.
-- A custom tool is gated by the host: the `ToolRunner` applies the permission level and, for `Ask`, the approval prompt, before your `Fn` runs. A write-tier custom tool is denied by default when no `PermissionConfig` is set.
+- Extra tools are **scoped to one call**: each `Run` starts without them.
+- `submit_result` always runs last. The extra tools run first, so the model can call a tool with side effects and signal completion in the same turn.
+- Resolve every path you read **or write** with `engine.SafeResolve(ctx, root, ...)`. It keeps the path inside the project root and rejects protected paths (`.env`, `.ssh/*`, `/etc/*`) and symlinks that point outside the root. It rejects dangling symlinks too, so a planted `docs -> ~/.ssh` cannot redirect a write. The path need not exist yet. `engine.SafeJoin` checks only the path text, which is not enough for a write into a repository you did not write.
+- The `root` parameter is the engine's sandbox root. Use it instead of `os.Getwd()` or hardcoded paths.
+- The host gates every custom tool: before your `Fn` runs, the `ToolRunner` applies the permission level and, for `Ask`, shows the approval prompt. When no `PermissionConfig` is set, a write-tier custom tool is denied by default.
 - After `Run`, check `res.Tools` to see which tools the model called. The `task` totem uses `slices.Contains(res.Tools, "write_plan")` to decide whether to run its Go fallback.
 
 ## Testing a totem
 
-`engine/enginetest` runs a totem against a scripted model — no network, no
-key. Its `Provider` answers each model call with whatever your `Respond`
-function returns for that request; `Submit` hands in a run's structured
-result.
+`engine/enginetest` runs a totem against a scripted model, with no network
+and no API key. Its `Provider` answers each model call with whatever your
+`Respond` function returns for that request. `Submit` builds a reply that
+hands in a run's structured result.
 
 ```go
 func TestRun(t *testing.T) {
@@ -522,8 +557,8 @@ func TestRun(t *testing.T) {
 }
 ```
 
-A `Reply{Err: ...}` fails that call, to test how the totem handles a pass that
-errors. The provider is safe for concurrent use, so parallel passes work.
+Return a `Reply{Err: ...}` to fail that call and test how the totem handles
+an error. The provider is safe for concurrent use, so parallel passes work.
 
 ---
 
@@ -552,15 +587,20 @@ my-totem review "concurrency" --set base=develop   # run one (--json for raw JSO
 my-totem mcp [--config <file>]             # serve them over MCP (stdio)
 ```
 
-For a host of your own, `bootstrap.Setup` is the glue underneath: it
-discovers config (project layers + the global `~/.config/ouija/config.json`
-written by `ouija setup`), validates it, builds the provider and returns a
-ready engine; `app.Run(ctx, "review", registry.Args{Task: "…"})` then runs a
-totem through `registry.Invoke`, and `app.ServeMCP` serves them. `app.Engine`
-keeps one budget across every `app.Run` — a long-lived host that runs a totem
-per request should `Setup` a fresh `App` per request — while `ServeMCP` gives
-each tool call a fresh engine from the same config (its own budget; the
-setters you call on `app.Engine` do not apply there). Options:
+To write a host of your own, use `bootstrap.Setup`, the layer under
+`bootstrap.Main`. It finds the config (the project layers plus the global
+`~/.config/ouija/config.json` that `ouija setup` writes), validates it, builds
+the provider and returns a ready engine. Then
+`app.Run(ctx, "review", registry.Args{Task: "…"})` runs a totem through
+`registry.Invoke`, and `app.ServeMCP` serves the totems over MCP.
+
+`app.Engine` keeps one budget across every `app.Run`. A long-lived host that
+runs a totem per request should therefore call `Setup` for a fresh `App` on
+each request. `ServeMCP` already gives each tool call a fresh engine from the
+same config, with its own budget; setters you call on `app.Engine` do not
+apply there.
+
+`bootstrap` accepts these options:
 
 | Option | Effect |
 |---|---|
@@ -568,15 +608,15 @@ setters you call on `app.Engine` do not apply there). Options:
 | `bootstrap.WithName(name)` | MCP identity (`<name>_<totem>` tools in the harness); defaults to the binary's name |
 | `bootstrap.WithTrace(true)` | Console trace tree on stderr (development) |
 
-`go mod tidy` will pull `github.com/discorgento/ouija` and its engine (to
-build against a local clone: `go mod edit -replace
-github.com/discorgento/ouija=/path/to/ouija`). Build
-with `go build -o my-totem ./cmd/totem`, or cross-compile with the same flags
-ouija uses (`make dist` → `CGO_ENABLED=0 go build -trimpath`).
+`go mod tidy` pulls in `github.com/discorgento/ouija` and its engine. To
+build against a local clone, run `go mod edit -replace
+github.com/discorgento/ouija=/path/to/ouija`. Build with
+`go build -o my-totem ./cmd/totem`, or cross-compile with the flags ouija's
+`make dist` uses: `CGO_ENABLED=0 go build -trimpath`.
 
-A totem registered this way is a normal Go package: it has tests, it can ship
-in a monorepo with your product, and it gets engine upgrades by bumping a
-`go.mod` line — not by rebasing a fork.
+A totem registered this way is a normal Go package. It has tests, it can ship
+in a monorepo with your product, and it gets engine upgrades when you bump one
+`go.mod` line instead of rebasing a fork.
 
 ---
 

@@ -8,8 +8,8 @@
 
 ## Requirements
 
-- **Go 1.26+** — the `go` directive in `go.mod` is the source of truth
-- **`make`** — optional; every command below has a raw `go` equivalent
+- **Go 1.26+**. The `go` directive in `go.mod` sets the exact version.
+- **`make`** (optional). Every command below has a plain `go` equivalent.
 
 ## The one rule: `make check` must pass
 
@@ -23,17 +23,17 @@ Without `make`:
 test -z "$(gofmt -l .)" && go vet ./... && go test ./...
 ```
 
-CI runs that gate and more on every push and pull request
-(`.github/workflows/ci.yml`: gofmt, `go.mod` tidiness, stale generated code, vet
-for linux/darwin/windows, staticcheck, actionlint, `go test -race ./...`, build,
-govulncheck) — a red PR is a PR that cannot merge. Each extra check is a `make`
-target you can run locally:
+CI runs that gate and more on every push and pull request. Its workflow,
+`.github/workflows/ci.yml`, checks gofmt, `go.mod` tidiness and stale
+generated code, runs vet for linux/darwin/windows, staticcheck, actionlint,
+`go test -race ./...`, the build and govulncheck. A pull request with a failing
+check cannot merge. Each extra check is a `make` target you can run locally:
 
 ```sh
 make tidy-check gen-check cross-vet lint actionlint vuln
 ```
 
-A single package, or a single test, while iterating:
+While iterating, run a single package or a single test:
 
 ```sh
 go test ./engine -run TestBashDenylist -v
@@ -59,25 +59,27 @@ make help                     # every target
 | A new provider | [Adding a provider](add-provider.md) |
 | Engine internals | [Engine](../explanation/engine.md) |
 
-Tests live next to the code they test (`foo.go` → `foo_test.go`), table-driven
-where the logic branches.
+Tests live next to the code they test: `foo_test.go` sits beside `foo.go`.
+Where the logic branches, make them table-driven.
 
 ## Go style
 
-- Follow `go fmt` and `go vet` — enforced by `make check` (run it before
-  committing).
-- Zero lint warnings on `go vet ./...`.
-- No unused imports or variables (Go compiler enforces this).
-- Use `gofumpt` if available, but standard `gofmt` is fine.
+- Follow `go fmt` and `go vet`. `make check` enforces both, so run it before
+  committing.
+- Keep `go vet ./...` free of warnings.
+- Leave no unused imports or variables (the Go compiler enforces this).
+- Use `gofumpt` if you have it; standard `gofmt` is fine too.
 
 ## Error handling
 
 - **Wrap errors** with `fmt.Errorf("context: %w", err)` to preserve the chain.
-- **`errors.Join`** (Go 1.20+) for multi-error collection (validation, fan-out).
-- **Don't panic** except in `init()` for truly unrecoverable misconfiguration
-  (e.g. duplicate provider registration).
-- Error messages: lowercase, no trailing punctuation.
-- Return early on validation — fail at startup, not mid-loop.
+- **Use `errors.Join`** (Go 1.20+) to collect several errors, as in
+  validation or fan-out.
+- **Don't panic**, except in `init()` for a misconfiguration nothing can
+  recover from (e.g. registering the same provider twice).
+- Write error messages in lowercase, with no trailing punctuation.
+- Validate early and return at once, so a bad input fails at startup, not in
+  the middle of a loop.
 
 ```go
 // Good
@@ -97,12 +99,16 @@ return fmt.Errorf("Config is invalid: %s", err)
 
 ## Logging
 
-- Use **`log/slog`** (Go 1.21+) — structured key-value pairs, not formatted strings.
-- **Info** for notable events (agent start, completion, config path).
-- **Warn** for recoverable issues (response truncated, fallback activated).
-- **Debug** for verbose details (tool calls, token counts — controlled by `OUIJA_LOG_LEVEL`).
-- Never log API keys or sensitive data (they come from `0600` files).
-- Use the engine's logger (`eng.Logger()`) in totems, not a global logger.
+- Use **`log/slog`** (Go 1.21+) and log structured key-value pairs, not
+  formatted strings.
+- Use **Info** for notable events (agent start, completion, config path).
+- Use **Warn** for issues ouija recovers from (response truncated, fallback
+  activated).
+- Use **Debug** for verbose details (tool calls, token counts). `OUIJA_LOG_LEVEL`
+  decides whether they print.
+- Never log API keys or other sensitive data; ouija reads the keys from
+  `0600` files.
+- In totems, use the engine's logger (`eng.Logger()`), not a global logger.
 
 ```go
 // Good
@@ -132,12 +138,13 @@ fmt.Fprintf(os.Stderr, "[ouija] starting agent %s\n", label)
 
 ## Testing
 
-- Use **table-driven tests** where appropriate.
-- Use `*testing.T` for errors, `t.Fatalf` for fatal.
-- **Mock providers** via `mockProvider` (see `loop_test.go`).
-- Temp dirs via `t.TempDir()` for file operations.
-- Test files go next to the source file (`foo_test.go`).
-- Parallel tests via `t.Parallel()` when safe.
+- Use **table-driven tests** where they fit.
+- Report errors through `*testing.T`, and use `t.Fatalf` when the test cannot
+  go on.
+- **Mock providers** with `mockProvider` (see `loop_test.go`).
+- Create temporary directories for file operations with `t.TempDir()`.
+- Put test files next to the source file (`foo_test.go`).
+- Mark tests with `t.Parallel()` when they are safe to run in parallel.
 
 ```go
 func TestEngineLoopToolThenSubmit(t *testing.T) {
@@ -156,13 +163,14 @@ func TestEngineLoopToolThenSubmit(t *testing.T) {
 
 | Directory | Import path | Exported? |
 |---|---|---|
-| `internal/*` | `github.com/discorgento/ouija/internal/...` | Internal only |
+| `engine/`, `registry/`, `schema/`, `bootstrap/` | `github.com/discorgento/ouija/...` | Public: what an external totem imports |
+| `totems/*` | `github.com/discorgento/ouija/totems/...` | Public registration of the built-in totems |
 | `cmd/*` | `github.com/discorgento/ouija/cmd/...` | Entry points |
-| `totems/*` | `github.com/discorgento/ouija/totems/...` | Public registration |
+| `internal/*` | `github.com/discorgento/ouija/internal/...` | Internal only |
 
-All domain logic is in `internal/`. Only `cmd/` and `totems/` are technically
-importable by external consumers, but the public API is the CLI, not the Go
-packages.
+The engine and the packages a totem needs are public, so a totem can live in
+another module ([Add a totem](add-totem.md)). Everything else, from the chat to
+the CLI commands, lives in `internal/` and cannot be imported from outside.
 
 ## Dependencies
 
@@ -172,20 +180,20 @@ packages.
   `golang.org/x/sync` (errgroup) plus `mvdan.cc/sh/v3` (shell parsing for the
   bash tool) in the engine.
 - Everything else comes from the Go standard library.
-- Vendor nothing — all deps are managed via `go.mod`.
+- Vendor nothing; `go.mod` manages every dependency.
 
 ## Security-sensitive code
 
 Permission gating, the sandbox (`engine/sandbox.go`), the bash denylist
-(`engine/tools_bash.go`) and config handling all **fail closed**: when
-unsure, they deny. A change that makes any of them more permissive must come with
-tests proving the previous behaviour was wrong — otherwise treat it as a security
-change and open an issue before writing code.
+(`engine/tools_bash.go`) and config handling all **fail closed**: when in
+doubt, they deny. A change that makes any of them more permissive must come
+with tests that prove the previous behaviour was wrong. Without such tests,
+treat it as a security change and open an issue before writing code.
 
 ## Commit messages
 
-[Conventional Commits](https://www.conventionalcommits.org/) —
-`type(scope): description`, lowercase, imperative:
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+`type(scope): description`, in lowercase and the imperative mood:
 
 ```
 fix(engine): reject recursive rm on protected paths
@@ -195,47 +203,54 @@ docs(reference): document exit codes
 
 Types used here: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`,
 `ci`, `chore`. The scope is the package or area (`engine`, `chat`, `mcp`,
-`task`, `docs`, `release`). No ticket numbers — this is an open-source project.
+`task`, `docs`, `release`). Leave out ticket numbers; this is an open-source
+project.
 
-Conventional Commits are not just style: they are what drives the release.
-`feat` and `fix` (and breaking changes) end up in the changelog and bump the
-version; `chore`/`ci`/`test` do not.
+Conventional Commits are more than style: they drive the release. `feat`,
+`fix` and breaking changes go into the changelog and bump the version;
+`chore`, `ci` and `test` do not.
 
 ## Releases
 
-There is **no version to edit anywhere** — the git tag is the version:
+There is **no version to edit anywhere**: the git tag is the version.
+A release happens in four steps:
 
 1. Push to `main` with Conventional Commits.
 2. [`release-please`](https://github.com/googleapis/release-please) opens a
    *release PR* with the bump, the new `CHANGELOG.md` section and the fallback
    in `internal/version/version.go`.
-   GitHub holds that PR's CI runs for approval (a bot pushed it), and `main`
-   requires CI's checks to merge: the release workflow approves them. If a
-   run still waits, its page has an **Approve and run** button.
+   Because a bot pushed that PR, GitHub holds its CI runs for approval, and
+   `main` merges only after CI's checks pass. The release workflow approves
+   the runs; if one still waits, its page has an **Approve and run** button.
 3. Merging that PR creates the tag `vX.Y.Z` and the GitHub Release.
-4. The same workflow re-runs the gate on the tag, cross-compiles `make dist`,
-   smoke-tests the archives (checksums, the binary's `version` against the
-   tag), attests their provenance and attaches them.
+4. The same workflow runs the gate again on the tag and cross-compiles with
+   `make dist`. It then smoke-tests the archives (their checksums, and the
+   binary's `version` against the tag), attests their provenance and attaches
+   them to the release.
 
-The workflow lives in `.github/workflows/release.yml`; config in
-`release-please-config.json` + `.release-please-manifest.json`. The manifest
-started at `0.0.0`, which release-please treats as *no release yet* (a first
-release would take its default, `1.0.0`): `v0.1.0` was set with a one-off
-`"release-as"`, removed after it shipped — left in, every release PR would
-ask for that version again. Now `bump-minor-pre-major` keeps ouija below 1.0
-while its API settles: a breaking change bumps the minor (`0.1.0` → `0.2.0`)
-and a fix the patch. Reaching `1.0.0` is a decision, made with `release-as`
-the same way.
+The workflow lives in `.github/workflows/release.yml`, and its config in
+`release-please-config.json` and `.release-please-manifest.json`.
+
+The manifest started at `0.0.0`, which release-please treats as *no release
+yet*; a first release would have taken its default, `1.0.0`. A one-off
+`"release-as"` set `v0.1.0` instead, and was removed after that release
+shipped, because every later release PR would otherwise ask for the same
+version again. Now `bump-minor-pre-major` keeps ouija below 1.0 while its API
+settles: a breaking change bumps the minor version (`0.1.0` → `0.2.0`), and a
+fix bumps the patch. Moving to `1.0.0` will be a deliberate decision, made
+with `release-as` the same way.
 
 ## Documentation
 
-Docs are docs-as-code: plain Markdown under `docs/`, organized by reader intent
-(tutorial / how-to / reference / explanation — see [Index](../index.md)).
-`docs/_style-guide.md` holds the formatting rules and the skeleton for a new
-page. A relative link or anchor broken by a move fails `go test ./...` via the
-link check in `internal/doccheck`. Absolute `http(s)://` links (including the
-README badges) are checked over the network by the same package, in a separate
-CI job: `DOCCHECK_EXTERNAL=1 go test ./internal/doccheck -run
+The docs are plain Markdown under `docs/`, versioned and reviewed like code.
+They are organized by what the reader wants: tutorial, how-to, reference or
+explanation (see the [Index](../index.md)). `docs/_style-guide.md` holds the
+formatting rules and the skeleton for a new page.
+
+The link check in `internal/doccheck` makes `go test ./...` fail when a move
+breaks a relative link or anchor. The same package checks absolute
+`http(s)://` links, including the README badges, over the network in a
+separate CI job: `DOCCHECK_EXTERNAL=1 go test ./internal/doccheck -run
 TestExternalLinksReachable`.
 
 ## License

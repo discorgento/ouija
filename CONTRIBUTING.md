@@ -1,9 +1,8 @@
 # Contributing to ouija
 
-Thanks for helping. The full developer guide — workflow, code conventions,
-error handling, logging, naming, testing — lives in
-**[`docs/how-to/contribute.md`](docs/how-to/contribute.md)**. This file is the
-short version.
+Thanks for helping. This file is the short version. The full developer guide,
+covering workflow, code conventions, error handling, logging, naming and
+testing, lives in **[`docs/how-to/contribute.md`](docs/how-to/contribute.md)**.
 
 ## Requirements
 
@@ -16,11 +15,12 @@ short version.
 make check    # gofmt -l . + go vet ./... + go test ./...
 ```
 
-CI runs that gate and more on every push and pull request
-(`.github/workflows/ci.yml`: gofmt, `go.mod` tidiness, stale generated code,
-vet for linux/darwin/windows, staticcheck, actionlint, `go test -race ./...`,
-build, govulncheck), so a red PR cannot merge. Each extra check is a `make`
-target you can run locally: `make tidy-check gen-check cross-vet lint actionlint vuln`.
+CI runs these checks and more on every push and pull request, and a PR with a
+failing check cannot merge. `.github/workflows/ci.yml` runs gofmt, checks that
+`go.mod` is tidy and generated code is current, runs vet for
+linux/darwin/windows, staticcheck, actionlint, `go test -race ./...`, the build
+and govulncheck. You can run each extra check locally as a `make` target:
+`make tidy-check gen-check cross-vet lint actionlint vuln`.
 
 While iterating:
 
@@ -33,32 +33,35 @@ make test-race          # before touching concurrency (chat, engine)
 
 - Read the right page first: [where to make changes](docs/how-to/contribute.md#where-to-make-changes).
 - **Security-sensitive code** (permissions, sandbox, bash denylist, config
-  handling) **fails closed**. A change that makes any of them more permissive
-  must come with tests proving the previous behaviour was wrong — otherwise open
-  an issue before writing code. See [SECURITY.md](SECURITY.md).
+  handling) **fails closed**: when in doubt, it denies. A change that makes any
+  of it more permissive must include tests proving the previous behaviour was
+  wrong. If you cannot prove that, open an issue before writing code. See
+  [SECURITY.md](SECURITY.md).
 - Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
-  (`fix(engine): …`) — no ticket numbers, this is an open-source project. They
-  also drive the automated release (`feat`/`fix` → version bump + changelog).
-- Docs changes must keep every relative link and anchor working —
-  `go test ./...` checks them (`internal/doccheck`). Absolute links are checked
-  by a separate, network-bound CI job.
+  (`fix(engine): …`), without ticket numbers. The commit types also drive the
+  automated release: a `feat` or `fix` commit bumps the version and adds a
+  changelog entry.
+- Docs changes must keep every relative link and anchor working;
+  `go test ./...` checks them (`internal/doccheck`). A separate CI job, which
+  needs the network, checks absolute links.
 - **Never edit a version by hand**: the git tag is the version, created by the
   [release pipeline](.github/workflows/release.yml) — see
   [Releases](docs/how-to/contribute.md#releases).
 
 ## Contributing a totem
 
-A totem is an agent workflow in Go. You can contribute one two ways:
+A totem is an AI agent written as Go code. You can contribute one in two ways:
 
-- **Upstream** (ships in the `ouija` binary, appears in `ouija help` and MCP for
-  everyone): `ouija generate totem` in this repo, implement the `Run` method,
-  open a PR. See [Add a totem](docs/how-to/add-totem.md).
-- **External** (your own repo, your own binary, your own MCP namespace): import
-  the public `bootstrap`, `engine`, `registry` packages, build your own CLI.
-  The engine, budget, sandbox, trace and MCP export are all inherited — no fork
-  needed.
+- **Upstream**, so it ships in the `ouija` binary and appears in `ouija help`
+  and MCP for everyone: run `ouija generate totem` in this repo, implement the
+  `Run` method, and open a PR. See [Add a totem](docs/how-to/add-totem.md).
+- **External**, in your own repo, binary and MCP namespace: import the public
+  `bootstrap`, `engine` and `registry` packages and build your own CLI. Your
+  totem inherits the engine, budget, sandbox, trace and MCP export without a
+  fork.
 
-The engine is in `engine/`, not `internal/` — it is designed to be imported.
+The engine lives in `engine/`, not `internal/`, because it is designed to be
+imported.
 
 ## License
 

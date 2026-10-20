@@ -9,37 +9,43 @@
 
 ## What is MCP?
 
-The ouija MCP server (`ouija mcp`) exposes totems as MCP **tools** and project
-files as MCP **resources** over stdio using JSON-RPC 2.0.
+The Model Context Protocol (MCP) lets an editor or agent, the *host*, call
+tools that another program provides. The ouija MCP server (`ouija mcp`) offers
+ouija's totems to the host as MCP **tools** and the project's files as MCP
+**resources**.
 
-- **Tools**: named `ouija_<totem>` — e.g. `ouija_task`, `ouija_review`, `ouija_doc`, `ouija_sticker`
-- **Resources**: URI scheme `ouija://project/{path}` — sandboxed file access
-  within the project root
-- **Transport**: JSON-RPC 2.0 over stdio, newline-delimited. The `initialize`
-  handshake advertises MCP protocol version `2025-06-18` with `tools` and
+- **Tools** are named `ouija_<totem>`, e.g. `ouija_task`, `ouija_review`,
+  `ouija_doc`, `ouija_sticker`.
+- **Resources** use the URI scheme `ouija://project/{path}` and give sandboxed
+  access to files within the project root.
+- **Transport** is newline-delimited JSON-RPC 2.0 over stdio. The `initialize`
+  handshake advertises MCP protocol version `2025-06-18` with the `tools` and
   `resources` capabilities.
-- **Logging**: stdout carries protocol messages only; diagnostics go to stderr.
+- **Logging**: stdout carries only protocol messages; diagnostics go to
+  stderr.
 
 ## Setup
 
-The MCP server is built into the `ouija` binary — there is nothing extra to
-install if you already have `ouija` on your `PATH`:
+The MCP server is built into the `ouija` binary, so if `ouija` is already on
+your `PATH`, you have nothing extra to install:
 
 ```sh
 ouija mcp install   # detect OpenCode / Claude Code / Cursor and register ouija
 ouija mcp status    # show where ouija is connected
 ```
 
-`install` touches only harnesses it finds, writes a `.bak` before editing any
-config, and never overwrites an existing entry. Restart the harness afterwards.
+`install` changes only the hosts (harnesses) it finds, backs up each config
+to a `.bak` file before editing it, and never overwrites an existing entry.
+Restart the host afterwards.
 
-A standalone `ouija-mcp` binary also exists for hosts configured to launch it
-directly (`go install ./cmd/ouija-mcp`). It runs the same server.
+For hosts configured to launch it directly, a standalone `ouija-mcp` binary
+runs the same server (`go install ./cmd/ouija-mcp`).
 
 > The directory holding the binary must be on the `PATH` **of the host process**,
-> because hosts spawn the server by name. If it is not there, add it in your
-> shell's config file — which one depends on the shell, not on the OS (zsh:
-> `~/.zshrc`, bash: `~/.bashrc`, fish: `~/.config/fish/config.fish`).
+> because hosts start the server by name. If it is not there, add it in your
+> shell's config file. The file depends on the shell, not on the OS:
+> `~/.zshrc` for zsh, `~/.bashrc` for bash, `~/.config/fish/config.fish` for
+> fish.
 
 > A GUI host launched from the desktop (Claude Desktop, Cursor, …) may not inherit
 > your shell's `PATH`. If the server fails to start with "command not found", put
@@ -47,8 +53,9 @@ directly (`go install ./cmd/ouija-mcp`). It runs the same server.
 
 ## Configuration
 
-The server command is `ouija mcp`. `ouija mcp install` writes the entries below
-for you; they are shown for manual setup or for hosts ouija does not know.
+The server command is `ouija mcp`. `ouija mcp install` writes the entries
+below for you; use them to set a host up by hand, or for a host ouija does not
+know.
 
 ### OpenCode
 
@@ -90,16 +97,17 @@ In Cursor settings, add a new MCP server with command `ouija` and argument `mcp`
 ## How it works
 
 1. The host calls `ouija_<name>` with a task string argument.
-2. The server discovers config, builds the engine, runs the totem, and returns
+2. The server finds the config, builds the engine, runs the totem and returns
    the result.
-3. Budget ceilings apply (the host prompts for approval before each call).
-   Each call gets a fresh engine, so each has its own budget.
-4. The host sees the result as a tool response.
+3. The budget ceilings apply, and the host asks for your approval before each
+   call. Each call gets a fresh engine, so each has its own budget.
+4. The host receives the result as a tool response.
 
-Calls run concurrently: a long `ouija_task` does not block `ping`,
-`tools/list` or another call. A host that sends `notifications/cancelled`
-stops the call (and its spending) right away, and no response is sent for it.
-When the host closes the connection, calls still running are cancelled.
+Calls run concurrently, so a long `ouija_task` does not block `ping`,
+`tools/list` or another call. When the host sends `notifications/cancelled`,
+the server stops that call and its spending at once and sends no response for
+it. When the host closes the connection, the server cancels every call still
+running.
 
 ---
 

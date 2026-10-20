@@ -6,8 +6,8 @@
 
 > From zero to your first verified plan in about 10 minutes. Audience: user
 
-This is the guided path — do it top to bottom. Every step explains what to run
-and what you should see. If you already have ouija installed, jump to
+Follow this guide from top to bottom. Each step tells you what to run and what
+you should see. If you already have ouija installed, jump to
 [Configure a provider](#3-configure-a-provider).
 
 ## 1. Install
@@ -45,14 +45,14 @@ You almost always use `ouija`.
 ouija setup
 ```
 
-The wizard asks for API keys (one field per provider — leave blank to skip) and
-your default provider/model. Everything is written to
-the global config with `0600` permissions — `~/.config/ouija/config.json` on
-Linux (`~/Library/Application Support/ouija/` on macOS, `%AppData%\ouija\` on
-Windows).
+The wizard asks for API keys, one field per provider (leave a field blank to
+skip that provider), and for your default provider and model. It writes
+everything to the global config with `0600` permissions:
+`~/.config/ouija/config.json` on Linux, `~/Library/Application Support/ouija/`
+on macOS, and `%AppData%\ouija\` on Windows.
 
-No API key? Pick **ollama** — it runs locally and free, as long as an Ollama
-server is reachable.
+No API key? Pick **ollama**. It runs locally and for free, as long as ouija can
+reach an Ollama server.
 
 Check the result:
 
@@ -60,12 +60,14 @@ Check the result:
 ouija doctor
 ```
 
-`doctor` prints a checklist: config files, resolved provider/model, key
-presence, registered totems, harness registration. ✓ ok, ! warning, ✗ problem.
+`doctor` prints a checklist of the config files, the provider and model it
+will use, whether the key is present, the registered totems (the agents ouija
+ships), and whether your editor's harness knows about ouija. Each line is
+marked ✓ for ok, ! for a warning, or ✗ for a problem.
 
 ## 4. Run your first task
 
-Go to **your own project** — ouija analyzes the directory it runs in:
+Go to **your own project**, because ouija analyzes the directory it runs in:
 
 ```sh
 cd /path/to/your/project
@@ -73,15 +75,18 @@ ouija init                     # per-project config: provider, model, overrides
 ouija task "describe this codebase and propose a refactor plan"
 ```
 
-`task` runs **scout → N passes × dimensions → reconcile** and prints a plan with
-a checklist. Two things to notice:
+`task` runs **scout → N passes × dimensions → reconcile**. A scout first
+surveys the codebase. Several independent passes then analyze it, each along
+one dimension such as correctness or security. Finally, a reconcile step merges
+their findings into one plan, which `task` prints with a checklist. Notice two
+things:
 
 - The plan is saved to `docs/task-plan.md` in the project.
 - The last stderr line is your usage: `[ouija] anthropic · claude-opus-5-5 ·
   184320 tokens · 14 steps · $1.05`.
 
-Want the raw data instead of the pretty output? Add `--json`. Want to see where
-the time and tokens went? Add `--trace-file run.json` and open it in
+For raw data instead of formatted output, add `--json`. To see where the time
+and tokens went, add `--trace-file run.json` and open the file in
 [ui.perfetto.dev](https://ui.perfetto.dev).
 
 ## 5. Open the chat
@@ -90,13 +95,15 @@ the time and tokens went? Add `--trace-file run.json` and open it in
 ouija chat
 ```
 
-A full-screen TUI with the same tools and engine, but conversational. Two
-behaviors worth knowing on day one:
+The chat is a full-screen terminal UI with the same tools and engine, but you
+talk to it. Two behaviors are worth knowing on day one:
 
-- **Read-only tools run immediately**; write and exec tools ask for approval.
-  Answer **Yes** once, **Session** to trust that exact file/command for the rest
-  of the run, **Edit** to modify the proposed change first.
-- **Type while the model works** — messages queue and send when it finishes.
+- **Read-only tools run immediately**; tools that write files or run commands
+  ask for approval. Answer **Yes** to allow it once, **Session** to trust that
+  exact file or command for the rest of the run, or **Edit** to change the
+  proposed edit first.
+- **You can type while the model works.** Your messages wait in a queue and go
+  out when it finishes.
 
 Type `/help` inside the chat for every command and shortcut. The full workflow
 is in [Use the chat TUI](../how-to/chat.md).
@@ -108,8 +115,10 @@ ouija mcp install   # detect OpenCode / Claude Code / Cursor and register ouija
 ouija mcp status    # show where ouija is connected
 ```
 
-Restart the harness afterwards; the totems appear as `ouija_task`,
-`ouija_doc`, … Details in [MCP integration](../how-to/integrate-mcp.md).
+MCP, the Model Context Protocol, lets these editors call outside tools.
+Restart your editor afterwards, and the totems appear as tools named
+`ouija_task`, `ouija_doc`, … Details in
+[MCP integration](../how-to/integrate-mcp.md).
 
 ## Where to go next
 

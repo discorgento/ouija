@@ -6,17 +6,17 @@
 
 > Running `task`, `review`, `doc`, `sticker` and `learn` from the terminal. Audience: user
 
-Totems are ouija's workflows. Each one is a command: `ouija <totem> "<task>"`.
-Full flag and exit-code tables live in the [CLI reference](../reference/cli.md) —
-this page is about getting each one done.
+A totem is one of ouija's built-in workflows, and each totem is a command:
+`ouija <totem> "<task>"`. The [CLI reference](../reference/cli.md) lists every
+flag and exit code; this page shows how to get each job done.
 
-Before anything else: [install](install.md) and [configure](configure.md)
-(`ouija setup` globally, `ouija init` inside the project).
+First [install](install.md) and [configure](configure.md) ouija: run
+`ouija setup` once, then `ouija init` inside the project.
 
 ## Global flags
 
-Every totem accepts the same flags, after the totem name (`chat` accepts
-`--config` and `--trace-file`):
+Every totem accepts the same flags, placed after the totem name. (`chat`
+accepts `--config` and `--trace-file` of these.)
 
 | Flag | Description |
 |---|---|
@@ -27,7 +27,8 @@ Every totem accepts the same flags, after the totem name (`chat` accepts
 
 ## `ouija task` — verified implementation plans
 
-Inside a project that has a `.ouija/config.json`, the everyday command:
+`task` is the everyday command. Run it inside a project that has a
+`.ouija/config.json`:
 
 ```sh
 ouija task "PROJ-1823 — block order placement when the ZIP has no shipping coverage"
@@ -35,11 +36,13 @@ ouija task "fix sorting bug" --trace-file run.json
 ouija task "refactor checkout" --json
 ```
 
-Pipeline: **scout → N passes × dimensions → reconcile → plan + checklist**.
-The reconcile step also saves the plan to `docs/task-plan.md`.
+A scout first surveys the codebase. Several independent passes then analyze
+it, each along one dimension such as correctness or security. Finally, a
+reconcile step merges their findings into one plan, prints it with a
+checklist, and saves it to `docs/task-plan.md`.
 
-Run it from inside the module you're analyzing — no extra flags needed. Config
-discovery walks up from the current directory.
+Run `task` from inside the module you are analyzing; it needs no extra flags,
+because ouija looks for the config by walking up from the current directory.
 
 ## `ouija review` — review the branch before the PR
 
@@ -49,17 +52,18 @@ ouija review "concurrency"            # with a focus
 ouija review --set base=develop       # against another branch or commit
 ```
 
-Pipeline: **the diff → find → a skeptic verifies each finding → report**.
-The diff is read by Go (`git diff --merge-base <base>`: commits and uncommitted
-changes), not guessed by the model. Each finding then goes to an independent
-verify pass that rereads the code; only the confirmed ones are reported, and
-the dropped ones are listed with the skeptic's reason. Without `base` it
-compares against `main`, else `master`.
+`review` reads the branch's diff, asks the model to find problems in it, has
+a skeptic check each finding, and reports what holds. Go code reads the diff
+with `git diff --merge-base <base>`, which covers commits and uncommitted
+changes, so the model never has to guess it. Each finding then goes to an
+independent verify pass that rereads the code. The report lists only the
+confirmed findings, plus the dropped ones with the skeptic's reason. Without
+`base`, `review` compares against `main`, or `master` if `main` does not exist.
 
-Style and naming are left out on purpose: it reports bugs, unhandled errors,
-races, leaks, security holes and broken contracts. The repository's own git
-config cannot make it run a command — external diffs, `textconv` filters and
-`core.fsmonitor` are turned off for its git calls.
+`review` reports bugs, unhandled errors, races, leaks, security holes and
+broken contracts. It leaves out style and naming on purpose. The repository's
+own git config cannot make it run a command, because its git calls turn off
+external diffs, `textconv` filters and `core.fsmonitor`.
 
 ## `ouija doc` — code-verified client documents
 
@@ -67,10 +71,10 @@ config cannot make it run a command — external diffs, `textconv` filters and
 cd my-project && ouija doc "configuration manual"
 ```
 
-Writes `<slug>.html` + `<slug>.pdf` + `<slug>.md` into `docs/` under the project
-root (the current directory by default). The PDF is only produced when
-Chrome/Chromium is on `PATH`; otherwise the HTML is written and the CLI reports
-how to print it.
+`doc` writes `<slug>.html`, `<slug>.pdf` and `<slug>.md` into `docs/` under
+the project root, which is the current directory by default. It produces the
+PDF only when Chrome/Chromium is on `PATH`; otherwise it writes the HTML and
+tells you how to print it.
 
 ## `ouija sticker` — project sticker
 
@@ -78,12 +82,12 @@ how to print it.
 cd my-project && ouija sticker
 ```
 
-Writes `<slug>.sticker.svg` into `docs/sticker/`. The project name and tech
-stack come from whatever manifest or README the project actually has
-(`package.json`, `composer.json`, `go.mod`, …) — any folder layout works. On
-Magento projects the platform, PHP and theme versions plus the custom-module
-count are read straight from `composer.json` and `app/code`, not generated by
-the model; on other projects those fields are simply omitted.
+`sticker` writes `<slug>.sticker.svg` into `docs/sticker/`. It takes the
+project name and tech stack from whatever manifest or README the project has
+(`package.json`, `composer.json`, `go.mod`, …), so any folder layout works. On
+Magento projects, Go code reads the platform, PHP and theme versions and the
+custom-module count straight from `composer.json` and `app/code`; the model
+does not generate them. Other projects' stickers omit those fields.
 
 ## `ouija learn` — project knowledge
 
@@ -92,16 +96,18 @@ ouija learn "This project uses React with TypeScript"
 ouija learn                     # show current knowledge
 ```
 
-Saves to `docs/knowledge.md` relative to the current directory. Facts are
-injected into the `task` scout and the chat system prompt.
+`learn` saves each fact to `docs/knowledge.md`, relative to the current
+directory. ouija adds the saved facts to the `task` scout's prompt and to the
+chat's system prompt.
 
 ## Live progress
 
-On a terminal, a totem's run is drawn live on stderr: one line per model run
-(the scout, each pass, the reconcile) with a spinner while it runs, then `✓` or
-`✗` with its time and why it failed, under a header with the elapsed time,
-tokens and cost so far. Logs print above it. Piped or redirected, stderr gets
-no board — only the logs and the stats below.
+In a terminal, ouija draws a totem's run live on stderr. Each model run (the
+scout, each pass, the reconcile) gets one line with a spinner. When the run
+ends, the spinner becomes `✓` or `✗` with its time and, for a failure, the
+reason. A header above shows the elapsed time, tokens and cost so far, and
+logs print above the board. When stderr is piped or redirected, ouija skips
+the board and prints only the logs and the stats below.
 
 ```
   ouija task  ·  1m12s  ·  48.2k tok  ·  $0.21
@@ -113,14 +119,14 @@ no board — only the logs and the stats below.
 
 ## Per-run stats
 
-Stats printed to stderr after completion:
+When a totem finishes, ouija prints its stats to stderr:
 
 ```
 [ouija] anthropic · claude-opus-5-5 · 184320 tokens · 14 steps · $1.05
 ```
 
-Token counts are printed as a plain integer; the ` · $…` suffix only appears
-when a cost is known.
+The token count is a plain integer. The ` · $…` suffix appears only when the
+cost is known. To keep just the stats line:
 
 ```sh
 ouija task "..." 2>&1 | tail -1
@@ -128,9 +134,9 @@ ouija task "..." 2>&1 | tail -1
 
 ## Next
 
-- Interactive work → [Chat TUI](chat.md)
-- Wire ouija into an editor → [MCP integration](integrate-mcp.md)
-- Every command and flag → [CLI reference](../reference/cli.md)
+- To work interactively, see [Chat TUI](chat.md).
+- To wire ouija into an editor, see [MCP integration](integrate-mcp.md).
+- For every command and flag, see the [CLI reference](../reference/cli.md).
 
 ---
 
