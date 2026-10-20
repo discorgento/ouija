@@ -2,7 +2,6 @@
   "release-type": "go",
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
-  "release-as": "0.1.0",
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug Fixes" },
