@@ -105,19 +105,21 @@ jobs:
       # checksums: a broken ldflags or archive stops here, before any upload.
       - name: Smoke-test the archives
         run: |
+          v="${TAG#v}"
           (cd dist && sha256sum -c SHA256SUMS)
-          tar -xzf dist/ouija-linux-amd64.tar.gz -C "$RUNNER_TEMP"
-          got="$("$RUNNER_TEMP/ouija-linux-amd64/ouija" version)"
-          want="ouija ${TAG#v}"
+          tar -xzf "dist/ouija_${v}_linux_amd64.tar.gz" -C "$RUNNER_TEMP"
+          got="$("$RUNNER_TEMP/ouija_${v}_linux_amd64/ouija" version)"
+          want="ouija $v"
           if [ "$got" != "$want" ]; then
             echo "::error::the binary says '$got', want '$want'"
             exit 1
           fi
-          # grep without -q reads the whole listing: -q stops early, tar gets
-          # SIGPIPE and pipefail (on in Actions) fails a good archive.
-          for a in linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
-            tar -tzf "dist/ouija-$a.tar.gz" | grep "ouija-$a/ouija" >/dev/null || { echo "::error::$a archive has no ouija binary"; exit 1; }
+          # grep without -q reads the whole listing: -q stops early, the
+          # lister gets SIGPIPE and pipefail (on in Actions) fails a good one.
+          for a in linux_arm64 darwin_amd64 darwin_arm64; do
+            tar -tzf "dist/ouija_${v}_${a}.tar.gz" | grep "ouija_${v}_${a}/ouija" >/dev/null || { echo "::error::$a archive has no ouija binary"; exit 1; }
           done
+          unzip -l "dist/ouija_${v}_windows_amd64.zip" | grep "ouija_${v}_windows_amd64/ouija.exe" >/dev/null || { echo "::error::the windows zip has no ouija.exe"; exit 1; }
 
       # Artifact attestations need a public repository (or GitHub Enterprise
       # Cloud): on a private one the step would fail and block the upload below.
@@ -130,4 +132,4 @@ jobs:
       - name: Attach artifacts to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"

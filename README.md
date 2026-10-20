@@ -201,7 +201,7 @@ make build          # ./ouija + ./ouija-mcp (gitignored)
 make run ARGS='…'   # build + execute
 make check          # gofmt + go vet + go test — run before committing
 make help           # every target
-make dist           # cross-compile 5 targets → dist/*.tar.gz
+make dist           # cross-compile 5 targets → dist/ouija_<version>_<os>_<arch> archives
 ```
 
 The version comes from the **git tag** — created automatically by the release

@@ -24,6 +24,8 @@ VERSION_BARE = $(patsubst v%,%,$(VERSION))
 LDFLAGS   = $(if $(VERSION_BARE),-ldflags "-X github.com/discorgento/ouija/internal/version.Version=$(VERSION_BARE)")
 
 DIST      = dist
+# The version in the archive names: a downloaded archive says which it is.
+DIST_VERSION = $(or $(VERSION_BARE),dev)
 PLATFORMS = linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
 # Analysis tools run pinned, through `go run` (nothing to install), on the
@@ -45,7 +47,7 @@ help: ## List every target
 	@echo
 	@echo "Pass arguments:  make run ARGS='task \"your task\"'"
 	@echo "Version:         make build VERSION=vX.Y.Z  (git tag is the default)"
-	@echo "Release:         make dist  (5 targets → dist/*.tar.gz + SHA256SUMS)"
+	@echo "Release:         make dist  (5 targets → dist/ouija_<version>_* + SHA256SUMS)"
 
 build: ## Build ouija and ouija-mcp at the repo root
 	$(GO) build $(LDFLAGS) -o $(BIN) ./cmd/ouija
@@ -55,21 +57,27 @@ build: ## Build ouija and ouija-mcp at the repo root
 build-mcp: ## Build only the MCP server
 	$(GO) build $(LDFLAGS) -o $(BIN_MCP) ./cmd/ouija-mcp
 
-dist: ## Cross-compile 5 targets (linux/darwin/windows) → dist/*.tar.gz + SHA256SUMS
+dist: ## Cross-compile 5 targets → dist/ouija_<version>_<os>_<arch>.tar.gz (.zip on Windows) + SHA256SUMS
 	rm -rf $(DIST) && mkdir -p $(DIST)
 	@set -e; for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=""; \
 	  if [ "$$os" = windows ]; then ext=".exe"; fi; \
-	  out=$(DIST)/ouija-$$os-$$arch; mkdir -p $$out; \
+	  out=$(DIST)/ouija_$(DIST_VERSION)_$${os}_$${arch}; mkdir -p $$out; \
 	  echo "→ $$os/$$arch"; \
 	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -trimpath $(LDFLAGS) -o $$out/ouija$$ext ./cmd/ouija; \
 	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 $(GO) build -trimpath $(LDFLAGS) -o $$out/ouija-mcp$$ext ./cmd/ouija-mcp; \
 	done
-	@cd $(DIST) && for d in ouija-*/; do d=$${d%/}; tar -czf "$$d.tar.gz" "$$d" && rm -rf "$$d"; done
+	@# Windows gets a .zip (Explorer opens it; .tar.gz needs a tool there).
+	@# zip, else Python's zipfile — not every machine has zip.
+	@cd $(DIST) && for d in ouija_*/; do d=$${d%/}; \
+	  case "$$d" in \
+	    *_windows_*) if command -v zip >/dev/null 2>&1; then zip -qr "$$d.zip" "$$d"; else python3 -m zipfile -c "$$d.zip" "$$d"; fi ;; \
+	    *) tar -czf "$$d.tar.gz" "$$d" ;; \
+	  esac; rm -rf "$$d"; done
 	@cd $(DIST) && if command -v sha256sum >/dev/null 2>&1; then \
-	  sha256sum *.tar.gz > SHA256SUMS; \
+	  sha256sum *.tar.gz *.zip > SHA256SUMS; \
 	else \
-	  shasum -a 256 *.tar.gz > SHA256SUMS; \
+	  shasum -a 256 *.tar.gz *.zip > SHA256SUMS; \
 	fi; echo "ok → $(DIST)/SHA256SUMS"
 	@echo "ok →"; ls -lh $(DIST) | tail -n +2
 
