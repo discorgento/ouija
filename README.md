@@ -16,7 +16,7 @@ sandbox, cost budget, tracing, MCP export) under **totems** you own: real code
 with types, tests and golden files, not prompt files.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="ouija chat: the intro, a question with an @file, the tools live, the reply and its diff, then /task drawn live and its plan" width="800">
+  <img src="assets/demo.gif" alt="ouija doctor checking the setup, then the chat: a failing test, the fix shown as a diff and approved, the test passing, and /review verifying its findings" width="800">
 </p>
 
 > **Why not a prompt file?** "Do A, then verify B, then reconcile" written in
