@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -53,7 +54,7 @@ func TestJournalUndo(t *testing.T) {
 	if _, err := j.Undo(); err != nil || read("a.go") != "old" {
 		t.Fatalf("restore edited: %v → %q", err, read("a.go"))
 	}
-	if fi, _ := os.Stat(filepath.Join(root, "a.go")); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(filepath.Join(root, "a.go")); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 { // no Unix modes on Windows
 		t.Errorf("mode = %v, want 0600 kept", fi.Mode().Perm())
 	}
 	if _, err := j.Undo(); err == nil {

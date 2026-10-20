@@ -74,6 +74,9 @@ func TestSpanChildren(t *testing.T) {
 		t.Fatalf("expected 2 children, got %d", len(parent.Children))
 	}
 
+	// Windows' clock can read the same instant for a start and an end this
+	// close: let some time pass, so the check is about End, not the clock.
+	time.Sleep(2 * time.Millisecond)
 	c1.End()
 	c2.End()
 	parent.End()

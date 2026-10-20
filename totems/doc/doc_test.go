@@ -91,7 +91,8 @@ func TestTechnicalMDGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden file %s: %v (run with -update to create it)", golden, err)
 	}
-	if got != string(expected) {
+	// A Windows checkout may have turned the golden's line ends into CRLF.
+	if got != strings.ReplaceAll(string(expected), "\r\n", "\n") {
 		t.Fatalf("output differs from golden file %s (run with -update to refresh)", golden)
 	}
 }
