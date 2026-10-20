@@ -24,26 +24,43 @@ if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
     throw "ouija ships Windows builds for x64 (amd64) only; this machine is $env:PROCESSOR_ARCHITECTURE."
 }
 
-# The release and its assets.
-$api = if ($Version -eq "latest") {
-    "https://api.github.com/repos/$repo/releases/latest"
-} else {
-    "https://api.github.com/repos/$repo/releases/tags/v$($Version.TrimStart('v'))"
+# The release and its assets. "latest" is the newest release that carries
+# them: for a few minutes after a release is cut, CI is still building its
+# archives, and the newest release has none yet.
+function Find-Assets($rel) {
+    # ouija_<version>_windows_amd64.zip; v0.1.0 shipped ouija-windows-amd64.tar.gz.
+    $a = $rel.assets | Where-Object { $_.name -match '^ouija_.+_windows_amd64\.zip$' } | Select-Object -First 1
+    if (-not $a) {
+        $a = $rel.assets | Where-Object { $_.name -eq "ouija-windows-amd64.tar.gz" } | Select-Object -First 1
+    }
+    $s = $rel.assets | Where-Object { $_.name -eq "SHA256SUMS" } | Select-Object -First 1
+    if ($a -and $s) { return @($a, $s) }
+    return $null
 }
+
 $headers = @{ "User-Agent" = "ouija-install" }
 # A token, when there is one, lifts the API's limit for anonymous calls
 # (shared CI machines hit it).
 if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
-$release = Invoke-RestMethod -Uri $api -Headers $headers
-# ouija_<version>_windows_amd64.zip; v0.1.0 shipped ouija-windows-amd64.tar.gz.
-$asset = $release.assets | Where-Object { $_.name -match '^ouija_.+_windows_amd64\.zip$' } | Select-Object -First 1
-if (-not $asset) {
-    $asset = $release.assets | Where-Object { $_.name -eq "ouija-windows-amd64.tar.gz" } | Select-Object -First 1
+
+$release = $null
+$found = $null
+if ($Version -eq "latest") {
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=10" -Headers $headers
+    foreach ($r in $releases) {
+        if ($r.draft -or $r.prerelease) { continue }
+        $found = Find-Assets $r
+        if ($found) { $release = $r; break }
+        Write-Host "$($r.tag_name) has no Windows archive yet (still being built?); trying the release before it"
+    }
+    if (-not $release) { throw "no release with a Windows archive and SHA256SUMS found." }
+} else {
+    $tag = "v" + $Version.TrimStart('v')
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $headers
+    $found = Find-Assets $release
+    if (-not $found) { throw "release $tag has no Windows archive or no SHA256SUMS (if it was cut minutes ago, CI may still be building it)." }
 }
-$sums = $release.assets | Where-Object { $_.name -eq "SHA256SUMS" } | Select-Object -First 1
-if (-not $asset -or -not $sums) {
-    throw "release $($release.tag_name) has no Windows archive or no SHA256SUMS."
-}
+$asset, $sums = $found
 Write-Host "ouija $($release.tag_name) - $($asset.name)"
 
 # Download and verify.
