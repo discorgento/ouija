@@ -34,6 +34,19 @@ ouija is a terminal program: there is no installer window or app icon —
 
 ### Linux and macOS
 
+One command — no root needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh
+```
+
+It picks the archive for your OS and CPU from the latest release, checks it
+against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in `~/.local/bin`
+(it tells you the line to add when that folder is not on your `PATH`).
+Options go after `sh -s --`: `--version 0.2.0`, `--dir <dir>`.
+
+By hand:
+
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c --ignore-missing
 tar -xzf ouija_0.2.0_linux_amd64.tar.gz       # ouija + ouija-mcp inside
