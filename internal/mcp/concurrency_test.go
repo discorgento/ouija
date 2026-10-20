@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -140,6 +141,39 @@ func TestToolCallCancelledByClient(t *testing.T) {
 		if m["id"] == float64(1) {
 			t.Fatalf("cancelled request was answered: %v", m)
 		}
+	}
+}
+
+// The client cancels a call and the server shuts down before the call
+// notices: it is still the client's cancellation, and gets no response.
+func TestToolCallCancelledByClientThenShutdown(t *testing.T) {
+	s := testServer(t.TempDir())
+	stopped := make(chan struct{})
+	proceed := make(chan struct{})
+	s.run = func(ctx context.Context, _ string, _ registry.Args) (any, error) {
+		<-ctx.Done()
+		close(stopped)
+		<-proceed
+		return nil, ctx.Err()
+	}
+	server, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	var buf bytes.Buffer
+	out := bufio.NewWriter(&buf)
+	s.handleToolCall(server, out, rpcRequest{JSONRPC: "2.0", ID: json.RawMessage("1"), Method: "tools/call",
+		Params: json.RawMessage(`{"name":"ouija_task","arguments":{"task":"x"}}`)})
+	if !s.cancelCall(json.RawMessage("1")) {
+		t.Fatal("the call was not running")
+	}
+	<-stopped
+	shutdown() // EOF lands before the call checks why it stopped
+	close(proceed)
+	s.wg.Wait()
+	s.writeMu.Lock()
+	out.Flush()
+	s.writeMu.Unlock()
+	if buf.Len() != 0 {
+		t.Fatalf("cancelled request was answered: %s", buf.String())
 	}
 }
 
