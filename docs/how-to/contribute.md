@@ -209,9 +209,9 @@ There is **no version to edit anywhere** — the git tag is the version:
 2. [`release-please`](https://github.com/googleapis/release-please) opens a
    *release PR* with the bump, the new `CHANGELOG.md` section and the fallback
    in `internal/version/version.go`.
-   The release workflow also dispatches CI on that PR: GitHub starts no
-   workflow for a push made with the workflow's own token, and `main` requires
-   CI's checks to merge.
+   GitHub holds that PR's CI runs for approval (a bot pushed it), and `main`
+   requires CI's checks to merge: the release workflow approves them. If a
+   run still waits, its page has an **Approve and run** button.
 3. Merging that PR creates the tag `vX.Y.Z` and the GitHub Release.
 4. The same workflow re-runs the gate on the tag, cross-compiles `make dist`,
    smoke-tests the archives (checksums, the binary's `version` against the
