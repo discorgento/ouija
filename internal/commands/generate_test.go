@@ -132,7 +132,10 @@ func TestScaffoldsCompile(t *testing.T) {
 	if err := os.WriteFile(gomod, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}} {
+	// tidy -e: tidy resolves the imports of every OS, and a Linux-only one
+	// (landlock) is never in the module cache of a macOS or Windows machine
+	// running this offline. vet, for this OS, still fails on a broken scaffold.
+	for _, args := range [][]string{{"mod", "tidy", "-e"}, {"vet", "./..."}} {
 		cmd := exec.Command("go", args...)
 		cmd.Dir = base
 		cmd.Env = append(os.Environ(), "GOPROXY=off", "GOFLAGS=-mod=mod", "GOWORK=off")

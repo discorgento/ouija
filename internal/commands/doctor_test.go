@@ -95,7 +95,9 @@ func isolateDoctor(t *testing.T) (configDir string) {
 	}
 	t.Cleanup(func() { probeModels = old })
 
-	return filepath.Join(xdg, "ouija")
+	// Where this OS keeps it under the temp home: XDG on Linux, AppData on
+	// Windows, ~/Library/Application Support on macOS (which ignores XDG).
+	return filepath.Dir(ouijaconfig.Path())
 }
 
 func TestDoctor_Configured(t *testing.T) {

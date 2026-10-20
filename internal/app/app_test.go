@@ -321,11 +321,17 @@ func TestResolveProjectRoot_DotBecomesWorkingDirectory(t *testing.T) {
 
 func TestResolveProjectRoot_WalkUpResolvesRelativeToConfigDir(t *testing.T) {
 	cfgDir := t.TempDir()
+	// The root comes back canonical: /var is /private/var on macOS, and
+	// Windows' temp dir has a short 8.3 name (RUNNER~1) for a long one.
+	canon, err := filepath.EvalSymlinks(cfgDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := &engine.Config{ProjectRoot: "sub"}
 	resolveProjectRoot(cfg, filepath.Join(cfgDir, "ouija.json"), false)
 
-	if want := filepath.Join(cfgDir, "sub"); cfg.ProjectRoot != want {
+	if want := filepath.Join(canon, "sub"); cfg.ProjectRoot != want {
 		t.Errorf("ProjectRoot = %q, want %q", cfg.ProjectRoot, want)
 	}
 }

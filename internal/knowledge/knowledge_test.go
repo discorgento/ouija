@@ -70,7 +70,8 @@ func TestSave_RejectsEmptyInput(t *testing.T) {
 }
 
 func TestFileName_IsUnderDocs(t *testing.T) {
-	if want := filepath.Join("docs", "knowledge.md"); FileName != want {
+	// Slash-separated on every OS: SafeResolve takes it as is.
+	if want := "docs/knowledge.md"; FileName != want {
 		t.Fatalf("FileName = %q, want %q", FileName, want)
 	}
 }

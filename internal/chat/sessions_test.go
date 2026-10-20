@@ -2,6 +2,7 @@ package chat
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -28,7 +29,8 @@ func TestSessionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir, _ := sessionDir("/proj")
-	if fi, err := os.Stat(dir + "/" + m.sessionID + ".json"); err != nil || fi.Mode().Perm() != 0o600 {
+	fi, err := os.Stat(dir + "/" + m.sessionID + ".json")
+	if err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) { // no Unix modes on Windows
 		t.Fatalf("session file: %v, mode %v (want 0600)", err, fi.Mode().Perm())
 	}
 
