@@ -219,9 +219,13 @@ There is **no version to edit anywhere** — the git tag is the version:
 
 The workflow lives in `.github/workflows/release.yml`; config in
 `release-please-config.json` + `.release-please-manifest.json`. The manifest
-starts at `0.0.0`, and `bump-minor-pre-major` keeps ouija below 1.0 while its
-API settles: until then a breaking change bumps the minor (`0.1.0` → `0.2.0`)
-and a fix the patch. Reaching `1.0.0` is a decision, made with `release-as`.
+starts at `0.0.0`, which release-please treats as *no release yet*: a first
+release takes the tool's default (`1.0.0`), so `"release-as": "0.1.0"` sets
+it — and must be removed once `v0.1.0` is out, or every later release PR
+would ask for 0.1.0 again. From then on `bump-minor-pre-major` keeps ouija
+below 1.0 while its API settles: a breaking change bumps the minor (`0.1.0`
+→ `0.2.0`) and a fix the patch. Reaching `1.0.0` is a decision, made with
+`release-as` again.
 
 ## Documentation
 
