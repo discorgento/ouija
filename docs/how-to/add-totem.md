@@ -164,9 +164,172 @@ ouija generate totem --external [dir]
 
 ### 2. Implement the logic
 
-Replace the placeholder `Run()` body with your totem's logic. Use the
-[Engine API](#engine-api-for-totems) for agentic work, tool calls, multi-step
-orchestration, and structured output.
+Replace the placeholder `Run()` body with your totem's logic. The walkthrough
+below builds a useful one piece by piece; the [Engine
+API](#engine-api-for-totems) lists everything else.
+
+## Walkthrough: a useful totem, piece by piece
+
+We build `review`: it reviews what a branch changed before the PR — finds
+problems, has each one checked by a skeptic, and reports only what holds. The
+finished totem ships with ouija: [`totems/review/review.go`](../../totems/review/review.go),
+with its [tests](../../totems/review/review_test.go).
+
+### The one question: what is Go's job, what is the model's?
+
+| Go decides | The model judges |
+|---|---|
+| which steps, in what order | is this line a bug? |
+| what data each step gets | is this finding real? |
+| what to do with each answer | |
+| what is reported | |
+
+Anything certain and repeatable — running `git`, reading a file, filtering,
+counting, saving — is Go. The model is called only for judgment, through
+`eng.Run`. That is the whole difference from a prompt file: "then verify each
+finding" is not a request the model may skip, it is a `for` loop.
+
+### 1. Draw the steps
+
+```
+git diff (Go) → find (model) → verify each finding (model, one call each) → keep the confirmed (Go)
+```
+
+Each arrow is a line of Go; each model step is one `eng.Run`.
+
+### 2. Gather the context in Go
+
+Do not ask the model to discover what you can just read. The diff is one
+command:
+
+```go
+cmd := exec.CommandContext(ctx, "git", "diff", "--no-ext-diff", "--merge-base", base)
+cmd.Dir = eng.Config().ProjectRoot
+diff, err := cmd.Output()
+```
+
+Other context you get for free: `eng.Config().Rules` (the project's rules,
+from `.ouija/config.json`), `knowledge.Load(root)` inside this repo (the facts
+saved with `ouija learn`), and `engine.ReadProjectFile(ctx, root, path)` for a
+file, through the sandbox.
+
+### 3. Tell the model how to work — `System`, `Prompt`, tools
+
+`eng.Run` takes a `RunRequest`; four fields are where context goes:
+
+| Field | What goes there | In `review` |
+|---|---|---|
+| `System` | how to work: role, rules, what to ignore. Stable across calls (and cached) | "You review code changes. Report only real problems… Never style." + the project rules |
+| `Prompt` | this call's data | the focus + the diff |
+| `UseTools` | let it read more on its own (`read_file`, `grep`, `glob`, `list_dir`) | `true`: the diff alone is not always enough |
+| `ExtraTools` | functions of **yours** it may call | — (see [Custom tools](#custom-tools-extratools), e.g. a `run_tests`) |
+
+```go
+found, err := eng.Run(ctx, engine.RunRequest{
+    Label:    "find", // shown in the progress and the trace
+    System:   system,
+    Prompt:   "FOCUS: " + args.Task + "\n\nDIFF:\n" + diff,
+    UseTools: true,
+    Schema:   findingsSchema(),
+})
+```
+
+### 4. Make it answer in a shape — `Schema`
+
+Without a schema the model answers in prose and you parse guesses. With one,
+the answer **is** a JSON object with the fields you declared (the model hands
+it in through a `submit_result` call), and `res.Text` decodes straight into a
+struct:
+
+```go
+func findingsSchema() map[string]any {
+    item := schema.Obj(map[string]any{
+        "file":     schema.Str("path of the file, as in the diff"),
+        "line":     schema.Str("the offending line, quoted exactly"),
+        "problem":  schema.Str("what is wrong and what it breaks"),
+        "severity": schema.Enum("how bad it is", "high", "medium", "low"),
+    }, "file", "line", "problem", "severity")
+    return schema.Obj(map[string]any{
+        "findings": map[string]any{"type": "array", "items": item},
+    }, "findings")
+}
+
+var out struct{ Findings []finding }
+if err := json.Unmarshal([]byte(found.Text), &out); err != nil { … }
+```
+
+`schema.Enum` is how you make the model choose instead of improvise: the
+verify step answers `"yes"` or `"no"`, and Go branches on it.
+
+### 5. Enforce the order in Go
+
+The step a prompt would *ask for* is code here — it always runs:
+
+```go
+for _, f := range out.Findings {
+    v, err := eng.Run(ctx, engine.RunRequest{
+        Label:    "verify",
+        System:   "You are a skeptical reviewer… decide whether it is real.",
+        Prompt:   f.File + "\n" + f.Line + "\n" + f.Problem,
+        UseTools: true,
+        Schema:   schema.Obj(map[string]any{"real": schema.Enum("is it real", "yes", "no")}, "real"),
+    })
+    // keep it only when the skeptic said yes
+}
+```
+
+Independent calls can run in parallel — the built-in `review` uses the same
+helper as `task`'s passes; in your own repo, `errgroup` does it. The budget,
+the sandbox and the trace apply to every call without a line of yours.
+
+### 6. Take inputs — `InputSchema` + `args.Decode`
+
+```go
+func (t *Totem) InputSchema() map[string]any {
+    return schema.Obj(map[string]any{
+        "task": schema.Str("what to focus on (optional)"),
+        "base": schema.Str("branch to compare against (default: main)"),
+    })
+}
+
+var in struct{ Base string `json:"base"` }
+if err := args.Decode(&in); err != nil { … }
+```
+
+The same schema becomes `--set base=develop` on the command line, the tool's
+arguments over MCP, and its required fields are checked before `Run`.
+
+### 7. Show the result — `Render()`
+
+Return a struct; give it a `Render() string` and the CLI prints that (markdown)
+instead of JSON. `--json` still prints the struct.
+
+### 8. Test it without a model
+
+`engine/enginetest` is a scripted provider: you decide what "the model"
+answers, by step, and assert what your Go does with it:
+
+```go
+p := &enginetest.Provider{Respond: func(req engine.ChatRequest) enginetest.Reply {
+    if strings.HasPrefix(req.System, "You review") {
+        return enginetest.Submit(map[string]any{"findings": []any{ /* two findings */ }})
+    }
+    return enginetest.Submit(map[string]any{"real": "yes", "reason": "…"}) // the skeptic
+}}
+out, err := registry.Invoke(ctx, enginetest.NewEngine(p, root), &Totem{}, registry.Args{})
+```
+
+`review`'s tests check that the diff reaches the find step, that each finding
+gets its own verify call, that only the confirmed one is reported — no API
+key, no cost, the same result every run.
+
+### Run it
+
+```sh
+ouija review "concurrency"      # terminal
+/review concurrency             # in the chat
+ouija_review                    # a tool in Claude Code, Cursor or OpenCode (MCP)
+```
 
 ## Engine API for totems
 
@@ -375,7 +538,7 @@ import (
     "os"
 
     "github.com/discorgento/ouija/bootstrap"
-    _ "github.com/you/your-agents/totems/sentinel"
+    _ "github.com/you/your-agents/totems/review"
 )
 
 func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
@@ -385,14 +548,14 @@ func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
 
 ```sh
 my-totem                                   # list the totems
-my-totem sentinel "task" --set depth=2     # run one (--json for raw JSON, --config <file>)
+my-totem review "concurrency" --set base=develop   # run one (--json for raw JSON, --config <file>)
 my-totem mcp [--config <file>]             # serve them over MCP (stdio)
 ```
 
 For a host of your own, `bootstrap.Setup` is the glue underneath: it
 discovers config (project layers + the global `~/.config/ouija/config.json`
 written by `ouija setup`), validates it, builds the provider and returns a
-ready engine; `app.Run(ctx, "sentinel", registry.Args{Task: "…"})` then runs a
+ready engine; `app.Run(ctx, "review", registry.Args{Task: "…"})` then runs a
 totem through `registry.Invoke`, and `app.ServeMCP` serves them. `app.Engine`
 keeps one budget across every `app.Run` — a long-lived host that runs a totem
 per request should `Setup` a fresh `App` per request — while `ServeMCP` gives

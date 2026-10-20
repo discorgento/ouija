@@ -23,7 +23,7 @@ with types, tests and golden files, not prompt files.
 > prose is a request the model may skip; in Go it is the next line — and you can
 > test it. [The full argument →](docs/explanation/totems.md)
 
-It ships with three totems (`task`, `doc`, `sticker`) — and the engine is a Go
+It ships with four totems (`task`, `review`, `doc`, `sticker`) — and the engine is a Go
 library: **your own agent is a Go type in your repo**, ~20 lines, inheriting
 budget, sandbox, tracing and MCP. `go build` gives you a standalone binary.
 [Write your own agent →](#write-your-own-agent)
@@ -36,7 +36,7 @@ flowchart LR
     CLI["ouija CLI · TUI"] --> ENG["engine<br/>ReAct loop · tools · budget · trace"]
     MCP["ouija mcp"] --> ENG
     ENG --> PROV["providers<br/>anthropic · openai · openrouter · opencode · ollama"]
-    ENG --> TOTEMS["totems<br/>task · doc · sticker · yours"]
+    ENG --> TOTEMS["totems<br/>task · review · doc · sticker · yours"]
 ```
 
 The engine knows nothing about tasks or documents — every totem defines its own
@@ -97,6 +97,7 @@ Keys, commands and themes: [Chat TUI](docs/how-to/chat.md) ·
 | Command | What it does |
 |---|---|
 | `ouija task "..."` | Verified implementation plan: scout → N passes → reconcile → checklist |
+| `ouija review` | Review the branch's changes: find problems → a skeptic verifies each → what holds |
 | `ouija doc "..."` | Code-verified client document — HTML + PDF + technical MD |
 | `ouija sticker` | Laptop sticker SVG from real project metrics |
 | `ouija chat` | Interactive terminal chat (Bubble Tea TUI): tools, streaming, approvals |
@@ -115,29 +116,79 @@ Flags, slash commands, shortcuts and exit codes:
 ## Write your own agent
 
 A totem is a Go type in **your** repository. `engine`, `registry`, `schema` and
-`bootstrap` are public Go packages — no fork, no upstream rebuild:
+`bootstrap` are public Go packages — no fork, no upstream rebuild.
+
+The split is the point: **Go decides the path** — which steps, in what order,
+with which data, and what to do with each answer — and **the model only does
+the judgment**, told how to work (`System`), given this call's data (`Prompt`),
+allowed to read files (`UseTools`) and bound to an answer shape (`Schema`).
+
+A code reviewer in ~50 lines — a trimmed version of the built-in
+[`review`](totems/review/review.go) totem, which adds typed inputs, parallel
+verify passes, a terminal summary and tests:
 
 ```go
-// github.com/you/your-agents/totems/sentinel/sentinel.go — the whole agent
-package sentinel
+// github.com/you/your-agents/totems/review/review.go — the whole agent
+package review
 
 import (
     "context"
+    "encoding/json"
+    "os/exec"
 
     "github.com/discorgento/ouija/engine"
     "github.com/discorgento/ouija/registry"
+    "github.com/discorgento/ouija/schema"
 )
 
 type Totem struct{}
 
-func (t *Totem) Name() string    { return "sentinel" }
-func (t *Totem) Summary() string { return "Example external totem" }
+func (t *Totem) Name() string    { return "review" }
+func (t *Totem) Summary() string { return "Review the branch: find problems, verify each one" }
+
 func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args) (any, error) {
-    res, err := eng.Run(ctx, engine.RunRequest{Label: "sentinel", Prompt: args.Task})
+    // 1. Go gathers the context — what changed since main. Nothing to guess.
+    cmd := exec.CommandContext(ctx, "git", "diff", "--no-ext-diff", "--merge-base", "main")
+    cmd.Dir = eng.Config().ProjectRoot
+    diff, err := cmd.Output()
     if err != nil {
         return nil, err
     }
-    return map[string]string{"summary": res.Text}, nil
+
+    // 2. The model judges. System: how to work. Prompt: this call's data.
+    //    UseTools: it may open files. Schema: the shape the answer must have.
+    found, err := eng.Run(ctx, engine.RunRequest{
+        Label:    "find",
+        System:   "You review code changes. Report real bugs only, never style.",
+        Prompt:   "Focus: " + args.Task + "\n\nDIFF:\n" + string(diff),
+        UseTools: true,
+        Schema:   schema.Obj(map[string]any{"findings": schema.Arr("one problem each: file, line, why")}, "findings"),
+    })
+    if err != nil {
+        return nil, err
+    }
+    var out struct{ Findings []string }
+    if err := json.Unmarshal([]byte(found.Text), &out); err != nil {
+        return nil, err
+    }
+
+    // 3. A rule in Go, not a request in a prompt: a skeptic checks every
+    //    finding, and only the confirmed ones are kept.
+    var confirmed []string
+    for _, f := range out.Findings {
+        v, err := eng.Run(ctx, engine.RunRequest{
+            Label:    "verify",
+            System:   "You are a skeptic. Read the code; say yes only if the problem is real.",
+            Prompt:   f,
+            UseTools: true,
+            Schema:   schema.Obj(map[string]any{"real": schema.Enum("is it real", "yes", "no")}, "real"),
+        })
+        var verdict struct{ Real string }
+        if err == nil && json.Unmarshal([]byte(v.Text), &verdict) == nil && verdict.Real == "yes" {
+            confirmed = append(confirmed, f)
+        }
+    }
+    return map[string]any{"confirmed": confirmed}, nil
 }
 
 func init() { registry.Register(&Totem{}) }
@@ -156,7 +207,7 @@ import (
     "os"
 
     "github.com/discorgento/ouija/bootstrap"
-    _ "github.com/you/your-agents/totems/sentinel"
+    _ "github.com/you/your-agents/totems/review"
 )
 
 func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
@@ -164,7 +215,7 @@ func main() { os.Exit(bootstrap.Main(bootstrap.WithName("my-totem"))) }
 
 ```sh
 go build -o my-totem ./cmd/my-totem   # standalone binary, full engine behind it
-my-totem sentinel "audit the auth flow" --set depth=2   # typed inputs, see InputSchema
+my-totem review "concurrency"         # run it on the current branch
 my-totem mcp                          # your totems as my-totem_<name> tools in
                                       # Claude Code, Cursor or OpenCode
 ```
@@ -264,7 +315,6 @@ sanitization — all **fail closed**: an inconclusive check means *deny*.
 
 ## Roadmap
 
-- `review` totem (review the current git diff).
 - `deploy` totem (preview + apply changes).
 - Adversarial verification step (a skeptic refutes each finding before reconcile).
 - Totem registry — index and install third-party totems
