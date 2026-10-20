@@ -3,6 +3,7 @@ package engine
 import (
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -143,11 +144,15 @@ var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 // Protected paths can never be accessed even with Allow level.
 // Checks both filename patterns and directory components anywhere in the path.
 func isProtectedPath(absPath string) bool {
+	// One separator on every OS: on Windows the file tools spell a path with
+	// "\" and the bash tool's POSIX shell with "/" — checking "\" alone let
+	// `cat ~/.config/ouija/config.json` and `~/.ssh/id_rsa` through there.
+	absPath = filepath.ToSlash(absPath)
 	if foldCase {
 		absPath = strings.ToLower(absPath)
 	}
 	// ── Protected filenames (regardless of location) ────────────────
-	base := filepath.Base(absPath)
+	base := path.Base(absPath)
 	switch base {
 	case ".gitconfig", ".netrc", ".npmrc", ".dockercfg", ".dockerconfigjson":
 		return true
@@ -166,7 +171,7 @@ func isProtectedPath(absPath string) bool {
 	}
 
 	// ── Protected system directories ────────────────────────────────
-	dir := filepath.Dir(absPath)
+	dir := path.Dir(absPath)
 	switch {
 	case dir == "/etc" || strings.HasPrefix(dir, "/etc/"):
 		return true
@@ -185,9 +190,8 @@ func isProtectedPath(absPath string) bool {
 	// .ssh (SSH keys), .gnupg (GPG keys), .aws (AWS credentials),
 	// .docker (Docker auth/config), .kube (Kubernetes config),
 	// .azure (Azure auth), .ouija (config with optional apiKey).
-	// Note: not using filepath.Join to preserve OS independence — the
-	// separator is always part of the absolute path string.
-	sep := string(filepath.Separator)
+	// absPath is slash-separated by now (above), on every OS.
+	sep := "/"
 	if containsComponent(absPath, sep, ".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure", ".ouija") {
 		return true
 	}
@@ -207,7 +211,7 @@ func isProtectedPath(absPath string) bool {
 	// credentials in %AppData%\gcloud, not .config/gcloud).
 	if dir, err := os.UserConfigDir(); err == nil {
 		for _, name := range []string{"ouija", "gcloud"} {
-			g := filepath.Join(dir, name)
+			g := filepath.ToSlash(filepath.Join(dir, name))
 			if foldCase {
 				g = strings.ToLower(g)
 			}
