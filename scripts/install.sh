@@ -8,14 +8,17 @@
 # Options, after `sh -s --` when piped:
 #   --version 0.2.0   a given release instead of the latest
 #   --dir DIR         where the binaries go (default ~/.local/bin)
+#   --no-prompt       ask nothing: no PATH change, no setup
 #
-# Nothing needs root: the folder is your user's. ouija is a terminal
-# program - after this, run `ouija` in a project.
+# Nothing needs root: the folder is your user's. In a terminal it offers to
+# add the folder to your PATH and to run `ouija setup`; anywhere else (CI, a
+# pipe without a terminal) it only prints what to do.
 set -eu
 
 repo="discorgento/ouija"
 version="latest"
 dir="${HOME}/.local/bin"
+prompt=yes
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -23,7 +26,8 @@ while [ $# -gt 0 ]; do
         --version=*) version="${1#*=}"; shift ;;
         --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
         --dir=*) dir="${1#*=}"; shift ;;
-        -h|--help) sed -n '2,14p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --no-prompt) prompt=no; shift ;;
+        -h|--help) sed -n '2,15p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -123,21 +127,45 @@ say "installed in ${dir}"
 
 "$dir/ouija" version
 
-case ":${PATH}:" in
-    *":${dir}:"*) ;;
-    *)
-        say ""
-        say "${dir} is not on your PATH. Add it to your shell's startup file:"
-        case "${SHELL:-}" in
-            */zsh) say "  echo 'export PATH=\"${dir}:\$PATH\"' >> ~/.zshrc" ;;
-            */fish) say "  fish_add_path ${dir}" ;;
-            *) say "  echo 'export PATH=\"${dir}:\$PATH\"' >> ~/.bashrc" ;;
-        esac
-        say "then open a new terminal."
-        ;;
-esac
+# Questions go to the terminal, not stdin: under `curl … | sh`, stdin is the
+# script itself. No terminal (CI, cron), or --no-prompt: nothing is asked.
+interactive=no
+if [ "$prompt" = yes ] && [ -z "${CI:-}" ] && (exec </dev/tty) 2>/dev/null; then
+    interactive=yes
+fi
+ask() {
+    printf '%s [Y/n] ' "$1" >/dev/tty
+    read -r answer </dev/tty || answer=n
+    case "$answer" in ""|y|Y|yes|s|S|sim) return 0 ;; *) return 1 ;; esac
+}
+
+on_path=yes
+case ":${PATH}:" in *":${dir}:"*) ;; *) on_path=no ;; esac
+if [ "$on_path" = no ]; then
+    case "${SHELL:-}" in
+        */zsh) rc="$HOME/.zshrc"; line="export PATH=\"${dir}:\$PATH\"" ;;
+        */fish) rc="$HOME/.config/fish/conf.d/ouija.fish"; line="fish_add_path ${dir}" ;;
+        *) rc="$HOME/.bashrc"; [ "$(uname -s)" = Darwin ] && rc="$HOME/.bash_profile"; line="export PATH=\"${dir}:\$PATH\"" ;;
+    esac
+    say ""
+    if [ "$interactive" = yes ] && ask "${dir} is not on your PATH. Add it in ${rc}?"; then
+        mkdir -p "$(dirname "$rc")"
+        grep -qsF "$line" "$rc" || printf '\n# ouija\n%s\n' "$line" >> "$rc"
+        say "added to ${rc}: new terminals will find ouija"
+    else
+        say "${dir} is not on your PATH. Add this line to ${rc}, then open a new terminal:"
+        say "  ${line}"
+    fi
+    PATH="${dir}:${PATH}" # this script's own calls below
+fi
 
 say ""
-say "Next:"
-say "  ouija setup      # API keys and the default model (or ollama, local and free)"
-say "  ouija            # in a project folder: the chat"
+if [ "$interactive" = yes ] && ask "Set up ouija now (provider, API key, model)?"; then
+    "$dir/ouija" setup </dev/tty >/dev/tty 2>&1 || say "setup did not finish: run \`ouija setup\` to try again"
+    say ""
+    say "Next: cd into a project and run \`ouija\`."
+else
+    say "Next:"
+    say "  ouija setup      # provider, API key and default model (or Ollama: local and free)"
+    say "  ouija            # in a project folder: the chat"
+fi

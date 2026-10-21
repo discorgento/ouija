@@ -48,9 +48,11 @@ curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/inst
 
 The script picks the archive for your OS and CPU from the latest release,
 checks it against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in
-`~/.local/bin`. If that folder is not on your `PATH`, the script prints the
-line to add. To pass options (`--version 0.2.0`, `--dir <dir>`), put them
-after `sh -s --`.
+`~/.local/bin`. In a terminal it then asks two questions: whether to add that
+folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` or fish's config) when it is
+not there yet, and whether to run `ouija setup` now. In CI, or with
+`--no-prompt`, it asks nothing and prints what to do instead. To pass options
+(`--version 0.2.0`, `--dir <dir>`, `--no-prompt`), put them after `sh -s --`.
 
 To install by hand, check and extract the archive:
 
@@ -72,9 +74,10 @@ irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1
 The script downloads the latest release's zip, checks it against
 `SHA256SUMS`, puts `ouija.exe` and `ouija-mcp.exe` in
 `%LOCALAPPDATA%\Programs\ouija` and adds that folder to your user's `PATH`.
-Then open a **new** terminal (Windows Terminal or PowerShell), run
-`ouija setup`, and run `ouija` in a project folder. If you save the script as
-a file, it accepts `-Version 0.2.0`, `-InstallDir <dir>` and `-NoPath`.
+In a console it offers to run `ouija setup` right away. Then open a **new**
+terminal (Windows Terminal or PowerShell) and run `ouija` in a project folder.
+If you save the script as a file, it accepts `-Version 0.2.0`,
+`-InstallDir <dir>`, `-NoPath` and `-NoPrompt`.
 
 To install by hand, download the zip and extract it (Explorer opens it). Then
 add the folder that holds `ouija.exe` to your `PATH` under *Settings → System
