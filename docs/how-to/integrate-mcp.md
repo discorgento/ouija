@@ -17,10 +17,15 @@ ouija's totems to the host as MCP **tools** and the project's files as MCP
 - **Tools** are named `ouija_<totem>`, e.g. `ouija_task`, `ouija_review`,
   `ouija_doc`, `ouija_sticker`.
 - **Resources** use the URI scheme `ouija://project/{path}` and give sandboxed
-  access to files within the project root.
+  access to files within the project root. Protected paths (credentials,
+  system files) are refused, as with the file tools. When the server starts in
+  `/` or in your home folder, which some hosts do, resources are off: start
+  it in a project folder (most hosts take a `cwd` for the server).
 - **Transport** is newline-delimited JSON-RPC 2.0 over stdio. The `initialize`
   handshake advertises MCP protocol version `2025-06-18` with the `tools` and
-  `resources` capabilities.
+  `resources` capabilities. A message over 4 MiB gets a parse error. At most 8
+  tool calls and resource reads run at once; more get error `-32000`, and a
+  request reusing the id of one still running gets `-32600`.
 - **Logging**: stdout carries only protocol messages; diagnostics go to
   stderr.
 

@@ -54,8 +54,9 @@ Writes `.ouija/config.json` in the current directory and trusts it (see
 
 Trusts the project config that discovery finds from the current directory (or
 from `<path>`). It first prints the security-sensitive keys the file sets
-(`permission`, the `tools` bash allowlist, `apiKey`, a non-default
-`systemPrompt`, a `projectRoot` other than `.`). Until you trust the file,
+(`permission`, the `tools` bash allowlist and sandbox, `apiKey`, a
+non-default `systemPrompt` or `rules`, a `projectRoot` other than `.`, a
+`budget` above the defaults, a `provider` or `model` other than yours). Until you trust the file,
 ouija ignores those keys with a warning, and any change to the file needs
 `ouija trust` again. `--revoke` forgets the trust. Files written by
 `ouija init` and by the chat are trusted automatically. See

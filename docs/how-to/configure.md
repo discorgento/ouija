@@ -93,8 +93,10 @@ the optional sections (`permission`, `tools`, `modelSuggestions`,
 
 `init` also marks the file it wrote as trusted. A project config you did not
 write, such as one a teammate committed or one in a repository you cloned,
-applies its `permission`, `tools`, `apiKey`, `systemPrompt` and `projectRoot`
-keys only after you review and trust it:
+applies its `permission`, `tools`, `apiKey`, `systemPrompt`, `rules` and
+`projectRoot` keys, a `budget` above the defaults, and a `provider` or `model`
+other than the ones you chose in `ouija setup`, only after you review and
+trust it:
 
 ```sh
 ouija trust          # prints what the config grants, then trusts it

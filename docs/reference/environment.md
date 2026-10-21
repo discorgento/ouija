@@ -35,8 +35,8 @@ OLLAMA_HOST=http://192.168.1.10:11434 ouija chat     # remote Ollama
 - The TUI discards engine logs, so `OUIJA_LOG_LEVEL` matters for totems and
   `ouija mcp`.
 - The `bash` tool starts subprocesses with a **sanitized** environment: it
-  strips credential-like variables (`AWS_*`, `*API_KEY*`, `*SECRET*`,
-  `*TOKEN*`, …) before exec. See [Security](../explanation/security.md).
+  strips credential-like variables (`AWS_*`, `*API_KEY*`, `*_KEY`, `*SECRET*`,
+  `*TOKEN*`, `*_DSN`, …) and URLs with a password before exec. See [Security](../explanation/security.md).
 - `PATH` matters for MCP hosts, which start the server by name: a GUI host
   launched from the desktop may not inherit your shell's `PATH`. See
   [MCP integration](../how-to/integrate-mcp.md).

@@ -115,7 +115,7 @@ Keys, commands and themes: [Chat TUI](docs/how-to/chat.md) ·
 | `ouija sticker` | Laptop sticker SVG from real project metrics |
 | `ouija chat` | Interactive terminal chat (Bubble Tea TUI): tools, streaming, approvals |
 | `ouija setup` / `ouija init` | Global defaults / per-project config |
-| `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey, systemPrompt, projectRoot) |
+| `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey, provider/model, budget, rules, …) |
 | `ouija learn "fact"` | Save project knowledge, used by the chat and the `task` totem |
 | `ouija mcp [install\|status]` | Serve MCP over stdio, or register ouija with your editor's harness |
 | `ouija generate totem` | Scaffold a new totem |
@@ -321,7 +321,8 @@ Details: [MCP integration](docs/how-to/integrate-mcp.md).
 
 ## Security
 
-ouija layers several defenses: a filesystem sandbox, protected paths,
+ouija layers several defenses: a filesystem sandbox, an OS sandbox for bash
+(on by default on Linux and macOS), protected paths,
 permission levels, a bash denylist and allowlist, detection of an agent stuck
 repeating the same call (a "doom loop"), budget ceilings, and credentials
 stripped from the environment of every command it runs. All of them **fail closed**: when a check is inconclusive, the

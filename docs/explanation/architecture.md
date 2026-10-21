@@ -127,11 +127,14 @@ the resolved absolute path, and bash commands. A protected path always yields
 `Deny`:
 
 - filenames: `.env*`, `.gitconfig`, `.netrc`, `.npmrc`,
-  `.dockercfg`/`.dockerconfigjson`, `.ouija.json`, `ouija.json`;
+  `.dockercfg`/`.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`,
+  `.my.cnf`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519`, `*.tfstate`,
+  `*.tfstate.backup`, `.ouija.json`, `ouija.json`;
 - directories at any path level: `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`,
-  `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`, and ouija's global
-  config (`.config/ouija`, or wherever `os.UserConfigDir()` puts it);
-- system directories: `/etc/**`, `/var/lib/**`.
+  `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`, `.config/gh`,
+  `.git/config`, and ouija's global config (`.config/ouija`, or wherever
+  `os.UserConfigDir()` puts it);
+- system directories: `/etc/**`, `/var/lib/**`, `/proc/**`, `/sys/**`.
 
 ## Provider architecture
 
