@@ -47,7 +47,7 @@ func help() string {
 	b.WriteString("\n  ◆ Setup\n")
 	b.WriteString("      setup      Interactive global config wizard (API keys + provider)\n")
 	b.WriteString("      init       Create .ouija/config.json (interactive)\n")
-	b.WriteString("      trust      Trust this project's config (permissions, allowlist, apiKey, systemPrompt, projectRoot)\n")
+	b.WriteString("      trust      Trust this project's config (permissions, tools and sandbox, apiKey, provider/model, budget, rules…)\n")
 	b.WriteString("      config     Same wizard as setup (API keys, default provider/model)\n")
 	b.WriteString("      doctor     Diagnose config, provider key, and harness wiring\n")
 
@@ -343,7 +343,7 @@ var commandUsage = map[string]string{
 	"config":   "usage: ouija config\n  Same wizard as `ouija setup`.",
 	"init":     "usage: ouija init\n  Interactive: write .ouija/config.json for this project (provider, model, optional key).",
 	"doctor":   "usage: ouija doctor\n  Check the config, the provider key and the harness wiring.",
-	"trust":    "usage: ouija trust [--revoke] [path]\n  Review and trust the project config (its permission, tools, apiKey, systemPrompt and projectRoot then apply).",
+	"trust":    "usage: ouija trust [--revoke] [path]\n  Review and trust the project config (its permission, tools and sandbox, apiKey, systemPrompt, rules, projectRoot, a raised budget and a provider or model other than yours then apply).",
 	"learn":    "usage: ouija learn [fact…]\n  Without a fact: show what was learned. A fact starting with - goes after --: ouija learn -- \"-v means verbose\"",
 	"generate": "usage: ouija generate totem [--external [dir]]\n  Scaffold a totem: in this ouija checkout, or as a standalone module with --external.",
 	"chat":     "usage: ouija chat [--config <file>] [--trace-file <file>]\n  Interactive chat with the project.",
