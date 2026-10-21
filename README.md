@@ -65,10 +65,10 @@ ouija chat                 # daily driver: explore and edit code, approve diffs
 ouija task "describe X"    # one-shot: verified plan (scout → N passes → reconcile)
 ```
 
-`ouija setup` walks you through the keys; pick `ollama` to run locally and
-for free. If something does not work, run `ouija doctor`. In a terminal,
-`ouija` with no arguments opens the chat, and runs the setup first if you have
-not run it yet.
+`ouija setup` takes three steps: pick a provider, paste its key, pick a model.
+Pick `ollama` to run locally and for free. If something does not work, run
+`ouija doctor`. In a terminal, `ouija` with no arguments opens the chat, and
+runs the setup first if you have not run it yet.
 
 ## The chat
 
