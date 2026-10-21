@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.6.0](https://github.com/discorgento/ouija/compare/v0.5.1...v0.6.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **sandbox:** with tools.bash.sandbox enabled, commands that use the network (downloading dependencies, calling a local service) now need network.connect, e.g. [443], or network.all.
+
+### Features
+
+* **doctor:** report whether bash runs in the sandbox ([9ec02cd](https://github.com/discorgento/ouija/commit/9ec02cdbbf40d690ec4383b8fc8ae7c5da40c433))
+* **install:** verify the archive's build provenance ([842cb9f](https://github.com/discorgento/ouija/commit/842cb9f1c294784e4275d1d613898cb61d02e9df))
+* **mcp:** annotate read-only totems for MCP hosts ([3fec9e7](https://github.com/discorgento/ouija/commit/3fec9e7fddf4100ecc8fe9c1359a45fee08aa191))
+* **sandbox:** a global sandbox no project can turn off ([77afc81](https://github.com/discorgento/ouija/commit/77afc8165f7b48253673512aa28bf03b48121c0d))
+* **sandbox:** close TCP by default under the bash sandbox ([d682c47](https://github.com/discorgento/ouija/commit/d682c47aa9c05027e60b8c2865908e2dc036692c))
+
 ## [0.5.1](https://github.com/discorgento/ouija/compare/v0.5.0...v0.5.1) (2026-10-21)
 
 
