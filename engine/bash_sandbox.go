@@ -208,5 +208,9 @@ func checkSandboxGrant(path string) error {
 	return nil
 }
 
+// SandboxAvailable reports whether this machine can enforce the bash sandbox
+// (Linux with a recent enough Landlock), and why not when it cannot.
+func SandboxAvailable() error { return sandboxAvailable() }
+
 // errSandboxUnsupported is returned where the OS cannot confine a command.
 var errSandboxUnsupported = errors.New("the bash sandbox needs Linux with Landlock")

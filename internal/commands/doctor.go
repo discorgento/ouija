@@ -48,6 +48,8 @@ func Doctor(w io.Writer) error {
 	r.configFiles()
 	r.section("provider")
 	r.provider()
+	r.section("safety")
+	r.sandbox()
 	r.section("totems")
 	r.totems()
 	r.section("harnesses")
@@ -241,6 +243,32 @@ func (r *report) providerAPI(cfg *engine.Config) {
 		r.warn("provider API", fmt.Sprintf("reachable, but model %q is not among its %d models", cfg.Model, len(list)))
 	default:
 		r.ok("provider API", fmt.Sprintf("reachable · %s available", cfg.Model))
+	}
+}
+
+// sandbox says whether bash runs confined by the OS, and how to turn that on
+// where this machine can enforce it. It is not a failure when off: bash still
+// asks before every command.
+func (r *report) sandbox() {
+	cfg, _, err := app.DiscoverConfig("")
+	on := err == nil && cfg.Tools != nil && cfg.Tools.Bash != nil && cfg.Tools.Bash.Sandbox != nil && cfg.Tools.Bash.Sandbox.Enabled
+	avail := engine.SandboxAvailable()
+	switch {
+	case on && avail == nil:
+		net := "TCP closed"
+		if n := cfg.Tools.Bash.Sandbox.Network; n != nil && (n.All || len(n.Connect) > 0 || len(n.Bind) > 0) {
+			net = "TCP open on the ports the config lists"
+			if n.All {
+				net = "network not restricted"
+			}
+		}
+		r.ok("bash sandbox", "on — Landlock confines every command ("+net+")")
+	case on:
+		r.fail("bash sandbox", "on in the config, but this machine cannot enforce it, so bash refuses to run: "+avail.Error())
+	case avail == nil:
+		r.warn("bash sandbox", "off — this machine supports it: add \"sandbox\": {\"enabled\": true} to "+ouijaconfig.Path()+" to confine bash in every project")
+	default:
+		r.info("bash sandbox", "not available here ("+avail.Error()+"); bash asks before every command")
 	}
 }
 
