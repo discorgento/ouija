@@ -14,11 +14,15 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +43,14 @@ const (
 	defaultPrefix   = "ouija_"
 
 	resourceProjectURI = "ouija://project/"
+
+	// maxLineBytes caps one JSON-RPC message: an endless line used to be read
+	// into memory whole (and copied twice more on the way to the parser).
+	maxLineBytes = 4 << 20
+	// maxCalls caps the tools/call and resources/read running at once: each
+	// totem call has its own budget, so a client firing hundreds of them in
+	// parallel multiplied the spend without limit.
+	maxCalls = 8
 )
 
 // Logf receives server diagnostics. stdout belongs to the protocol, so these
@@ -62,7 +74,7 @@ type Server struct {
 	writeMu sync.Mutex // concurrent tool calls share the output stream
 
 	callsMu sync.Mutex
-	calls   map[string]*inflightCall // request id → running tools/call
+	calls   map[string]*inflightCall // request id → running call
 	wg      sync.WaitGroup           // running tools/call goroutines
 }
 
@@ -160,16 +172,17 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 	// a read is pending — stdin cannot be interrupted — but it hands over
 	// nothing more.
 	type read struct {
-		line []byte
-		err  error
+		line    []byte
+		tooLong bool
+		err     error
 	}
 	lines := make(chan read)
 	go func() {
 		reader := bufio.NewReader(in)
 		for {
-			line, err := reader.ReadBytes('\n')
+			line, tooLong, err := readLine(reader, maxLineBytes)
 			select {
-			case lines <- read{line, err}:
+			case lines <- read{line, tooLong, err}:
 			case <-ctx.Done():
 				return
 			}
@@ -183,7 +196,9 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 		case <-ctx.Done():
 			return nil
 		case r := <-lines:
-			if len(r.line) > 0 {
+			if r.tooLong {
+				s.writeError(writer, nil, -32700, fmt.Sprintf("parse error: message over %d bytes", maxLineBytes))
+			} else if len(r.line) > 0 {
 				s.handleLine(ctx, r.line, writer)
 			}
 			if r.err == io.EOF {
@@ -192,6 +207,25 @@ func (s *Server) Run(ctx context.Context, in io.Reader, out io.Writer) error {
 			if r.err != nil {
 				return r.err
 			}
+		}
+	}
+}
+
+// readLine reads one newline-terminated message of at most max bytes. A
+// longer one is read to its end and dropped (tooLong), so the stream stays in
+// step and the next message is read normally.
+func readLine(r *bufio.Reader, max int) (line []byte, tooLong bool, err error) {
+	for {
+		chunk, err := r.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > max {
+				tooLong, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if err != bufio.ErrBufferFull {
+			return line, tooLong, err
 		}
 	}
 }
@@ -223,7 +257,7 @@ type rpcError struct {
 }
 
 func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer) {
-	line = []byte(strings.TrimSpace(string(line)))
+	line = bytes.TrimSpace(line)
 	if len(line) == 0 {
 		return
 	}
@@ -282,7 +316,7 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 	case "resources/read":
 		// Off the read loop, like tools/call: a slow file (a FIFO, a network
 		// mount) must not stop every other request.
-		s.startCall(ctx, req.ID, func(callCtx context.Context) { s.handleResourceRead(callCtx, out, req) })
+		s.startCall(ctx, out, req.ID, func(callCtx context.Context) { s.handleResourceRead(callCtx, out, req) })
 	default:
 		if !isNotification {
 			s.writeError(out, req.ID, -32601, "method not found: "+req.Method)
@@ -336,7 +370,7 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 
 	task, _ := p.Arguments["task"].(string)
 	args := registry.Args{Task: task, Params: p.Arguments}
-	s.startCall(ctx, req.ID, func(callCtx context.Context) {
+	s.startCall(ctx, out, req.ID, func(callCtx context.Context) {
 		result, runErr := s.runTotem(callCtx, module, args)
 		if cancelledByClient(callCtx) {
 			// MCP says not to answer a cancelled request.
@@ -369,8 +403,10 @@ func (s *Server) runTotem(ctx context.Context, totem string, args registry.Args)
 }
 
 // startCall runs fn in its own goroutine, under a context the client can
-// cancel with notifications/cancelled (keyed by the request id).
-func (s *Server) startCall(ctx context.Context, id json.RawMessage, fn func(ctx context.Context)) {
+// cancel with notifications/cancelled (keyed by the request id). It refuses an
+// id that is still running — a second call under it could not be cancelled on
+// its own — and a call over maxCalls running at once.
+func (s *Server) startCall(ctx context.Context, out *bufio.Writer, id json.RawMessage, fn func(ctx context.Context)) {
 	ctx, cancel := context.WithCancel(ctx)
 	call := &inflightCall{cancel: cancel}
 	ctx = context.WithValue(ctx, inflightKey{}, call)
@@ -380,6 +416,18 @@ func (s *Server) startCall(ctx context.Context, id json.RawMessage, fn func(ctx 
 	if s.calls == nil {
 		s.calls = make(map[string]*inflightCall)
 	}
+	if _, dup := s.calls[key]; dup {
+		s.callsMu.Unlock()
+		cancel()
+		s.writeError(out, id, -32600, "invalid request: id "+key+" is already in use by a running request")
+		return
+	}
+	if len(s.calls) >= maxCalls {
+		s.callsMu.Unlock()
+		cancel()
+		s.writeError(out, id, -32000, fmt.Sprintf("too many requests running (limit %d): retry when one finishes", maxCalls))
+		return
+	}
 	s.calls[key] = call
 	s.callsMu.Unlock()
 
@@ -388,9 +436,7 @@ func (s *Server) startCall(ctx context.Context, id json.RawMessage, fn func(ctx 
 		defer s.wg.Done()
 		defer func() {
 			s.callsMu.Lock()
-			if s.calls[key] == call { // a reused id may have replaced it
-				delete(s.calls, key)
-			}
+			delete(s.calls, key)
 			s.callsMu.Unlock()
 			cancel()
 		}()
@@ -413,8 +459,18 @@ func (s *Server) cancelCall(id json.RawMessage) bool {
 
 // callKey normalizes a JSON-RPC id (number or string) into a map key, so
 // `7` and ` 7 ` in a cancellation name the same request.
+// A numeric id is keyed by its value, so 1, 1.0 and 1e0 are one request; a
+// string id stays distinct from the number it spells.
 func callKey(id json.RawMessage) string {
-	return strings.TrimSpace(string(id))
+	raw := strings.TrimSpace(string(id))
+	var n json.Number
+	if dec := json.NewDecoder(strings.NewReader(raw)); !strings.HasPrefix(raw, `"`) && dec.Decode(&n) == nil {
+		// Exactly, as a rational: float64 made 2^53+1 and 2^53 one key.
+		if r, ok := new(big.Rat).SetString(string(n)); ok {
+			return r.RatString()
+		}
+	}
+	return raw
 }
 
 // toolErrorText renders a totem failure as the tool result text. When the error
@@ -443,6 +499,8 @@ func resourceList() []map[string]any {
 // Supported URIs:
 //   - ouija://project/         → directory listing
 //   - ouija://project/<path>   → file content (sandboxed to the project root)
+//
+// A request the client cancelled gets no answer, as MCP says.
 func (s *Server) handleResourceRead(ctx context.Context, out *bufio.Writer, req rpcRequest) {
 	var p struct {
 		URI string `json:"uri"`
@@ -451,12 +509,41 @@ func (s *Server) handleResourceRead(ctx context.Context, out *bufio.Writer, req 
 		s.writeError(out, req.ID, -32602, "invalid params")
 		return
 	}
+	data, mime, err := s.readResource(ctx, p.URI)
+	if cancelledByClient(ctx) {
+		return
+	}
+	if err != nil {
+		code := -32602
+		if errors.Is(err, errInternal) {
+			code = -32603
+		}
+		s.writeError(out, req.ID, code, err.Error())
+		return
+	}
+	s.writeResourceData(out, req.ID, p.URI, data, mime)
+}
 
-	if p.URI == resourceProjectURI {
+// errInternal marks a resources/read failure that is the server's, not the
+// request's (-32603 rather than -32602).
+var errInternal = errors.New("internal error")
+
+// readResource reads one ouija://project/ resource. Its errors name the
+// resource by its project-relative path, never by where it is on disk.
+func (s *Server) readResource(ctx context.Context, uri string) ([]byte, string, error) {
+	if !strings.HasPrefix(uri, resourceProjectURI) {
+		return nil, "", fmt.Errorf("invalid resource URI: must start with %s", resourceProjectURI)
+	}
+	// Started from / or the home folder (a harness that launches servers
+	// there), the "project" is every file of the user: the resource API has
+	// no permission gate, so it serves nothing then.
+	if broadRoot(s.root) {
+		return nil, "", fmt.Errorf("resources are off: the project root is %s — start the MCP server in a project folder", s.root)
+	}
+	if uri == resourceProjectURI {
 		entries, err := os.ReadDir(s.root)
 		if err != nil {
-			s.writeError(out, req.ID, -32603, "cannot list directory: "+err.Error())
-			return
+			return nil, "", fmt.Errorf("%w: cannot list the project directory", errInternal)
 		}
 		var lines []string
 		for _, e := range entries {
@@ -466,23 +553,16 @@ func (s *Server) handleResourceRead(ctx context.Context, out *bufio.Writer, req 
 			}
 			lines = append(lines, name)
 		}
-		s.writeResourceResult(out, req.ID, p.URI, strings.Join(lines, "\n"), "text/plain")
-		return
+		return []byte(strings.Join(lines, "\n")), "text/plain", nil
 	}
 
-	rel := strings.TrimPrefix(p.URI, resourceProjectURI)
-	if rel == "" {
-		s.writeError(out, req.ID, -32602, "invalid resource URI: must start with "+resourceProjectURI)
-		return
-	}
-
+	rel := strings.TrimPrefix(uri, resourceProjectURI)
 	// SafeResolve, not SafeJoin: it also refuses symlinks pointing out of the
 	// sandbox and protected paths (credentials/system files), so an MCP client
 	// cannot reach through the resource API what the file tools refuse.
 	full, err := engine.SafeResolve(ctx, s.root, rel)
 	if err != nil {
-		s.writeError(out, req.ID, -32602, "access denied: "+err.Error())
-		return
+		return nil, "", fmt.Errorf("access denied: %s is outside the project or protected", rel)
 	}
 
 	// Regular files only, within a size cap: a FIFO blocked the server and a
@@ -490,22 +570,49 @@ func (s *Server) handleResourceRead(ctx context.Context, out *bufio.Writer, req 
 	fi, err := os.Stat(full)
 	switch {
 	case err != nil:
-		s.writeError(out, req.ID, -32602, "cannot read: "+err.Error())
-		return
+		return nil, "", fmt.Errorf("cannot read %s: %w", rel, pathlessError(err))
 	case !fi.Mode().IsRegular():
-		s.writeError(out, req.ID, -32602, "not a regular file: "+rel)
-		return
+		return nil, "", fmt.Errorf("not a regular file: %s", rel)
 	case fi.Size() > maxResourceBytes:
-		s.writeError(out, req.ID, -32602, fmt.Sprintf("file too large (%d bytes, limit %d): %s", fi.Size(), maxResourceBytes, rel))
-		return
+		return nil, "", fmt.Errorf("file too large (%d bytes, limit %d): %s", fi.Size(), maxResourceBytes, rel)
 	}
 	data, err := os.ReadFile(full)
 	if err != nil {
-		s.writeError(out, req.ID, -32602, "cannot read: "+err.Error())
-		return
+		return nil, "", fmt.Errorf("cannot read %s: %w", rel, pathlessError(err))
 	}
+	return data, mimeType(rel), nil
+}
 
-	s.writeResourceData(out, req.ID, p.URI, data, mimeType(rel))
+// pathlessError drops the absolute path an *fs.PathError carries ("open
+// /home/me/proj/x: no such file") and keeps the reason.
+func pathlessError(err error) error {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return pe.Err
+	}
+	return err
+}
+
+// broadRoot reports whether root is a filesystem root, the home folder or a
+// folder above it — after resolving symlinks: a root linked to / passed the
+// check made on its spelling.
+func broadRoot(root string) bool {
+	real := func(p string) string {
+		p = filepath.Clean(p)
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	root = real(root)
+	if filepath.Dir(root) == root {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	rel, err := filepath.Rel(root, real(home))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // maxResourceBytes caps one resources/read.
@@ -542,11 +649,6 @@ func mimeType(path string) string {
 	default:
 		return "text/plain"
 	}
-}
-
-// writeResourceResult sends a resources/read response with text contents.
-func (s *Server) writeResourceResult(out *bufio.Writer, id json.RawMessage, uri, text, mime string) {
-	s.writeResourceData(out, id, uri, []byte(text), mime)
 }
 
 // writeResourceData sends file contents: as "text" when they are UTF-8 text,
