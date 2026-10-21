@@ -140,6 +140,31 @@ func (cfg *PermissionConfig) Check(tool, absPath string) Level {
 // there. A variable so tests can exercise it on Linux.
 var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
 
+// policyName spells a slash-separated path the way the filesystem will
+// match it, so the protected-name checks see what the OS opens:
+//   - fold: the case-insensitive filesystems (APFS, NTFS) also fold a few
+//     non-ASCII letters onto ASCII ones — "ſ" (long s) onto "s" and the
+//     Kelvin sign onto "k" — so `.ſſh/id_rsa` opened ~/.ssh/id_rsa;
+//   - win: Win32 drops trailing dots and spaces of each name, so `.ssh./`,
+//     `.ouija.json.` and `.gitconfig ` opened the protected files.
+func policyName(p string, fold, win bool) string {
+	if fold {
+		// ſ (long s) and K (Kelvin) fold to s and k on macOS; NTFS upper-cases
+		// ı (dotless i) to I, and İ lowercases to i plus a combining dot.
+		p = strings.NewReplacer("\u017f", "s", "\u212a", "k", "\u0131", "i", "i\u0307", "i").Replace(strings.ToLower(p))
+	}
+	if win {
+		parts := strings.Split(p, "/")
+		for i, part := range parts {
+			if trimmed := strings.TrimRight(part, ". "); trimmed != "" && part != "." && part != ".." {
+				parts[i] = trimmed
+			}
+		}
+		p = strings.Join(parts, "/")
+	}
+	return p
+}
+
 // isProtectedPath checks whether a resolved absolute path is protected.
 // Protected paths can never be accessed even with Allow level.
 // Checks both filename patterns and directory components anywhere in the path.
@@ -147,14 +172,14 @@ func isProtectedPath(absPath string) bool {
 	// One separator on every OS: on Windows the file tools spell a path with
 	// "\" and the bash tool's POSIX shell with "/" — checking "\" alone let
 	// `cat ~/.config/ouija/config.json` and `~/.ssh/id_rsa` through there.
-	absPath = filepath.ToSlash(absPath)
-	if foldCase {
-		absPath = strings.ToLower(absPath)
-	}
+	absPath = policyName(filepath.ToSlash(longName(absPath)), foldCase, runtime.GOOS == "windows")
 	// ── Protected filenames (regardless of location) ────────────────
 	base := path.Base(absPath)
 	switch base {
-	case ".gitconfig", ".netrc", ".npmrc", ".dockercfg", ".dockerconfigjson":
+	case ".gitconfig", ".netrc", ".npmrc", ".dockercfg", ".dockerconfigjson",
+		".git-credentials", ".pgpass", ".pypirc", ".my.cnf", ".vault-token",
+		// SSH keys kept outside ~/.ssh (a key copied into a project).
+		"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519":
 		return true
 	// ouija's own project configs: they may hold an apiKey, and they grant
 	// permissions — a model that could rewrite them would grant its own.
@@ -167,6 +192,11 @@ func isProtectedPath(absPath string) bool {
 	// False positives (`.env.example`, a file named `.environment`) are
 	// accepted by design — the policy fails closed.
 	if strings.HasPrefix(base, ".env") {
+		return true
+	}
+	// Terraform state holds every secret the infrastructure was given, in
+	// plain text (terraform.tfstate, .backup, a workspace's copy).
+	if strings.HasSuffix(base, ".tfstate") || strings.HasSuffix(base, ".tfstate.backup") {
 		return true
 	}
 
@@ -183,6 +213,11 @@ func isProtectedPath(absPath string) bool {
 		return true
 	case dir == "/private/var/lib" || strings.HasPrefix(dir, "/private/var/lib/"):
 		return true
+	// Linux: /proc/<pid>/environ of ouija itself (or its parent shell) holds
+	// the API keys from the environment; /proc and /sys hold no source code.
+	case absPath == "/proc" || strings.HasPrefix(absPath, "/proc/"),
+		absPath == "/sys" || strings.HasPrefix(absPath, "/sys/"):
+		return true
 	}
 
 	// ── Protected directory names at ANY path level ─────────────────
@@ -192,7 +227,7 @@ func isProtectedPath(absPath string) bool {
 	// .azure (Azure auth), .ouija (config with optional apiKey).
 	// absPath is slash-separated by now (above), on every OS.
 	sep := "/"
-	if containsComponent(absPath, sep, ".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure", ".ouija") {
+	if containsComponent(absPath, sep, ".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure", ".ouija", ".password-store") {
 		return true
 	}
 	if containsComponentPair(absPath, sep, ".config", "gcloud") {
@@ -200,6 +235,27 @@ func isProtectedPath(absPath string) bool {
 	}
 	if containsComponentPair(absPath, sep, ".config", "kube") {
 		return true
+	}
+	// The GitHub CLI's token (.config/gh/hosts.yml), and a repository's
+	// .git/config: a remote URL may carry a token, and a written one runs
+	// code on the next git command (core.fsmonitor, core.hooksPath).
+	if containsComponentPair(absPath, sep, ".config", "gh") || containsComponentPair(absPath, sep, ".git", "config") ||
+		containsComponentPair(absPath, sep, ".git", "hooks") {
+		return true
+	}
+	// Package registries' and model hubs' tokens, inside tool directories
+	// whose other parts (caches, toolchains) the sandbox may read.
+	for _, pair := range [][2]string{
+		{".cargo", "credentials"}, {".cargo", "credentials.toml"},
+		{".m2", "settings.xml"}, {".m2", "settings-security.xml"},
+		{".gradle", "gradle.properties"}, {"huggingface", "token"},
+		{"uv", "credentials"}, {".docker", "config.json"}, {"etc", "npmrc"},
+		{"git", "credentials"}, {".terraform.d", "credentials.tfrc.json"}, {"rclone", "rclone.conf"},
+		{"share", "keyrings"},
+	} {
+		if containsComponentPair(absPath, sep, pair[0], pair[1]) {
+			return true
+		}
 	}
 	// ouija's global config: every provider's API key and the trusted-project
 	// list. Matched both as the literal `.config/ouija` and as the real

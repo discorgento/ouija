@@ -108,11 +108,31 @@ type SandboxConfig struct {
 	// Network is the TCP a confined command may use. Nil (the default) is
 	// none: no outgoing connection and no listening port.
 	Network *SandboxNetwork `json:"network,omitempty"`
+
+	// Optional marks the sandbox ouija turns on by itself, not one a config
+	// asked for: where the OS cannot confine a command, bash then runs
+	// unconfined instead of being refused (`ouija doctor` says which).
+	Optional bool `json:"-"`
+
+	// AllowUnsandboxed false forbids the escape hatch: a bash call with
+	// "unsandboxed": true, which runs outside the sandbox once the user
+	// approves that exact command. Nil (the default) allows it.
+	AllowUnsandboxed *bool `json:"allowUnsandboxed,omitempty"`
 }
 
+// UnsandboxedAllowed reports whether a bash call may ask to run outside sb.
+func (sb *SandboxConfig) UnsandboxedAllowed() bool {
+	return sb == nil || sb.AllowUnsandboxed == nil || *sb.AllowUnsandboxed
+}
+
+// DefaultSandbox is the bash sandbox when no config mentions one: on where
+// the OS can enforce it. `"sandbox": {"enabled": false}` turns it off.
+func DefaultSandbox() *SandboxConfig { return &SandboxConfig{Enabled: true, Optional: true} }
+
 // SandboxNetwork lists the TCP ports a confined command may use. Landlock
-// filters TCP by port, not by host, and does not filter UDP (so DNS lookups
-// still go out).
+// filters TCP by port, not by host. Since ABI v10 it filters UDP too: none by
+// default, DNS (UDP 53) once any TCP port is listed; older kernels do not
+// filter UDP at all.
 type SandboxNetwork struct {
 	Connect []uint16 `json:"connect,omitempty"` // ports it may connect to, e.g. 443
 	Bind    []uint16 `json:"bind,omitempty"`    // ports it may listen on

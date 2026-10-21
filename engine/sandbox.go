@@ -49,7 +49,7 @@ func resolve(ctx context.Context, root, p string) (string, error) {
 	if err != nil {
 		// Lexical escape — check for pre-approved escape in context
 		if escaped, _ := ctx.Value(escapeKey{}).(string); escaped != "" {
-			return escaped, nil
+			return approvedEscape(escaped, p)
 		}
 		return "", fmt.Errorf("path escapes the sandbox: %s", p)
 	}
@@ -57,7 +57,7 @@ func resolve(ctx context.Context, root, p string) (string, error) {
 	// The policy applies to where the path physically lands, not only to its
 	// name: a symlink inside the project (notes.txt → .env, cfg → .ouija)
 	// must not hand out what the lexical check protects.
-	if isProtectedPath(full) || isProtectedPath(physicalPath(full)) {
+	if isProtectedPath(full) || isProtectedFile(physicalPath(full)) {
 		return "", fmt.Errorf("path is protected (credentials/system files): %s", p)
 	}
 
@@ -72,6 +72,17 @@ func resolve(ctx context.Context, root, p string) (string, error) {
 	}
 
 	return full, nil
+}
+
+// approvedEscape returns the path the user approved leaving the project for,
+// unless it, or where it physically leads, is protected. The approval is
+// consent to that path, not to its target: a symlink there pointing at
+// ~/.ssh showed an innocent name in the prompt and handed out the key.
+func approvedEscape(escaped, asked string) (string, error) {
+	if isProtectedPath(escaped) || isProtectedFile(physicalPath(escaped)) {
+		return "", fmt.Errorf("path is protected (credentials/system files): %s", asked)
+	}
+	return escaped, nil
 }
 
 // SafeResolve is the exported form of resolve, for callers outside this
@@ -103,7 +114,7 @@ func resolveSymlinkEscape(ctx context.Context, root, full string) (string, error
 		if real := physicalPath(current); !within(rootAbs, real) {
 			// Symlink escape — check for pre-approved escape in context
 			if escaped, _ := ctx.Value(escapeKey{}).(string); escaped != "" {
-				return escaped, nil
+				return approvedEscape(escaped, current)
 			}
 			return "", fmt.Errorf("path escapes the project root (symlink): %s", current)
 		}

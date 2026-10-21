@@ -50,7 +50,7 @@ func walkFiles(ctx context.Context, rootAbs, base string, fn func(path, rel stri
 			}
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 || !d.Type().IsRegular() || isProtectedPath(p) {
+		if d.Type()&fs.ModeSymlink != 0 || !d.Type().IsRegular() || isProtectedFile(p) {
 			return nil
 		}
 		rel, _ := filepath.Rel(rootAbs, p)

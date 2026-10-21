@@ -109,6 +109,9 @@ func New(cfg EngineConfig) *Engine {
 		}
 		e.tools.sandbox = cfg.Config.Tools.Bash.Sandbox
 	}
+	if e.tools.sandbox == nil {
+		e.tools.sandbox = DefaultSandbox()
+	}
 	return e
 }
 
@@ -341,7 +344,40 @@ func (e *Engine) SaveConfigAt(path string) error {
 	e.mu.RUnlock()
 	c.ProjectRoot = "."
 	c.APIKey = apiKeyOnDisk(path, c.Provider)
+	// Likewise the bash sandbox: the running one is the global floor (or the
+	// default) merged in. Saved and trusted, it outlived the global setting
+	// — a loosened global stayed loosened in the project, an "off" stayed
+	// off after the user removed it.
+	if c.Tools != nil {
+		tools := *c.Tools
+		if tools.Bash != nil {
+			bash := *tools.Bash
+			bash.Sandbox = sandboxOnDisk(path)
+			tools.Bash = &bash
+		}
+		c.Tools = &tools
+	}
 	return c.Save(path)
+}
+
+// sandboxOnDisk returns the tools.bash.sandbox a config file declares, nil
+// when the file is missing, unreadable or has none.
+func sandboxOnDisk(path string) *SandboxConfig {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var f struct {
+		Tools struct {
+			Bash struct {
+				Sandbox *SandboxConfig `json:"sandbox"`
+			} `json:"bash"`
+		} `json:"tools"`
+	}
+	if json.Unmarshal(b, &f) != nil {
+		return nil
+	}
+	return f.Tools.Bash.Sandbox
 }
 
 // apiKeyOnDisk returns the apiKey a config file declares for provider, ""

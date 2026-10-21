@@ -117,10 +117,43 @@ func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolRes
 		return errSandboxEscape(fmt.Sprintf("refusing to delete outside sandbox via symlink: %s", p))
 	}
 
+	// A directory may hold protected files (app/.env): resolve only checked
+	// the directory's own path, and RemoveAll took them with it.
+	if held := protectedInside(full); len(held) > 0 {
+		return errPermissionDenied(fmt.Sprintf("refusing to delete %s: it holds protected files (%s)", p, strings.Join(held, ", ")))
+	}
 	if err := os.RemoveAll(full); err != nil {
 		return errInternal(fmt.Sprintf("delete %s: %v", p, err))
 	}
 	return ToolResult{Data: fmt.Sprintf("✓ deleted %s", p)}
+}
+
+// protectedInside lists (up to five) the protected entries under dir, relative
+// to it; nil for a file or a directory without any. WalkDir does not follow
+// symlinks, so a link inside is checked as the link, which RemoveAll removes
+// without touching its target.
+func protectedInside(dir string) []string {
+	var held []string
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return nil
+		}
+		// A nested repository's .git goes with it: its config and hooks are
+		// protected against being written, not against the whole clone
+		// being deleted.
+		if d.IsDir() && d.Name() == ".git" {
+			return fs.SkipDir
+		}
+		if isProtectedPath(path) {
+			rel, _ := filepath.Rel(dir, path)
+			held = append(held, rel)
+			if len(held) == 5 {
+				return fs.SkipAll
+			}
+		}
+		return nil
+	})
+	return held
 }
 
 // BuildDiffSnippet creates a unified diff snippet with context lines,

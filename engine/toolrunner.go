@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
 	"path/filepath"
 	"regexp"
@@ -131,12 +132,7 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	// Extract path from input when present (for permission path checks).
 	rawPath, _ := call.Input["path"].(string)
 
-	checkPath := rawPath
-	if rawPath != "" && !filepath.IsAbs(rawPath) && r.tools != nil {
-		if abs, err := filepath.Abs(filepath.Join(r.tools.Root(), rawPath)); err == nil {
-			checkPath = abs
-		}
-	}
+	checkPath := r.checkPathFor(rawPath)
 
 	_, isExtra := extraFns[call.Name]
 
@@ -145,6 +141,12 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 	// "the user will just approve it": they are hard rules, not suggestions.
 	if call.Name == "bash" {
 		if cmd, ok := call.Input["command"].(string); ok && cmd != "" {
+			// A shell cannot run a NUL byte, and one let a command's approval
+			// key spell another key ("bash\x00" + "unsandboxed\x00cat …").
+			if strings.ContainsRune(cmd, 0) {
+				span.SetError("NUL in command")
+				return errInvalidInput("bash: the command contains a NUL byte")
+			}
 			if IsDenied(cmd) {
 				span.SetError("denylist")
 				return ToolResult{Error: &ToolError{
@@ -164,6 +166,53 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 				}}
 			}
 		}
+	}
+
+	// ── Running outside the sandbox — always the user's call ────────
+	// Asked for every time (a session approval covers that exact command
+	// only), whatever the permission level or the allowlist says: those
+	// approve a command, not lifting the confinement it runs in.
+	if sb := sandboxOf(r.tools); call.Name == "bash" && call.Input["unsandboxed"] == true && sb != nil && sb.Enabled {
+		cmd, _ := call.Input["command"].(string)
+		// The permission level holds here too — deny, and allow's allowlist:
+		// lifting the sandbox is asked on top of the permission check, never
+		// instead of it.
+		if gate.permConfig != nil {
+			switch gate.permConfig.Check(call.Name, checkPath) {
+			case Deny:
+				span.SetError("denied by config")
+				return errRejected("tool '" + call.Name + "' was denied by permission config")
+			case Allow:
+				if r.allowlist.Restricts() && !r.allowlist.IsAllowed(cmd) {
+					span.SetError("not in allowlist")
+					return allowlistError()
+				}
+			}
+		}
+		if !sb.UnsandboxedAllowed() {
+			span.SetError("unsandboxed forbidden")
+			return errRejected("running bash outside the sandbox is turned off (sandbox.allowUnsandboxed: false); ask the user to allow what the command needs under tools.bash.sandbox")
+		}
+		if gate.approvalMgr == nil {
+			span.SetError("denied (no approval UI)")
+			return errRejected("running bash outside the sandbox requires the user's approval (no approval UI configured)")
+		}
+		approvalInput := maps.Clone(call.Input)
+		approvalInput["_preview"] = "⚠ runs OUTSIDE the bash sandbox: full access to your files and network\n" + r.tools.Preview(ctx, call)
+		// Its own key space: an ordinary bash approval ("bash\x00" + command,
+		// and a command holds no NUL) can never be this one.
+		result, aerr := gate.approvalMgr.Request(ctx, "bash\x00\x00unsandboxed\x00"+cmd, approvalInput)
+		if aerr != nil {
+			return errRejected(aerr.Error())
+		}
+		if !result.Allowed {
+			span.SetError("rejected by user")
+			return errRejected("The user REJECTED running this command outside the sandbox. Do not retry it unsandboxed; respond to the user in text instead.")
+		}
+		ctx = context.WithValue(ctx, unsandboxedKey{}, cmd)
+		res := r.tools.Run(ctx, call)
+		recordBashResult(span, res)
+		return res
 	}
 
 	// ── Permission check ──────────────────────────────────────────
@@ -210,8 +259,12 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					return ToolResult{Data: "✓ already applied via external editor"}
 				}
 				// Fresh human consent for this exact call: the allowlist does
-				// not get a second veto after the user said yes.
-				doom.ResetCount()
+				// not get a second veto after the user said yes. An answer from
+				// the session cache is not one: resetting there let an approved
+				// call repeat forever, past the doom-loop limit.
+				if !result.Cached {
+					doom.ResetCount()
+				}
 			}
 		case Allow:
 			// Unattended execution: the allowlist is the guard rail, since no
@@ -255,8 +308,8 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 }
 
 // bashExit matches the status bash appends to the output of a command that
-// failed ("[exit status 1]").
-var bashExit = regexp.MustCompile(`\[exit status (\d+)\]\s*$`)
+// failed ("[exit status 1]", or "[exit status 1; ran in the bash sandbox…]").
+var bashExit = regexp.MustCompile(`\[exit status (\d+)(?:; [^\]]*)?\]\s*$`)
 
 // maxSpanOutput bounds the output tail a bash span keeps for a UI.
 const (
@@ -317,6 +370,15 @@ func (r *ToolRunner) MayRun(def ToolDef, extra bool) bool {
 // allowlist (which requires a non-empty allowlist — an empty one means "no
 // commands pre-approved yet", NOT "everything approved": the Ask level still
 // prompts for each command).
+// sandboxOf is the bash sandbox of the engine's own tool registry, nil for
+// another registry (its bash, if any, is not this one).
+func sandboxOf(reg ToolRegistry) *SandboxConfig {
+	if t, ok := reg.(*Tools); ok {
+		return t.sandbox
+	}
+	return nil
+}
+
 func (r *ToolRunner) bashPreApproved(call ToolCall) bool {
 	if call.Name != "bash" || !r.allowlist.Restricts() {
 		return false
@@ -325,16 +387,52 @@ func (r *ToolRunner) bashPreApproved(call ToolCall) bool {
 	return cmd != "" && r.allowlist.IsAllowed(cmd)
 }
 
-// approvalSessionKey scopes "approve for session" to the tool's target:
-// the absolute path for file tools, the exact command for bash. Tools
-// without a target fall back to the bare tool name. The encoding (a null byte
-// between tool and target) matches the sandbox-escape approval, so the TUI can
-// split both keys the same way — a null byte cannot occur in a path.
+// checkPathFor is the path the permission check and the approval key use
+// for a call's raw "path": the one the file tools will touch. They join every
+// path, an absolute one included, under the project (SafeJoin); taking an
+// absolute path as is checked and keyed a different file than the one
+// written. A path that escapes is where the escape prompt says it lands.
+func (r *ToolRunner) checkPathFor(raw string) string {
+	if raw == "" || r.tools == nil {
+		return raw
+	}
+	if full, err := SafeJoin(r.tools.Root(), raw); err == nil {
+		return full
+	}
+	if abs, err := filepath.Abs(filepath.Join(r.tools.Root(), raw)); err == nil {
+		return abs
+	}
+	return raw
+}
+
+// approvalSessionKey scopes "approve for session" to the tool's target: the
+// absolute path for the built-in file tools, the exact command for bash, and
+// for every other tool its path and all its arguments, so approving one URL
+// does not approve the next. Only a call with no arguments at all is keyed by
+// the bare tool name. The encoding (the tool, a null byte, then the target)
+// matches the sandbox-escape approval, so the TUI reads the tool name the same
+// way from both — a null byte cannot occur in a tool name.
 func approvalSessionKey(tool, absPath string, input map[string]any) string {
 	disc := absPath
-	if tool == "bash" {
+	switch {
+	case tool == "bash":
 		if cmd, ok := input["command"].(string); ok {
 			disc = cmd
+		}
+	case !pathKeyedTools[tool]:
+		// Every other tool's approval covers its exact arguments, the path
+		// among them: an upload approved for one URL must not send the same
+		// file to another.
+		args := make(map[string]any, len(input))
+		for k, v := range input {
+			if k != "_preview" { // the engine's own metadata, not an argument
+				args[k] = v
+			}
+		}
+		if len(args) > 0 {
+			if b, err := json.Marshal(args); err == nil { // map keys come out sorted
+				disc = absPath + "\x00" + string(b)
+			}
 		}
 	}
 	if disc == "" {
@@ -342,6 +440,10 @@ func approvalSessionKey(tool, absPath string, input map[string]any) string {
 	}
 	return tool + "\x00" + disc
 }
+
+// pathKeyedTools are the built-in tools whose session approval covers a file,
+// whatever the change: "edit this file for the session" is the point.
+var pathKeyedTools = map[string]bool{"write_file": true, "edit_file": true, "delete_file": true}
 
 func allowlistError() ToolResult {
 	return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "command is not in the bash allowlist. " +
