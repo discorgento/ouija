@@ -567,6 +567,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
     <div class="prompt reveal"><span class="path">~</span><span class="sym">❯</span><span class="cmd">ouija setup</span></div>
     <h2 class="reveal">From zero to a séance in a minute</h2>
     <p class="sub reveal">ouija is a terminal program: "installed" means <code>ouija</code> is on your <code>PATH</code>.</p>
+    <img class="reveal" src="assets/install.gif" width="800" height="711" loading="lazy" style="width:100%;max-width:800px;height:auto;margin:0 auto 28px;border-radius:12px;box-shadow:0 40px 100px rgba(0,0,0,.55),0 0 0 1px rgba(139,92,246,.18)" alt="A real install: the curl command, the PATH and setup questions, the three setup steps with the model list searched for free models, then ouija opening the chat in a project">
     <div class="install">
       <fieldset class="pane hi reveal"><legend>install</legend>
         <div class="tabs" role="tablist">
@@ -579,7 +580,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 <span class="p">PS&gt; </span>irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
 
 <span class="cm"># then, in a new terminal</span>
-<span class="p">PS&gt; </span>ouija setup
+<span class="cm"># it offers to open the setup</span>
 <span class="p">PS&gt; </span>ouija</pre>
           <p class="note">installs to %LOCALAPPDATA%\Programs\ouija and adds it to PATH · the agent's bash tool needs <a href="https://gitforwindows.org">Git for Windows</a></p>
         </div>
@@ -587,7 +588,7 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
 <pre class="code"><button class="copy">copy</button><span class="cm"># no sudo: it goes to ~/.local/bin</span>
 <span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh
 
-<span class="p">$ </span>ouija setup
+<span class="cm"># it asks two questions, then opens the setup</span>
 <span class="p">$ </span>ouija</pre>
           <p class="note">checks the archive against SHA256SUMS · linux and macos, amd64 and arm64 · to install by hand, download an archive from the latest <a href="https://github.com/discorgento/ouija/releases/latest">GitHub Release</a></p>
         </div>
@@ -604,9 +605,9 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
       </fieldset>
       <fieldset class="pane reveal"><legend>3 steps</legend>
         <ol class="steps">
-          <li><span class="n">1</span><b>install</b> — pick your platform</li>
-          <li><span class="n">2</span><b>ouija setup</b> — add your API keys and pick a default provider and model</li>
-          <li><span class="n">3</span><b>cd your-project &amp;&amp; ouija</b> — then start chatting</li>
+          <li><span class="n">1</span><b>run the command</b> for your platform</li>
+          <li><span class="n">2</span><b>answer two questions</b>: add ouija to your PATH, and open the setup (provider, key, model)</li>
+          <li><span class="n">3</span><b>cd your-project &amp;&amp; ouija</b> and start chatting</li>
         </ol>
         <ul class="check">
           <li>pick <code>ollama</code> to run fully local and free</li>

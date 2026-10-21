@@ -24,6 +24,20 @@ so you install nothing by hand. They are the Charm stack for the TUI,
 the standard library. [Conventions](contribute.md#dependencies) gives the full
 list and the reason for each.
 
+## The quick way
+
+One command, then answer two questions (add ouija to `PATH`, run the setup):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh   # Linux, macOS
+irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex       # Windows
+```
+
+![A real install: the curl command, the PATH and setup questions, the three setup steps, then ouija opening the chat](../../assets/install.gif)
+
+The rest of this page explains what those scripts do, and how to install by
+hand or from source.
+
 ## Pre-built archives (no Go needed)
 
 CI builds every [GitHub Release](https://github.com/discorgento/ouija/releases).
