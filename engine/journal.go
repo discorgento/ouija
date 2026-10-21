@@ -28,6 +28,7 @@ var journaled = map[string]bool{"write_file": true, "edit_file": true, "delete_f
 type journalEntry struct {
 	rel     string      // as the tool was given it, for messages
 	full    string      // resolved inside the sandbox
+	real    string      // full with every symlink resolved, at snapshot time
 	existed bool        // false: the change created it
 	content []byte      // what it held (existed)
 	mode    fs.FileMode // its permissions (existed)
@@ -49,7 +50,7 @@ func (j *Journal) snapshot(ctx context.Context, root, rel string) int {
 	if err != nil {
 		return -1 // the tool will refuse it too
 	}
-	e.full = full
+	e.full, e.real = full, physicalPath(full)
 	switch fi, err := os.Lstat(full); {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
@@ -107,6 +108,11 @@ func (j *Journal) Undo() (string, error) {
 	switch {
 	case e.undoErr != "":
 		return "", fmt.Errorf("%s cannot be undone: %s", e.rel, e.undoErr)
+	case physicalPath(e.full) != e.real:
+		// A symlink planted since the snapshot (sandboxed bash can make one)
+		// would aim the write or the removal outside the project: ouija runs
+		// undo unsandboxed.
+		return "", fmt.Errorf("%s cannot be undone: it now points to %s, not where it was", e.rel, physicalPath(e.full))
 	case !e.existed:
 		if err := os.Remove(e.full); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", err

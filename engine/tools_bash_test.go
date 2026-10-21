@@ -756,3 +756,120 @@ func skipOnWindows(t *testing.T, why string) {
 		t.Skip(why)
 	}
 }
+
+// The names the first denylist missed, and a URL with a password under any
+// name.
+func TestSanitizeEnvFiltersMoreCredentials(t *testing.T) {
+	blocked := map[string]string{
+		"OPENROUTER_API_KEY": "sk-or",
+		"GROQ_KEY":           "gsk",
+		"STRIPE_KEY":         "sk_live",
+		"SSH_PRIVATE":        "-----BEGIN",
+		"PGPASSWD":           "x",
+		"SENTRY_DSN":         "https://k@sentry.io/1",
+		"DATABASE_URL":       "postgres://u@h/db",
+		"MY_DB":              "postgres://u:hunter2@h/db",
+		"GIT_REMOTE":         "https://x:ghp_abc@github.com/o/r",
+	}
+	for k, v := range blocked {
+		t.Setenv(k, v)
+	}
+	t.Setenv("GOPATH", "/home/u/go")
+	t.Setenv("DOCS_URL", "https://example.com/docs")
+	t.Setenv("MONKEY", "banana") // a "KEY" suffix without the underscore
+
+	got := map[string]bool{}
+	for _, kv := range sanitizeEnv() {
+		got[strings.SplitN(kv, "=", 2)[0]] = true
+	}
+	for k := range blocked {
+		if got[k] {
+			t.Errorf("%s reached bash", k)
+		}
+	}
+	for _, k := range []string{"GOPATH", "DOCS_URL", "MONKEY"} {
+		if !got[k] {
+			t.Errorf("%s was filtered out", k)
+		}
+	}
+}
+
+// A known credential format is filtered whatever the variable is called; an
+// ordinary value with a similar start is not.
+func TestSanitizeEnvFiltersSecretValues(t *testing.T) {
+	blocked := map[string]string{
+		"MY_LLM":  "sk-ant-api03-" + strings.Repeat("a", 40),
+		"OR":      "sk-or-v1-" + strings.Repeat("b", 40),
+		"GH":      "ghp_" + strings.Repeat("c", 36),
+		"GHFG":    "github_pat_" + strings.Repeat("d", 60),
+		"AWSID":   "AKIAABCDEFGHIJKLMNOP",
+		"SLACKY":  "xoxb-123456789012-abcdefghij",
+		"GOOG":    "AIza" + strings.Repeat("e", 35),
+		"SESSION": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.abc123",
+		"PEMDATA": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+	}
+	for k, v := range blocked {
+		t.Setenv(k, v)
+	}
+	kept := map[string]string{"SKIP": "sk-1", "LANG": "en_US.UTF-8", "TERM": "xterm-256color", "GOFLAGS": "-mod=mod"}
+	for k, v := range kept {
+		t.Setenv(k, v)
+	}
+	got := map[string]bool{}
+	for _, kv := range sanitizeEnv() {
+		got[strings.SplitN(kv, "=", 2)[0]] = true
+	}
+	for k := range blocked {
+		if got[k] {
+			t.Errorf("%s (a credential value) reached bash", k)
+		}
+	}
+	for k := range kept {
+		if !got[k] {
+			t.Errorf("%s was filtered out", k)
+		}
+	}
+}
+
+// The spellings the anchored match missed: padding, a prefix, a broken URL,
+// DSNs and more formats.
+func TestSanitizeEnvFindsSecretsInsideValues(t *testing.T) {
+	blocked := map[string]string{
+		"MYSQL_PWD": "hunter2",
+		"V1":        "postgres://u:p%zz@h/db",
+		"V2":        "u:pw@tcp(127.0.0.1:3306)/db",
+		"V3":        " postgres://u:pw@h/db",
+		"V4":        " sk-ant-api03-" + strings.Repeat("a", 40),
+		"V5":        "sk-ant-api03-" + strings.Repeat("a", 40) + "\n",
+		"V6":        "Bearer ghp_" + strings.Repeat("c", 36),
+		"V7":        "sk_live_" + strings.Repeat("d", 24),
+		"V8":        "https://hooks.slack.com/services/T0/B0/xyz",
+		"V9":        "https://0123456789abcdef0123456789abcdef@o1.ingest.sentry.io/1",
+	}
+	for k, v := range blocked {
+		t.Setenv(k, v)
+	}
+	kept := map[string]string{
+		"REGISTRY": "http://localhost:4873/@scope/pkg",
+		"TOOLDIR":  "/opt/sk-" + strings.Repeat("x", 30),
+		"PATH":     "/usr/bin:/home/u/sk-" + strings.Repeat("y", 30),
+		"WEB":      "https://example.com/docs",
+	}
+	for k, v := range kept {
+		t.Setenv(k, v)
+	}
+	got := map[string]bool{}
+	for _, kv := range sanitizeEnv() {
+		got[strings.SplitN(kv, "=", 2)[0]] = true
+	}
+	for k := range blocked {
+		if got[k] {
+			t.Errorf("%s=%q reached bash", k, blocked[k])
+		}
+	}
+	for k := range kept {
+		if !got[k] {
+			t.Errorf("%s=%q was filtered out", k, kept[k])
+		}
+	}
+}

@@ -46,6 +46,12 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		if ct.Fn == nil {
 			return nil, msgs, fmt.Errorf("extra tool %q has nil Fn", ct.Def.Name)
 		}
+		// The gate decides by name: an extra tool named like a built-in (or
+		// submit_result) would run under that tool's permission level and
+		// risk tier, whatever it really does.
+		if ct.Def.Name == SubmitTool || env.Tools.Has(ct.Def.Name) {
+			return nil, msgs, fmt.Errorf("extra tool %q uses a built-in tool's name: rename it", ct.Def.Name)
+		}
 	}
 
 	// Build the tool list the model sees: defaults + extras.
@@ -63,9 +69,6 @@ func (a *ReAct) Run(ctx context.Context, env RunEnv, req RunRequest, msgs []Mess
 		}
 	}
 	for _, ct := range req.ExtraTools {
-		if env.Tools.Has(ct.Def.Name) {
-			env.Logger.Warn("extra tool shadows built-in", "name", ct.Def.Name)
-		}
 		if env.mayRun(ct.Def, true) {
 			toolDefs = append(toolDefs, ct.Def)
 		}

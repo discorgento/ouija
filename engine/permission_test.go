@@ -99,6 +99,34 @@ func TestIsProtectedPath(t *testing.T) {
 		{"/project/.netrc", true},
 		{"/project/.gitconfig", true},
 
+		// Credentials the audit found readable over MCP resources/read.
+		{"/home/u/.git-credentials", true},
+		{"/home/u/.config/gh/hosts.yml", true},
+		{"/home/u/.pgpass", true},
+		{"/home/u/.pypirc", true},
+		{"/home/u/.my.cnf", true},
+		{"/project/.git/config", true},
+		{"/project/.git/hooks/pre-commit", true},
+		{"/project/.git/HEAD", false},
+		{"/project/backup/id_ed25519", true},
+		{"/project/infra/terraform.tfstate", true},
+		{"/project/infra/terraform.tfstate.backup", true},
+		{"/proc/self/environ", true},
+		{"/home/u/.cargo/credentials.toml", true},
+		{"/home/u/.m2/settings.xml", true},
+		{"/home/u/.gradle/gradle.properties", true},
+		{"/home/u/.cache/huggingface/token", true},
+		{"/home/u/.local/share/uv/credentials/x.json", true},
+		{"/home/u/.cargo/registry/index/x", false},
+		{"/home/u/.nvm/versions/node/v22/etc/npmrc", true},
+		{"/home/u/.config/git/credentials", true},
+		{"/home/u/.terraform.d/credentials.tfrc.json", true},
+		{"/home/u/.vault-token", true},
+		{"/home/u/.config/rclone/rclone.conf", true},
+		{"/home/u/.password-store/x.gpg", true},
+		{"/home/u/.local/share/keyrings/login.keyring", true},
+		{"/sys/kernel/notes", true},
+
 		// Protected directory names at ANY path level (absolute).
 		{"/workspace/.ssh/id_rsa", true},
 		{"/workspace/.gnupg/pubring.gpg", true},
@@ -128,8 +156,11 @@ func TestIsProtectedPath(t *testing.T) {
 		// files: ".dotenv" is a different first component (".dot").
 		{"/project/.dotenv", false},
 		{"/project/Documents/notes.txt", false},
-		{".ssh_backup/id_rsa", false}, // substring, not component
-		{"/project/.sshkeys", false},  // no trailing separator
+		{".ssh_backup/notes.txt", false}, // substring, not component
+		{"/project/.sshkeys", false},     // no trailing separator
+		{"/project/.github/config.yml", false},
+		{"/project/src/gh/main.go", false},
+		{"/project/procedures.md", false},
 		{"notprotected/file.txt", false},
 	}
 	for _, tc := range tests {
@@ -253,5 +284,39 @@ func TestProtectedPathFoldsCase(t *testing.T) {
 	}
 	if isProtectedPath("/p/README.md") {
 		t.Error("README.md protected")
+	}
+}
+
+// The running sandbox is the global floor merged in; saving must not write it
+// into the project file, where (trusted) it outlived the global setting.
+func TestSaveConfigAtKeepsTheProjectsOwnSandbox(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Tools = &ToolsConfig{Bash: &BashConfig{Allowlist: []string{"go"}, Sandbox: &SandboxConfig{
+		Enabled: true, Read: []string{"~/go"}, Network: &SandboxNetwork{All: true},
+	}}}
+	eng := New(EngineConfig{Provider: &mockProvider{}, Config: cfg, Tracer: NewTracer(false)})
+	dir := t.TempDir()
+
+	fresh := filepath.Join(dir, "fresh.json")
+	if err := eng.SaveConfigAt(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(fresh); strings.Contains(string(b), "sandbox") || !strings.Contains(string(b), `"go"`) {
+		t.Fatalf("a new project file got the running sandbox, or lost the allowlist: %s", b)
+	}
+
+	own := filepath.Join(dir, "own.json")
+	if err := os.WriteFile(own, []byte(`{"tools":{"bash":{"sandbox":{"enabled":true,"write":["build"]}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SaveConfigAt(own); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(own)
+	if !strings.Contains(string(b), `"build"`) || strings.Contains(string(b), `"all"`) || strings.Contains(string(b), "~/go") {
+		t.Fatalf("the project's own sandbox was not kept as it was: %s", b)
+	}
+	if sb := eng.Config().Tools.Bash.Sandbox; sb == nil || sb.Network == nil || !sb.Network.All {
+		t.Fatal("SaveConfigAt changed the running sandbox")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -32,8 +33,21 @@ const (
 // Timeout is 30s by default; the model can request longer via the timeout field.
 // Returns the combined output, trimmed to maxToolBytes.
 func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	before := gitGuardSnapshot(root)
-	res := execBash(ctx, root, in)
+	before, state := gitGuardSnapshot(root), captureGitState(root)
+	res, confined := execBash(ctx, root, in)
+	if confined {
+		// Confined means the user approved nothing outside the project:
+		// what the command left for git to run on its own is put back.
+		if undone := restoreGitState(root, state); len(undone) > 0 {
+			note := GitGuardMarker + " the sandboxed command changed what git runs on its own; ouija put back " +
+				strings.Join(undone, ", ")
+			if res.Error != nil {
+				res.Error.Message += "\n" + note
+			} else {
+				res.Data = strings.TrimSpace(res.Data + "\n\n" + note)
+			}
+		}
+	}
 	if notice := gitGuardNotice(root, before, gitGuardSnapshot(root)); notice != "" {
 		if res.Error != nil {
 			res.Error.Message += "\n" + notice
@@ -60,11 +74,12 @@ func posixShell() (string, error) {
 	return "", errors.New("no POSIX shell found — install Git for Windows (its sh.exe on PATH) to use the bash tool")
 }
 
-// execBash runs the command (see bashTool).
-func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
+// execBash runs the command (see bashTool) and reports whether the sandbox
+// confined it.
+func execBash(ctx context.Context, root string, in map[string]any) (res ToolResult, confined bool) {
 	command, _ := in["command"].(string)
 	if strings.TrimSpace(command) == "" {
-		return errInvalidInput("bash: command is required")
+		return errInvalidInput("bash: command is required"), confined
 	}
 
 	// Parse optional timeout (seconds).
@@ -83,17 +98,34 @@ func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 	defer cancel()
 
 	var cmd *exec.Cmd
-	if sb, ok := ctx.Value(sandboxKey{}).(*SandboxConfig); ok && sb.Enabled {
-		sandboxed, err := sandboxedShell(ctx, root, sb, command)
-		if err != nil {
-			// Fail closed: the user asked for a sandbox; never run unconfined.
-			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash sandbox: " + err.Error()}}
+	sb, _ := ctx.Value(sandboxKey{}).(*SandboxConfig)
+	if unsandboxed, _ := in["unsandboxed"].(bool); unsandboxed && sb != nil && sb.Enabled {
+		// Only the ToolRunner grants this, after the user approved this exact
+		// command; a call that reaches the tool any other way stays confined.
+		if approved, _ := ctx.Value(unsandboxedKey{}).(string); approved != command || !sb.UnsandboxedAllowed() {
+			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash: running outside the sandbox needs the user's approval of this exact command" +
+				", and the config can forbid it (sandbox.allowUnsandboxed)"}}, confined
 		}
-		cmd = sandboxed // its environment is sanitized too
-	} else {
+		sb = nil
+	}
+	if sb != nil && sb.Enabled {
+		sandboxed, err := sandboxedShell(ctx, root, sb, command)
+		switch {
+		case err == nil:
+			cmd, confined = sandboxed, true // its environment is sanitized too
+		case sb.Optional && errors.Is(err, errSandboxUnsupported):
+			// The default sandbox, on an OS that cannot enforce it: run as
+			// without one. A sandbox a config asked for never gets here.
+			sb = nil
+		default:
+			// Fail closed: never run unconfined what should be confined.
+			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash sandbox: " + err.Error() + sandboxOffHint}}, confined
+		}
+	}
+	if cmd == nil {
 		shell, err := posixShell()
 		if err != nil {
-			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash: " + err.Error()}}
+			return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "bash: " + err.Error()}}, confined
 		}
 		cmd = exec.CommandContext(ctx, shell, "-c", command)
 		cmd.Env = sanitizeEnv()
@@ -115,7 +147,7 @@ func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 	errOut := strings.TrimSpace(stderr.String())
 
 	if err != nil && ctx.Err() == context.DeadlineExceeded {
-		return ToolResult{Error: &ToolError{Code: ErrCodeTimeout, Message: fmt.Sprintf("bash: command timed out after %v", timeout)}}
+		return ToolResult{Error: &ToolError{Code: ErrCodeTimeout, Message: fmt.Sprintf("bash: command timed out after %v", timeout)}}, confined
 	}
 
 	// Both streams, also on failure: `go test` and `make` print what failed
@@ -127,12 +159,17 @@ func execBash(ctx context.Context, root string, in map[string]any) ToolResult {
 		// (no shell, no such file) is a tool error, not a "successful" result.
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
-			return ToolResult{Error: &ToolError{Code: ErrCodeInternal, Message: "bash: the command could not start: " + err.Error()}}
+			return ToolResult{Error: &ToolError{Code: ErrCodeInternal, Message: "bash: the command could not start: " + err.Error()}}, confined
 		}
 		status := fmt.Sprintf("exit status %d", exitErr.ExitCode())
-		return ToolResult{Data: trim(strings.TrimSpace(out + "\n[" + status + "]"))}
+		if sb != nil && sb.Enabled {
+			// A sandbox denial reads like any failure ("permission denied",
+			// "could not resolve host"): say what the command ran under.
+			status += "; " + sandboxNote(sb)
+		}
+		return ToolResult{Data: trim(strings.TrimSpace(out + "\n[" + status + "]"))}, confined
 	}
-	return ToolResult{Data: trim(cmp.Or(out, "(no output)"))}
+	return ToolResult{Data: trim(cmp.Or(out, "(no output)"))}, confined
 }
 
 // sanitizeEnv filters the parent process environment to remove credential-like
@@ -153,7 +190,24 @@ func sanitizeEnv() []string {
 			strings.HasPrefix(key, "OPENAI_"),
 			strings.HasPrefix(key, "ANTHROPIC_"),
 			strings.HasPrefix(key, "TOGETHER_"),
+			strings.HasPrefix(key, "OPENROUTER_"),
+			strings.HasPrefix(key, "GROQ_"),
+			strings.HasPrefix(key, "MISTRAL_"),
+			strings.HasPrefix(key, "DEEPSEEK_"),
+			strings.HasPrefix(key, "GEMINI_"),
+			strings.HasPrefix(key, "XAI_"),
+			strings.HasPrefix(key, "COHERE_"),
+			strings.HasPrefix(key, "HF_"),
 			strings.HasPrefix(key, "OUIJA_"):
+			return true
+		// FOO_KEY, STRIPE_KEY, a private key, a database DSN.
+		case strings.HasSuffix(key, "_KEY"),
+			strings.Contains(key, "PRIVATE"),
+			strings.Contains(key, "PASSWD"),
+			strings.HasSuffix(key, "_PASS"),
+			strings.HasSuffix(key, "_PWD"), // MYSQL_PWD
+			strings.HasSuffix(key, "_DSN"),
+			key == "DATABASE_URL":
 			return true
 		// Block vars with credential-like substrings in the key name.
 		case strings.Contains(key, "API_KEY"),
@@ -175,12 +229,61 @@ func sanitizeEnv() []string {
 		if eq < 0 {
 			continue
 		}
-		if isSensitive(strings.ToUpper(kv[:eq])) {
+		// PATH is kept whatever it holds: a bash without it runs nothing.
+		if k, v := kv[:eq], kv[eq+1:]; isSensitive(strings.ToUpper(k)) || k != "PATH" && secretValue.MatchString(v) {
 			continue
 		}
 		out = append(out, kv)
 	}
 	return out
+}
+
+// secretValue finds a well-known credential format anywhere in a value,
+// whatever the variable is called: the name denylist missed MY_LLM=sk-ant-….
+// Each token format has a fixed prefix and a long random tail, and must start
+// a word (" sk-…", "Bearer ghp_…" match; a path segment "/sk-tool" does not),
+// so ordinary values (a path, a version, "sk-1") do not match. The last
+// alternatives are credentials inside a URL or a DSN: a password in the user
+// part (parsed or not: postgres://u:p%zz@h is no valid URL, still a
+// password), a Go MySQL DSN, a Sentry key and a Slack webhook.
+var secretValue = regexp.MustCompile(`(?:^|[^A-Za-z0-9_/.-])(?:` + strings.Join([]string{
+	`sk-[A-Za-z0-9_-]{20,}`,                                        // OpenAI, Anthropic (sk-ant-), OpenRouter (sk-or-)
+	`[sr]k_live_[A-Za-z0-9]{20,}`,                                  // Stripe
+	`gh[pousr]_[A-Za-z0-9]{30,}`,                                   // GitHub tokens
+	`github_pat_[A-Za-z0-9_]{40,}`,                                 // GitHub fine-grained tokens
+	`glpat-[A-Za-z0-9_-]{20,}`,                                     // GitLab
+	`(?:AKIA|ASIA)[0-9A-Z]{16}`,                                    // AWS access key ids
+	`xox[abprs]-[A-Za-z0-9-]{10,}`,                                 // Slack
+	`AIza[0-9A-Za-z_-]{35}`,                                        // Google API keys
+	`npm_[A-Za-z0-9]{36}`,                                          // npm
+	`gsk_[A-Za-z0-9]{40,}`,                                         // Groq
+	`hf_[A-Za-z0-9]{30,}`,                                          // Hugging Face
+	`eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`, // a JWT
+	`-----BEGIN [A-Z ]*PRIVATE KEY-----`,                           // a PEM private key
+}, "|") + `)|[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]*:[^\s/@]+@|[^\s:/@]+:[^\s/@]+@(?:tcp|unix)\(|://[0-9a-f]{32}(?::[0-9a-f]{32})?@|hooks\.slack\.com/services/`)
+
+// unsandboxedKey carries, from the ToolRunner to the bash tool, the command
+// the user just approved to run outside the sandbox.
+type unsandboxedKey struct{}
+
+// sandboxOffHint tells the user how to run bash without the sandbox.
+const sandboxOffHint = ` (to run bash without the sandbox, set "tools": {"bash": {"sandbox": {"enabled": false}}} in the config)`
+
+// sandboxNote describes the sandbox a failed command ran in, for the model
+// and the user: what a denial looks like is otherwise a guess.
+func sandboxNote(sb *SandboxConfig) string {
+	net := "no network"
+	switch n := sb.Network; {
+	case n != nil && n.All:
+		net = "network open"
+	case n != nil && len(n.Connect) > 0:
+		net = fmt.Sprintf("TCP only to ports %v", n.Connect)
+	}
+	hint := "; if the sandbox blocked it, retry the same command with \"unsandboxed\": true (the user is asked)"
+	if !sb.UnsandboxedAllowed() {
+		hint = "; if the sandbox blocked it, ask the user to allow it under tools.bash.sandbox"
+	}
+	return "ran in the bash sandbox: writes only in the project and its private temp and cache, " + net + hint
 }
 
 // bashPreview generates a preview for a bash call — shows the command, a
@@ -238,6 +341,11 @@ func bashDef() toolEntry {
 				"timeout": map[string]any{
 					"type":        "number",
 					"description": "timeout in secs (max 120)",
+				},
+				"unsandboxed": map[string]any{
+					"type": "boolean",
+					"description": "run outside the bash sandbox. Only after the same command failed because the " +
+						"sandbox blocked it (network, a path outside the project); the user is asked every time",
 				},
 			}, "command"),
 		},
@@ -737,7 +845,7 @@ func commandRefsProtectedPathIn(root, cmd string) (string, bool) {
 			return c, true
 		}
 		if root != "" {
-			if p := physicalCandidate(root, c); p != "" && isProtectedPath(p) {
+			if p := physicalCandidate(root, c); p != "" && isProtectedFile(p) {
 				return c, true
 			}
 		}
@@ -745,7 +853,7 @@ func commandRefsProtectedPathIn(root, cmd string) (string, bool) {
 		// `cat ~/.ss?/id_rsa` and `cat .en?` open the files their patterns
 		// match, so every existing match is checked.
 		for _, m := range globMatches(root, c) {
-			if isProtectedPath(m) || isProtectedPath(physicalPath(m)) {
+			if isProtectedPath(m) || isProtectedFile(physicalPath(m)) {
 				return c, true
 			}
 		}

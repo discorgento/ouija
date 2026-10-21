@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -133,8 +132,8 @@ func TestBashSandboxExtraPaths(t *testing.T) {
 // Where the OS cannot confine the command, bash refuses instead of running
 // unconfined.
 func TestBashSandboxFailsClosed(t *testing.T) {
-	if runtime.GOOS == "linux" && sandboxAvailable() == nil {
-		t.Skip("sandbox available here; the fail-closed path is covered on other OSes")
+	if sandboxAvailable() == nil {
+		t.Skip("sandbox available here; the fail-closed path is covered where the OS has none")
 	}
 	tools := NewTools(t.TempDir())
 	tools.sandbox = &SandboxConfig{Enabled: true}
@@ -179,6 +178,266 @@ func TestCheckSandboxGrant(t *testing.T) {
 	} {
 		if err := checkSandboxGrant(path); (err == nil) != ok {
 			t.Errorf("checkSandboxGrant(%s) = %v, want ok=%v", path, err, ok)
+		}
+	}
+}
+
+// With no sandbox in any config, the engine turns the default one on.
+func TestEngineDefaultsToTheSandbox(t *testing.T) {
+	e := New(EngineConfig{Config: DefaultConfig()})
+	if sb := e.tools.sandbox; sb == nil || !sb.Enabled || !sb.Optional {
+		t.Fatalf("default sandbox = %+v, want enabled and optional", sb)
+	}
+	off := DefaultConfig()
+	off.Tools = &ToolsConfig{Bash: &BashConfig{Sandbox: &SandboxConfig{Enabled: false}}}
+	if sb := New(EngineConfig{Config: off}).tools.sandbox; sb == nil || sb.Enabled {
+		t.Fatalf("an explicit enabled:false was not kept: %+v", sb)
+	}
+}
+
+// The default sandbox on an OS that cannot enforce it runs bash unconfined;
+// a sandbox a config asked for is refused there instead.
+func TestOptionalSandboxFallsBack(t *testing.T) {
+	saved := checkSandbox
+	checkSandbox = func() error { return errSandboxUnsupported }
+	t.Cleanup(func() { checkSandbox = saved })
+
+	tools := NewTools(t.TempDir())
+	tools.sandbox = DefaultSandbox()
+	run := func() ToolResult {
+		return tools.Run(context.Background(), ToolCall{Name: "bash", Input: map[string]any{"command": "echo hi"}})
+	}
+	if res := run(); res.Error != nil || !strings.Contains(res.String(), "hi") {
+		t.Fatalf("default sandbox without OS support: %+v, want the command to run", res)
+	}
+	tools.sandbox = &SandboxConfig{Enabled: true}
+	if res := run(); res.Error == nil || res.Error.Code != ErrCodeNotAllowed {
+		t.Fatalf("asked-for sandbox without OS support: %+v, want a refusal", res)
+	}
+}
+
+// The default sandbox reads the toolchains in the home directory (~/go's
+// module cache, ~/.cargo's registry), never the credentials kept next to them;
+// and it writes to a private cache, never the user's real ones, which tools
+// run later outside the sandbox trust.
+func TestSandboxReachesHomeToolchainsNotCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	for p, body := range map[string]string{
+		"go/pkg/mod/m.txt":                  "MODULE",
+		".cargo/registry/index/r":           "REGISTRY",
+		".nvm/versions/node/v22/bin/node-x": "NODE",
+		".nvm/versions/node/v22/etc/npmrc":  "TOPSECRET",
+		".ssh/id_rsa":                       "TOPSECRET",
+		"Documents/x":                       "TOPSECRET",
+		".cargo/credentials.toml":           "TOPSECRET",
+		".cache/huggingface/token":          "TOPSECRET",
+		".m2/settings.xml":                  "TOPSECRET",
+		".gradle/gradle.properties":         "TOPSECRET",
+		".local/share/uv/credentials/c":     "TOPSECRET",
+		".cache/go-build/keep":              "",
+	} {
+		full := filepath.Join(home, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _, run := sandboxFixture(t, DefaultSandbox())
+	for p, want := range map[string]string{"go/pkg/mod/m.txt": "MODULE", ".cargo/registry/index/r": "REGISTRY", ".nvm/versions/node/v22/bin/node-x": "NODE"} {
+		if res := run("cat " + filepath.Join(home, p)); !strings.Contains(fmtData(res), want) {
+			t.Errorf("%s is not readable: %q", p, fmtData(res))
+		}
+	}
+	for _, p := range []string{".ssh/id_rsa", "Documents/x", ".cargo/credentials.toml", ".cache/huggingface/token", ".nvm/versions/node/v22/etc/npmrc",
+		".m2/settings.xml", ".gradle/gradle.properties", ".local/share/uv/credentials/c"} {
+		// A path built at run time: only the kernel can stop this one.
+		res := run(`f=$(printf '%s/%s' "` + home + `" "` + p + `"); cat "$f"`)
+		if strings.Contains(fmtData(res), "TOPSECRET") {
+			t.Errorf("%s was readable in the sandbox", p)
+		}
+	}
+	// The real caches are read-only; the private one, which GOCACHE and
+	// XDG_CACHE_HOME point to, is not.
+	run(`f=$(printf '%s/%s' "` + home + `" .cache/go-build/planted); echo x > "$f"`)
+	if _, err := os.Stat(filepath.Join(home, ".cache", "go-build", "planted")); err == nil {
+		t.Error("the user's real build cache was writable")
+	}
+	res := run(`mkdir -p "$GOCACHE" && echo ok > "$GOCACHE/x" && case "$GOCACHE" in "` + home + `/.cache/go-build"*) echo REAL;; esac; echo "$XDG_CACHE_HOME"`)
+	if s := fmtData(res); !strings.Contains(s, filepath.Join(home, ".cache", "ouija", "sandbox")) || strings.Contains(s, "REAL") {
+		t.Errorf("GOCACHE/XDG_CACHE_HOME are not the private cache: %q", s)
+	}
+	// TMPDIR is private too.
+	if res := run(`echo "$TMPDIR"`); !strings.Contains(fmtData(res), "ouija-sandbox-") {
+		t.Errorf("TMPDIR is not the private temp dir: %q", fmtData(res))
+	}
+}
+
+// The everyday commands work in the default sandbox: a profile missing a
+// system service (macOS) or a system directory (Linux) shows up here, not as
+// every user's bash failing.
+func TestSandboxRunsEverydayCommands(t *testing.T) {
+	project, _, run := sandboxFixture(t, DefaultSandbox())
+	if err := os.WriteFile(filepath.Join(project, "a.txt"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmds := []string{
+		"ls -la", "cat a.txt", "grep -n hello a.txt", "sed -n 1p a.txt", "find . -name a.txt",
+		"date", "uname -a", "env | head -n 1", "whoami", "mkdir -p d && touch d/x && rm -r d",
+		"echo x | sort | uniq | wc -l", "printf '%s' ok > out && cat out",
+		"echo err > /dev/stderr", "echo in | cat /dev/stdin",
+	}
+	if _, err := exec.LookPath("bash"); err == nil {
+		cmds = append(cmds, `bash -c 'cat <(echo substituted)'`) // opens /dev/fd/N
+	}
+	if _, err := exec.LookPath("git"); err == nil {
+		cmds = append(cmds, "git --version", "git init -q repo && git -C repo status --short")
+	}
+	for _, c := range cmds {
+		if res := run(c); res.Error != nil || strings.Contains(fmtData(res), "exit status") {
+			t.Errorf("%q failed in the sandbox: %s", c, fmtData(res))
+		}
+	}
+}
+
+// git in the sandbox commits under the user's name and email, though it
+// cannot read ~/.gitconfig.
+func TestSandboxedGitKeepsTheAuthor(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	saved := gitIdentity
+	gitIdentity = func() (string, string) { return "Ada Lovelace", "ada@example.com" }
+	t.Cleanup(func() { gitIdentity = saved })
+	_, _, run := sandboxFixture(t, DefaultSandbox())
+	res := run("git init -q r && git -C r commit -q --allow-empty -m x && git -C r log --format='%an <%ae>'")
+	if !strings.Contains(fmtData(res), "Ada Lovelace <ada@example.com>") {
+		t.Fatalf("sandboxed commit: %s", fmtData(res))
+	}
+}
+
+// "unsandboxed": true runs the command outside the sandbox only after the
+// user approves that exact command — whatever the permission level or the
+// allowlist — and never where the config forbids it or nobody can approve.
+func TestUnsandboxedNeedsTheUsersApproval(t *testing.T) {
+	if err := sandboxAvailable(); err != nil {
+		t.Skipf("no sandbox here: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "data"), []byte("OUTSIDE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := "cat " + filepath.Join(outside, "data")
+	newEngine := func(sb *SandboxConfig, answer *bool) (*Engine, *[]string) {
+		eng := newTestEngine(&mockProvider{}, t.TempDir())
+		eng.tools.sandbox = sb
+		perm := NewPermissionConfig(Allow) // bash would run unasked
+		eng.SetPermissionConfig(perm)
+		var asked []string
+		if answer != nil {
+			am := NewApprovalManager()
+			am.SetCallback(func(_ context.Context, key string, _ map[string]any) (ApprovalResult, error) {
+				asked = append(asked, key)
+				return ApprovalResult{Allowed: *answer}, nil
+			})
+			eng.SetApprovalManager(am)
+		}
+		return eng, &asked
+	}
+	call := ToolCall{Name: "bash", Input: map[string]any{"command": cmd, "unsandboxed": true}}
+	yes, no := true, false
+
+	// Confined, the command cannot read the file.
+	eng, _ := newEngine(DefaultSandbox(), &yes)
+	if res := eng.runner.Run(context.Background(), "t", ToolCall{Name: "bash", Input: map[string]any{"command": cmd}}, nil, nil); strings.Contains(res.String(), "OUTSIDE") {
+		t.Fatal("the sandbox did not confine the command")
+	}
+	// Approved: it runs outside, and the user was asked even under Allow.
+	res := eng.runner.Run(context.Background(), "t", call, nil, nil)
+	if !strings.Contains(res.String(), "OUTSIDE") {
+		t.Fatalf("approved unsandboxed run: %s", res.String())
+	}
+	eng, asked := newEngine(DefaultSandbox(), &yes)
+	eng.runner.Run(context.Background(), "t", call, nil, nil)
+	if len(*asked) != 1 || !strings.Contains((*asked)[0], "unsandboxed") {
+		t.Fatalf("asked = %q, want one unsandboxed prompt", *asked)
+	}
+	// Rejected, no approval UI, or forbidden by the config: it does not run.
+	forbid := false
+	for name, eng := range map[string]*Engine{
+		"rejected": func() *Engine { e, _ := newEngine(DefaultSandbox(), &no); return e }(),
+		"no UI":    func() *Engine { e, _ := newEngine(DefaultSandbox(), nil); return e }(),
+		"forbidden": func() *Engine {
+			e, _ := newEngine(&SandboxConfig{Enabled: true, AllowUnsandboxed: &forbid}, &yes)
+			return e
+		}(),
+	} {
+		if res := eng.runner.Run(context.Background(), "t", call, nil, nil); strings.Contains(res.String(), "OUTSIDE") {
+			t.Errorf("%s: ran outside the sandbox: %s", name, res.String())
+		}
+	}
+	// Straight to the tool, without the runner's approval: stays confined.
+	tools := NewTools(t.TempDir())
+	tools.sandbox = DefaultSandbox()
+	if res := tools.Run(context.Background(), call); strings.Contains(res.String(), "OUTSIDE") {
+		t.Fatal("the bash tool left the sandbox without an approval")
+	}
+}
+
+// An ordinary approval cannot be the escape's: a command spelling the escape
+// key ("unsandboxed\x00…") is refused before any prompt, and a deny level or
+// an allow level's allowlist holds for unsandboxed calls too.
+func TestUnsandboxedApprovalCannotBeBorrowed(t *testing.T) {
+	if err := sandboxAvailable(); err != nil {
+		t.Skipf("no sandbox here: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "data"), []byte("OUTSIDE"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := "cat " + filepath.Join(outside, "data")
+	eng := newTestEngine(&mockProvider{}, t.TempDir())
+	eng.tools.sandbox = DefaultSandbox()
+	perm := NewPermissionConfig(Ask)
+	eng.SetPermissionConfig(perm)
+	var asked []string
+	am := NewApprovalManager()
+	am.SetCallback(func(_ context.Context, key string, _ map[string]any) (ApprovalResult, error) {
+		asked = append(asked, key)
+		return ApprovalResult{Allowed: true, ForSession: true}, nil
+	})
+	eng.SetApprovalManager(am)
+	run := func(in map[string]any) string {
+		return eng.runner.Run(context.Background(), "t", ToolCall{Name: "bash", Input: in}, nil, nil).String()
+	}
+	if out := run(map[string]any{"command": "unsandboxed\x00" + cmd}); !strings.Contains(out, "NUL") {
+		t.Fatalf("a command with a NUL byte was not refused: %s", out)
+	}
+	if len(asked) != 0 {
+		t.Fatalf("a prompt was shown for it: %q", asked)
+	}
+	run(map[string]any{"command": cmd, "unsandboxed": true})
+	if len(asked) != 1 {
+		t.Fatalf("the unsandboxed run was not asked for on its own: %q", asked)
+	}
+
+	for name, perm := range map[string]*PermissionConfig{
+		"deny":            NewPermissionConfig(Deny),
+		"allow+allowlist": NewPermissionConfig(Allow),
+	} {
+		e := newTestEngine(&mockProvider{}, t.TempDir())
+		e.tools.sandbox = DefaultSandbox()
+		e.SetPermissionConfig(perm)
+		e.SetApprovalManager(am)
+		if name == "allow+allowlist" {
+			e.allowlist.Set([]string{"echo"})
+		}
+		res := e.runner.Run(context.Background(), "t", ToolCall{Name: "bash", Input: map[string]any{"command": cmd, "unsandboxed": true}}, nil, nil)
+		if strings.Contains(res.String(), "OUTSIDE") {
+			t.Errorf("%s: ran outside the sandbox: %s", name, res.String())
 		}
 	}
 }
