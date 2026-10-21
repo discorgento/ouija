@@ -29,10 +29,13 @@ ouija 1.2.3   # 0.0.0 for a build from source before the first release
 
 ### `ouija setup`
 
-Interactive wizard for the global config. Prompts for:
+Interactive wizard for the global config, in three steps:
 
-1. API keys per provider (not for Ollama, which needs none)
-2. Default provider and model
+1. The provider, each with a one-line description.
+2. That provider's API key, with the page to get one. Ollama needs no key, so
+   the wizard skips this step. With a key already saved, a blank field keeps it.
+3. The default model, listed from the provider's API with the key just typed.
+   Suggested models come first, marked ★; type `/` to search a long list.
 
 Writes the global config (`0600`): `~/.config/ouija/config.json` on Linux,
 `~/Library/Application Support/ouija/config.json` on macOS,

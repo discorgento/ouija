@@ -69,8 +69,9 @@ func Init(args []string) error {
 	selModel := huh.NewSelect[string]().
 		Title("Model").
 		OptionsFunc(func() []huh.Option[string] {
-			return modelOptions(ms, provider, cmp.Or(chosenKey(apiKey, origKey, provider, origProvider), global.APIKeys[provider]))
+			return providerModelOptions(ms, provider, cmp.Or(chosenKey(apiKey, origKey, provider, origProvider), global.APIKeys[provider]))
 		}, &provider).
+		Height(10).
 		Value(&model)
 
 	keyDesc := "Leave blank to use global key"

@@ -28,11 +28,19 @@ looks for **`.ouija/config.json`** first, then `.ouija.json`, then
 ouija setup
 ```
 
-The interactive wizard asks two groups of questions:
+The interactive wizard has three steps:
 
-1. **API keys** — one input per provider. Ollama runs locally, so it needs
-   no key and the wizard skips it.
-2. **Defaults** — your default provider and model.
+1. **Provider**: who runs the model. Each option says what it is; Ollama runs
+   on your computer, for free.
+2. **API key**: only for the provider you picked, with the page to get one.
+   Ollama needs no key, so the wizard skips this step. If a key is already
+   saved, leave the field blank to keep it.
+3. **Model**: your default model, listed from the provider's own API with the
+   key you just typed. Suggested models come first, marked ★, and `/` searches
+   a long list such as OpenRouter's.
+
+Keys you saved for other providers stay as they are; run the wizard again to
+switch providers or add another key.
 
 It saves your answers to `~/.config/ouija/config.json`:
 

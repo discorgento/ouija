@@ -29,24 +29,29 @@ func (ouijaTheme) Theme(_ bool) *huh.Styles {
 
 	// ─── Focused ─────────────────────────────────────────────────────
 	t.Focused.Base = lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(purple).
-		Padding(0, 1)
+		Padding(1, 2)
 
 	t.Focused.Title = lipgloss.NewStyle().
-		Foreground(purple).
-		Bold(true).
-		Padding(0, 1)
+		Foreground(white).
+		Bold(true)
 
 	t.Focused.Description = lipgloss.NewStyle().
-		Foreground(dim).
-		Italic(true).
-		Padding(0, 1)
+		Foreground(gray).
+		MarginBottom(1)
 
-	// Select
+	// Select: the highlighted row gets a band of color, like a menu.
 	t.Focused.SelectSelector = lipgloss.NewStyle().
 		Foreground(hotPink).
-		SetString("◆ ")
+		Bold(true).
+		SetString("▸ ")
+	t.Focused.SelectedOption = lipgloss.NewStyle().
+		Foreground(white).
+		Background(lipgloss.Color("#2d1f4f")).
+		Bold(true)
+	t.Focused.UnselectedOption = lipgloss.NewStyle().
+		Foreground(theme.Text)
 
 	t.Focused.SelectedPrefix = lipgloss.NewStyle().
 		Foreground(white).
@@ -72,21 +77,24 @@ func (ouijaTheme) Theme(_ bool) *huh.Styles {
 	t.Focused.TextInput.Placeholder = lipgloss.NewStyle().
 		Foreground(gray).
 		Italic(true)
+	t.Focused.TextInput.Prompt = lipgloss.NewStyle().
+		Foreground(hotPink).
+		Bold(true)
+	t.Focused.ErrorIndicator = lipgloss.NewStyle().Foreground(theme.Red).SetString(" ✗")
+	t.Focused.ErrorMessage = lipgloss.NewStyle().Foreground(theme.Red)
 
 	// ─── Blurred ────────────────────────────────────────────────────
 	t.Blurred.Base = lipgloss.NewStyle().
-		Border(lipgloss.DoubleBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(gray).
-		Padding(0, 1)
+		Padding(1, 2)
 
 	t.Blurred.Title = lipgloss.NewStyle().
-		Foreground(gray).
-		Padding(0, 1)
+		Foreground(gray)
 
 	t.Blurred.Description = lipgloss.NewStyle().
 		Foreground(gray).
-		Italic(true).
-		Padding(0, 1)
+		MarginBottom(1)
 
 	t.Blurred.SelectSelector = lipgloss.NewStyle().
 		Foreground(gray).
@@ -115,6 +123,13 @@ func (ouijaTheme) Theme(_ bool) *huh.Styles {
 	t.Blurred.TextInput.Placeholder = lipgloss.NewStyle().
 		Foreground(gray).
 		Italic(true)
+
+	// The step header above the box: "●●○  Step 2 of 3 · API key".
+	t.Group.Title = lipgloss.NewStyle().MarginLeft(2).MarginTop(1).MarginBottom(1)
+	t.Group.Description = lipgloss.NewStyle().Foreground(gray).MarginLeft(2)
+	t.Help.ShortKey = lipgloss.NewStyle().Foreground(purple)
+	t.Help.ShortDesc = lipgloss.NewStyle().Foreground(gray)
+	t.Help.ShortSeparator = lipgloss.NewStyle().Foreground(gray)
 
 	return t
 }
