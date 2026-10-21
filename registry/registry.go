@@ -64,6 +64,23 @@ type InputSchemer interface {
 	InputSchema() map[string]any
 }
 
+// Hints describe what a totem does to the project, for an MCP host deciding
+// whether to ask before calling it (the MCP tool annotations). They are hints
+// for the host, not a security boundary: the engine's gate still decides what
+// each tool call may do, whatever a totem claims.
+type Hints struct {
+	// ReadOnly: the totem changes nothing in the project (it may still call
+	// a model provider over the network).
+	ReadOnly bool
+}
+
+// Hinter is implemented by a totem that describes itself to MCP hosts. A
+// totem without it gets no annotations, which MCP hosts read as "may change
+// things": the cautious default.
+type Hinter interface {
+	Hints() Hints
+}
+
 // DefaultInputSchema is the input of a totem without InputSchema: a required
 // free-text task.
 func DefaultInputSchema() map[string]any {

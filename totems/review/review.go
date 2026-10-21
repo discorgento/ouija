@@ -28,6 +28,10 @@ func (t *Totem) Summary() string {
 	return "Review the branch's changes: find problems -> verify each one -> report what holds"
 }
 
+// Hints tells MCP hosts that a review changes nothing: it reads the diff and
+// the code, and only reports.
+func (t *Totem) Hints() registry.Hints { return registry.Hints{ReadOnly: true} }
+
 // InputSchema makes both inputs optional: `ouija review` alone reviews the
 // branch against main.
 func (t *Totem) InputSchema() map[string]any {
