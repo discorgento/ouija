@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/discorgento/ouija/engine"
@@ -26,8 +27,11 @@ import (
 
 // sensitiveKeys are the project-config keys applied only from a trusted file.
 // projectRoot is one: it moves the sandbox, and through a symlink in the repo
-// (src -> ~) it moved it onto the home directory without any prompt.
-var sensitiveKeys = []string{"permission", "tools", "apiKey", "systemPrompt", "projectRoot"}
+// (src -> ~) it moved it onto the home directory without any prompt. rules is
+// one too: it goes into the system message, like systemPrompt.
+// budget is one when it raises a ceiling above the default: untrusted, it is
+// clamped, and trusting the file lifts the clamp.
+var sensitiveKeys = []string{"permission", "tools", "apiKey", "systemPrompt", "rules", "budget", "projectRoot"}
 
 // FindProjectConfig returns the project config path discovery would load from
 // the current directory, "" when there is none.
@@ -98,11 +102,15 @@ func SensitiveKeys(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return sensitiveKeysIn(b)
+	global, _ := ouijaconfig.Load()
+	return sensitiveKeysIn(b, global)
 }
 
 // sensitiveKeysIn lists the sensitive keys a config file's contents set.
-func sensitiveKeysIn(b []byte) ([]string, error) {
+// provider and model count when they differ from the user's own defaults
+// (global): they decide which company gets the code and the key, and what
+// every token costs.
+func sensitiveKeysIn(b []byte, global *ouijaconfig.Config) ([]string, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return nil, err
@@ -113,7 +121,34 @@ func sensitiveKeysIn(b []byte) ([]string, error) {
 			out = append(out, k)
 		}
 	}
+	gp, gm := userDefaults(global)
+	if p := stringKey(raw, "provider"); p != "" && p != gp {
+		out = append(out, "provider")
+	}
+	if m := stringKey(raw, "model"); m != "" && m != gm {
+		out = append(out, "model")
+	}
 	return out, nil
+}
+
+// stringKey is raw's string value for k, matched without regard to case as
+// encoding/json does; "" when absent or not a string.
+func stringKey(raw map[string]json.RawMessage, k string) string {
+	for name, v := range raw {
+		var s string
+		if strings.EqualFold(name, k) && json.Unmarshal(v, &s) == nil {
+			return s
+		}
+	}
+	return ""
+}
+
+// userDefaults is the provider and model the user chose in `ouija setup`.
+func userDefaults(global *ouijaconfig.Config) (provider, model string) {
+	if global == nil {
+		return "", ""
+	}
+	return global.DefaultProvider(), global.DefaultModel()
 }
 
 // setsKey reports whether raw sets the sensitive key k. Keys match without
@@ -128,6 +163,19 @@ func setsKey(raw map[string]json.RawMessage, k string) bool {
 		if k == "projectRoot" { // `ouija init` writes "."; it moves nothing
 			var r string
 			if json.Unmarshal(v, &r) == nil && (r == "." || r == "./") {
+				continue
+			}
+		}
+		if k == "budget" { // only a budget above the defaults grants anything
+			var b engine.Budget
+			def := engine.DefaultConfig().Budget
+			if json.Unmarshal(v, &b) == nil && b.MaxTokens <= def.MaxTokens && b.MaxSteps <= def.MaxSteps {
+				continue
+			}
+		}
+		if k == "rules" { // `ouija init` writes the built-in rules
+			var r []string
+			if json.Unmarshal(v, &r) == nil && (len(r) == 0 || slices.Equal(r, engine.DefaultConfig().Rules)) {
 				continue
 			}
 		}
@@ -146,6 +194,9 @@ func setsKey(raw map[string]json.RawMessage, k string) bool {
 // path: an existing untrusted file that sets sensitive keys. Rewriting it
 // would either drop them or, by trusting the result, adopt them.
 func CheckWritable(path string) error {
+	if g := ouijaconfig.Path(); g != "" && trustKey(path) == trustKey(g) {
+		return fmt.Errorf("%s is the global config, not a project config: ouija does not rewrite it as one", path)
+	}
 	if _, err := os.Stat(path); err == nil && !IsTrusted(path) {
 		if keys, _ := SensitiveKeys(path); len(keys) > 0 {
 			return fmt.Errorf("%s is not trusted (sets %s) — review it with `ouija trust` before ouija rewrites it",
@@ -172,12 +223,23 @@ func SaveProjectConfig(path string, save func(string) error) error {
 
 // stripUntrusted clears the sensitive keys of a project config that was loaded
 // from an untrusted file.
-func stripUntrusted(c *engine.Config) {
+// An untrusted file may also lower the budget, never raise it: a clone that
+// set maxTokens to 1e12 spent the user's API key without a ceiling. And it
+// keeps the user's provider and model: switching them would send the code and
+// the user's key to another company, or to a model at many times the price.
+func stripUntrusted(c *engine.Config, global *ouijaconfig.Config) {
+	if gp, gm := userDefaults(global); c.Provider != "" && c.Provider != gp || c.Model != "" && c.Model != gm {
+		c.Provider, c.Model = "", "" // the global defaults apply
+	}
+	def := engine.DefaultConfig()
 	c.Permission = nil
 	c.Tools = nil
 	c.APIKey = ""
-	c.SystemPrompt = engine.DefaultConfig().SystemPrompt
+	c.SystemPrompt = def.SystemPrompt
+	c.Rules = def.Rules
 	c.ProjectRoot = "."
+	c.Budget.MaxTokens = min(c.Budget.MaxTokens, def.Budget.MaxTokens)
+	c.Budget.MaxSteps = min(c.Budget.MaxSteps, def.Budget.MaxSteps)
 }
 
 func digest(data []byte) string {

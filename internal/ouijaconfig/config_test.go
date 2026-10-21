@@ -224,3 +224,35 @@ func TestHasKey(t *testing.T) {
 		t.Error("HasKey(missing) = true, want false")
 	}
 }
+
+// Without an absolute config directory there is no global config: it used to
+// be the relative .config/ouija/config.json, which a cloned repository could
+// ship (trusting its own project config).
+func TestNoRelativeGlobalConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".config", "ouija"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".config", "ouija", "config.json"), []byte(`{"trustedProjects":{"x":"y"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, env := range map[string][2]string{"no HOME": {"", ""}, "relative XDG": {dir, "rel/cfg"}} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("HOME", env[0])
+			t.Setenv("XDG_CONFIG_HOME", env[1])
+			if runtime.GOOS != "linux" {
+				t.Skip("os.UserConfigDir reads HOME/XDG only on Linux")
+			}
+			if p := Path(); p != "" {
+				t.Fatalf("Path() = %q, want none", p)
+			}
+			if cfg, err := Load(); cfg != nil || err != nil {
+				t.Fatalf("Load() = %+v, %v; want no global config", cfg, err)
+			}
+			if err := Save(&Config{}); err == nil {
+				t.Fatal("Save wrote a relative global config")
+			}
+		})
+	}
+}

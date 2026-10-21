@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"cmp"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
+	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/internal/termsafe"
 )
 
@@ -87,10 +89,35 @@ func describeSensitive(key string, cfg *engine.Config) string {
 		b, _ := json.Marshal(cfg.Permission)
 		return string(b)
 	case "tools":
-		if cfg.Tools != nil && cfg.Tools.Bash != nil && len(cfg.Tools.Bash.Allowlist) > 0 {
-			return "bash allowlist: " + strings.Join(cfg.Tools.Bash.Allowlist, ", ")
+		if cfg.Tools == nil || cfg.Tools.Bash == nil {
+			return "(no bash settings)"
 		}
-		return "(no bash allowlist)"
+		var parts []string
+		if a := cfg.Tools.Bash.Allowlist; len(a) > 0 {
+			parts = append(parts, "bash allowlist: "+strings.Join(a, ", "))
+		}
+		if sb := cfg.Tools.Bash.Sandbox; sb != nil && sb.Enabled {
+			parts = append(parts, describeSandbox(sb))
+		} else if sb != nil {
+			parts = append(parts, "turns the bash sandbox off (a global sandbox still applies)")
+		}
+		if len(parts) == 0 {
+			return "(no bash allowlist)"
+		}
+		return strings.Join(parts, "; ")
+	case "provider", "model":
+		gp, gm := "", ""
+		if g, _ := ouijaconfig.Load(); g != nil {
+			gp, gm = g.DefaultProvider(), g.DefaultModel()
+		}
+		if key == "provider" {
+			return fmt.Sprintf("sends your code (and the key you saved for it) to %s instead of your default %s", cfg.Provider, cmp.Or(gp, "(none)"))
+		}
+		return fmt.Sprintf("uses model %s instead of your default %s — check what it costs", cfg.Model, cmp.Or(gm, "(none)"))
+	case "budget":
+		return fmt.Sprintf("raises the budget above the defaults: maxTokens %d, maxSteps %d", cfg.Budget.MaxTokens, cfg.Budget.MaxSteps)
+	case "rules":
+		return fmt.Sprintf("adds to the system message: %q", strings.Join(cfg.Rules, " | "))
 	case "apiKey":
 		return "overrides your API key for provider " + cfg.Provider
 	case "projectRoot":
@@ -103,4 +130,24 @@ func describeSensitive(key string, cfg *engine.Config) string {
 		return fmt.Sprintf("%q", p)
 	}
 	return ""
+}
+
+// describeSandbox says what an enabled project sandbox adds: the paths bash
+// may read and write beyond the project, and the network it may reach.
+func describeSandbox(sb *engine.SandboxConfig) string {
+	out := "bash sandbox"
+	if len(sb.Read) > 0 {
+		out += ", also reads " + strings.Join(sb.Read, ", ")
+	}
+	if len(sb.Write) > 0 {
+		out += ", also writes " + strings.Join(sb.Write, ", ")
+	}
+	switch n := sb.Network; {
+	case n == nil:
+	case n.All:
+		out += ", ANY network"
+	case len(n.Connect)+len(n.Bind) > 0:
+		out += fmt.Sprintf(", TCP connect %v bind %v", n.Connect, n.Bind)
+	}
+	return out
 }
