@@ -328,10 +328,21 @@ func backupFile(path string) error {
 		return err
 	}
 	bak := path + ".bak"
-	if _, err := os.Stat(bak); err == nil {
+	// Lstat and O_EXCL, not Stat and WriteFile: a dangling symlink planted at
+	// the .bak name made the copy land wherever it pointed. O_EXCL refuses
+	// any existing name, a symlink included, without following it.
+	if _, err := os.Lstat(bak); err == nil {
 		return nil // keep the first backup untouched
 	}
-	return os.WriteFile(bak, data, 0o600)
+	f, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func dirExists(path string) bool {
