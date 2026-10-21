@@ -14,7 +14,8 @@ param(
     [string]$Version = "latest",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\ouija"),
     [switch]$NoPath,
-    [switch]$NoPrompt # ask nothing (no setup); CI never asks
+    [switch]$NoPrompt, # ask nothing (no setup); CI never asks
+    [switch]$RequireProvenance # refuse to install unless the build provenance is verified (needs gh)
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,6 +80,29 @@ try {
     $got = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
     if ($got -ne $want) { throw "checksum mismatch for $($asset.name): got $got, want $want - not installed." }
     Write-Host "checksum ok"
+
+    # The checksum only proves the zip matches SHA256SUMS, and both come from
+    # the same release. The build provenance ties the zip to this repository's
+    # release workflow (Sigstore-signed by GitHub Actions): a swapped zip has
+    # none. Checking it needs the GitHub CLI, logged in or with a token.
+    $canVerify = $false
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        if ($env:GH_TOKEN -or $env:GITHUB_TOKEN) {
+            $canVerify = $true
+        } else {
+            & gh auth status *> $null
+            $canVerify = ($LASTEXITCODE -eq 0)
+        }
+    }
+    if ($canVerify) {
+        & gh attestation verify $archive --repo $repo *> $null
+        if ($LASTEXITCODE -ne 0) { throw "provenance check failed for $($asset.name): it was not built by $repo's release workflow - not installed." }
+        Write-Host "provenance ok (built by $repo's release workflow)"
+    } elseif ($RequireProvenance) {
+        throw "-RequireProvenance: the GitHub CLI (gh), logged in, is needed to verify the build provenance - not installed."
+    } else {
+        Write-Host "provenance not checked (with the GitHub CLI logged in, the installer verifies it: gh attestation verify <zip> --repo $repo)"
+    }
 
     # Extract (tar ships with Windows 10+ for the old .tar.gz).
     $out = Join-Path $tmp "x"

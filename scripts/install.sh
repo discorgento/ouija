@@ -9,6 +9,8 @@
 #   --version 0.2.0   a given release instead of the latest
 #   --dir DIR         where the binaries go (default ~/.local/bin)
 #   --no-prompt       ask nothing: no PATH change, no setup
+#   --require-provenance  refuse to install unless the archive's build
+#                     provenance is verified (needs gh, logged in)
 #
 # Nothing needs root: the folder is your user's. In a terminal it offers to
 # add the folder to your PATH and to run `ouija setup`; anywhere else (CI, a
@@ -19,6 +21,7 @@ repo="discorgento/ouija"
 version="latest"
 dir="${HOME}/.local/bin"
 prompt=yes
+require_provenance=no
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -27,7 +30,8 @@ while [ $# -gt 0 ]; do
         --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
         --dir=*) dir="${1#*=}"; shift ;;
         --no-prompt) prompt=no; shift ;;
-        -h|--help) sed -n '2,15p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --require-provenance) require_provenance=yes; shift ;;
+        -h|--help) sed -n '2,17p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -109,6 +113,22 @@ want=$(awk -v n="$name" '{ f = $2; sub(/^\*/, "", f); if (f == n) { print tolowe
 got=$(sha "$tmp/$name" | tr 'A-F' 'a-f')
 [ "$got" = "$want" ] || die "checksum mismatch for ${name}: got ${got}, want ${want} - not installed."
 say "checksum ok"
+
+# The checksum only proves the archive matches SHA256SUMS, and both come from
+# the same release. The build provenance ties the archive to this repository's
+# release workflow (Sigstore-signed by GitHub Actions): a swapped archive has
+# none. Checking it needs the GitHub CLI, logged in or with a token.
+if command -v gh >/dev/null 2>&1 && { [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || gh auth status >/dev/null 2>&1; }; then
+    if gh attestation verify "$tmp/$name" --repo "$repo" >/dev/null 2>&1; then
+        say "provenance ok (built by ${repo}'s release workflow)"
+    else
+        die "provenance check failed for ${name}: it was not built by ${repo}'s release workflow - not installed."
+    fi
+elif [ "$require_provenance" = yes ]; then
+    die "--require-provenance: the GitHub CLI (gh), logged in, is needed to verify the build provenance - not installed."
+else
+    say "provenance not checked (with the GitHub CLI logged in, the installer verifies it: gh attestation verify <archive> --repo ${repo})"
+fi
 
 mkdir -p "$tmp/x"
 tar -xzf "$tmp/$name" -C "$tmp/x" || die "could not extract ${name}."
