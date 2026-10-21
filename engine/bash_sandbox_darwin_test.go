@@ -20,7 +20,11 @@ func TestSeatbeltProfileKeepsPathsOutOfTheText(t *testing.T) {
 	if strings.Contains(profile, "allow default") {
 		t.Fatalf("a path reached the profile text:\n%s", profile)
 	}
-	if len(params) == 0 || params[0] != odd {
+	real, err := filepath.EvalSymlinks(odd) // Seatbelt sees /private/var, not /var
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(params) == 0 || params[0] != real {
 		t.Fatalf("params = %q, want the odd path first", params)
 	}
 }
