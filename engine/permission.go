@@ -267,10 +267,9 @@ func isProtectedPath(absPath string) bool {
 	// credentials in %AppData%\gcloud, not .config/gcloud).
 	if dir, err := os.UserConfigDir(); err == nil {
 		for _, name := range []string{"ouija", "gcloud"} {
-			g := filepath.ToSlash(filepath.Join(dir, name))
-			if foldCase {
-				g = strings.ToLower(g)
-			}
+			// Normalized like absPath: an 8.3 short name in the config dir
+			// (C:\Users\RUNNER~1\AppData) must meet the expanded path.
+			g := policyName(filepath.ToSlash(longName(filepath.Join(dir, name))), foldCase, runtime.GOOS == "windows")
 			if absPath == g || strings.HasPrefix(absPath, g+sep) {
 				return true
 			}

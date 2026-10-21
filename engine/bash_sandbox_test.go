@@ -266,8 +266,12 @@ func TestSandboxReachesHomeToolchainsNotCredentials(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".cache", "go-build", "planted")); err == nil {
 		t.Error("the user's real build cache was writable")
 	}
+	userCache, err := os.UserCacheDir() // ~/.cache, or ~/Library/Caches on macOS
+	if err != nil {
+		t.Fatal(err)
+	}
 	res := run(`mkdir -p "$GOCACHE" && echo ok > "$GOCACHE/x" && case "$GOCACHE" in "` + home + `/.cache/go-build"*) echo REAL;; esac; echo "$XDG_CACHE_HOME"`)
-	if s := fmtData(res); !strings.Contains(s, filepath.Join(home, ".cache", "ouija", "sandbox")) || strings.Contains(s, "REAL") {
+	if s := fmtData(res); !strings.Contains(s, filepath.Join(userCache, "ouija", "sandbox")) || strings.Contains(s, "REAL") {
 		t.Errorf("GOCACHE/XDG_CACHE_HOME are not the private cache: %q", s)
 	}
 	// TMPDIR is private too.

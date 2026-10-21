@@ -20,8 +20,8 @@ func TestSeatbeltProfileKeepsPathsOutOfTheText(t *testing.T) {
 	if strings.Contains(profile, "allow default") {
 		t.Fatalf("a path reached the profile text:\n%s", profile)
 	}
-	if len(params) != 1 {
-		t.Fatalf("params = %q", params)
+	if len(params) == 0 || params[0] != odd {
+		t.Fatalf("params = %q, want the odd path first", params)
 	}
 }
 
@@ -37,6 +37,7 @@ func TestSeatbeltRefusesEscapes(t *testing.T) {
 	}
 	for _, c := range []string{
 		"osascript -e 'return 42'",
+		`osascript -e 'tell application "Finder" to get name'`,
 		"open -g -a TextEdit",
 		`printf '#!/bin/sh\n' > .git/hooks/pre-commit`,
 		`printf '[core]\n' > .git/config`,
