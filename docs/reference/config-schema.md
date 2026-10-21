@@ -58,7 +58,7 @@ File permissions: `0600` (ouija tightens looser permissions on load).
 ```json
 {
   "provider": "openrouter",
-  "model": "qwen/qwen3-coder:free",
+  "model": "openrouter/free",
   "apiKey": "sk-alt-...",
   "permission": {
     "default": "ask",
