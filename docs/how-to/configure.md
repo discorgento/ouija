@@ -80,7 +80,7 @@ therefore also carries `maxNudges`, `budget` (`maxTokens`/`maxSteps`/`maxUSD`),
 ```json
 {
   "provider": "openrouter",
-  "model": "qwen/qwen3-coder:free"
+  "model": "openrouter/free"
 }
 ```
 

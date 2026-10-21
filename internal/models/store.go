@@ -71,15 +71,17 @@ func defaultModels() *ModelsFile {
 				},
 			},
 			"openrouter": {
+				// Free models come and go (every one listed here on 2026-10-19
+				// was gone by 2026-10-21); the setup lists the live ones, and
+				// these are only its fallback. openrouter/free routes to
+				// whatever free model is up, so it keeps working.
 				Label: "OpenRouter (free models)",
 				Models: map[string]ModelDef{
-					"poolside/laguna-m.1:free":     {Label: "Laguna M.1 (free)"},
-					"nvidia/nemotron-3-super:free": {Label: "Nemotron 3 Super (free)"},
-					"tencent/hy3-preview:free":     {Label: "Hy3 preview (free)"},
-					"qwen/qwen3-coder:free":        {Label: "Qwen 3 Coder (free)"},
-					"openrouter/owl-alpha":         {Label: "OWL Alpha (free)"},
-					"openai/gpt-oss-120b:free":     {Label: "GPT-OSS 120B (free)"},
-					"openrouter/free":              {Label: "OpenRouter Free (fallback)"},
+					"openrouter/free":                        {Label: "OpenRouter Free (routes to a free model)"},
+					"minimax/minimax-m3.1-flash:free":        {Label: "MiniMax M3.1 Flash (free)"},
+					"nvidia/nemotron-3-ultra-550b-a55b:free": {Label: "Nemotron 3 Ultra (free)"},
+					"google/gemma-4-26b-a4b-it:free":         {Label: "Gemma 4 26B (free)"},
+					"poolside/laguna-s-2.1:free":             {Label: "Laguna S 2.1 (free)"},
 				},
 			},
 			"opencode": {
