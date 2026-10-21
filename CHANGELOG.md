@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/discorgento/ouija/compare/v0.4.0...v0.5.0) (2026-10-21)
+
+
+### Features
+
+* **install:** offer to fix PATH and run setup after installing ([04746bb](https://github.com/discorgento/ouija/commit/04746bb51ef5f542fb1cd9ce4bab936f7ba4b5db))
+* **setup:** a three-step wizard that checks the key ([a6a906e](https://github.com/discorgento/ouija/commit/a6a906ed666d3d05aff857efc60ae10954b2c5fc))
+* **setup:** open the wizards with the planchette spelling the name ([6d64a36](https://github.com/discorgento/ouija/commit/6d64a366a0374aa99272f7037a9f6896fd2c7fb9))
+* **setup:** search a long model list as you type, free models first ([30d3b1e](https://github.com/discorgento/ouija/commit/30d3b1e14a923dd848d586b7a7b5e6197aed862b))
+
 ## [0.4.0](https://github.com/discorgento/ouija/compare/v0.3.0...v0.4.0) (2026-10-20)
 
 
