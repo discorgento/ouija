@@ -196,8 +196,10 @@ start programs outside the sandbox), the Docker socket, other terminals' ttys
 writes to what git runs on its own in the project: `.git/hooks`,
 `.git/config`, `commondir`, `config.worktree`, `modules/` and `worktrees/`.
 `.git` itself cannot be moved or created there (`mv .git g` would carry the
-hooks past those rules), so `git init` of the project itself needs an
-unsandboxed run.
+hooks past those rules), so on macOS `git init` of the project itself, and
+commands that write its git config (`git remote add`, `git config`), need an
+approved unsandboxed run. `open`, `osascript` and `osacompile` cannot run at
+all.
 
 When the sandbox blocks a command the user needs (a download, a file outside
 the project), the model retries it with `"unsandboxed": true`, and the user

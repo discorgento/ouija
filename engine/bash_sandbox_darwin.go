@@ -131,6 +131,7 @@ const seatbeltNet = `(allow system-socket (socket-domain AF_UNIX))
 // through a read-only descriptor, past file-write* (Codex denies them too).
 const seatbeltDeny = `(deny lsopen)
 (deny appleevent-send)
+(deny process-exec (literal "/usr/bin/open") (literal "/usr/bin/osascript") (literal "/usr/bin/osacompile"))
 (deny network-outbound (literal "/var/run/docker.sock") (literal "/private/var/run/docker.sock") (regex #"/\.docker/run/docker\.sock$") (regex #"/\.colima/.*\.sock$") (regex #"/\.orbstack/run/.*\.sock$"))
 (deny system-fcntl (fcntl-command 80 110))
 `

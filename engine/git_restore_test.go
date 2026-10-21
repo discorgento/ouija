@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -37,6 +38,12 @@ func TestConfinedCommandCannotPlantGitCode(t *testing.T) {
 	cfg, _ := os.ReadFile(filepath.Join(project, ".git", "config"))
 	if strings.Contains(string(cfg), "fsmonitor") || strings.Contains(string(cfg), "sh -c x") {
 		t.Errorf("a planted config entry survived:\n%s", cfg)
+	}
+	if runtime.GOOS == "darwin" {
+		// Seatbelt refuses those writes outright, ordinary config changes
+		// included (they need an approved unsandboxed run there); nothing
+		// is left to put back.
+		return
 	}
 	if !strings.Contains(fmtData(res), "ouija put back") {
 		t.Errorf("the result does not say what was put back: %s", fmtData(res))
