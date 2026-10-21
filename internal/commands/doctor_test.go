@@ -171,3 +171,40 @@ func TestDoctor_RefusedKey(t *testing.T) {
 		t.Fatalf("Doctor() = %v; want the refused key reported\n%s", err, buf.String())
 	}
 }
+
+// The safety section says whether bash runs confined, and how to turn that on
+// where the machine can enforce it; a sandbox the global config enables shows
+// as on, in every project.
+func TestDoctor_Sandbox(t *testing.T) {
+	configDir := isolateDoctor(t)
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write := func(extra string) string {
+		t.Helper()
+		cfg := `{"apiKeys":{"opencode":"sk-test"},"defaults":{"provider":"opencode","model":"big-pickle"}` + extra + `}`
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), []byte(cfg), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var buf bytes.Buffer
+		_ = Doctor(&buf)
+		return ansi.Strip(buf.String())
+	}
+	avail := engine.SandboxAvailable()
+
+	off := write("")
+	switch {
+	case avail == nil && !strings.Contains(off, "bash sandbox     off — this machine supports it"):
+		t.Errorf("sandbox off on a machine that supports it:\n%s", off)
+	case avail != nil && !strings.Contains(off, "not available here"):
+		t.Errorf("sandbox on a machine without it:\n%s", off)
+	}
+
+	on := write(`,"sandbox":{"enabled":true}`)
+	switch {
+	case avail == nil && !strings.Contains(on, "bash sandbox     on — Landlock confines every command (TCP closed)"):
+		t.Errorf("global sandbox on:\n%s", on)
+	case avail != nil && !strings.Contains(on, "cannot enforce it"):
+		t.Errorf("global sandbox on, machine without it:\n%s", on)
+	}
+}

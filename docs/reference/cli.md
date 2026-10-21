@@ -90,8 +90,9 @@ into the `task` totem's scout (the agent that first surveys the code).
 ### `ouija doctor`
 
 Checks the local setup: binary location, global and project config files,
-resolved provider/model, API key presence, registered totems, and harness
-registration status.
+resolved provider/model, API key presence, whether the bash sandbox is on (and
+how to turn it on where the machine supports it), registered totems, and
+harness registration status.
 
 ```sh
 ouija doctor
