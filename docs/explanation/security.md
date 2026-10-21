@@ -37,10 +37,22 @@ ouija finds a project config (`.ouija/config.json`, `.ouija.json`,
 `ouija.json`) by walking up from the working directory, so the file may come
 from a repository someone else wrote. Until you run `ouija trust` in the
 project, ouija ignores the file's security-sensitive keys and prints a warning.
-These keys are `permission`, `tools` (the bash allowlist), `apiKey`, a
-non-default `systemPrompt`, and a `projectRoot` other than `.` (which moves the
-sandbox). Capitalization does not matter: `"Permission"` counts as
-`"permission"`.
+These keys are `permission`, `tools` (the bash allowlist and sandbox),
+`apiKey`, a non-default `systemPrompt`, non-default `rules` (they go into the
+system message too), and a `projectRoot` other than `.` (which moves the
+sandbox). A `provider` or `model` other than the ones you chose in
+`ouija setup` counts too: it decides which company gets your code and your
+key, and what each token costs, so an untrusted file keeps yours. So does a
+`budget` above the defaults: an untrusted file may lower the token and step
+budget but never raise it. Capitalization does not matter: `"Permission"`
+counts as `"permission"`. `ouija trust` prints each key's effect,
+including the paths and network a sandbox section opens.
+
+ouija refuses a discovered config whose real file lies outside the directory
+it was found in: a repository could otherwise ship `.ouija.json` as a symlink
+to a project you trusted (borrowing its trust) or to the global config (which a
+chat save would then overwrite). ouija never rewrites the global config as a
+project config.
 
 ouija records trust as the file's SHA-256 hash in the global config, itself a
 protected path, so any change to the file invalidates the trust.
@@ -48,10 +60,11 @@ protected path, so any change to the file invalidates the trust.
 chat saves) are trusted automatically, and ouija never rewrites an untrusted
 file that sets those keys.
 
-The bash sandbox is the exception that goes the other way: enabled in the
-global config (`"sandbox": {"enabled": true}`), it applies to every project,
-trusted or not, and no project config can turn it off. A trusted project can
-only add the paths and ports it needs. `ouija doctor` shows whether it is on.
+The bash sandbox is the exception that goes the other way. It is on by
+default where the OS supports it, and enabled in the global config
+(`"sandbox": {"enabled": true}`) it applies to every project, trusted or not,
+and no project config can turn it off. A trusted project can only add the
+paths and ports it needs. `ouija doctor` shows whether it is on.
 
 Without this check, cloning a repository that commits
 `{"permission":{"default":"allow"}}` would give a prompt-injected model
@@ -61,8 +74,11 @@ an account the repository's author controls.
 ## Layer 2: Protected paths (always denied)
 
 Some paths are **always blocked**, whatever the permission level: `/etc/*`,
-`/var/lib/*`, `.env*`, `.netrc`, `.gitconfig`, `.ssh/*`, `.gnupg/*`, `.aws/*`,
-`.ouija/*`, `.ouija.json`, `ouija.json`, ouija's global config
+`/var/lib/*`, `/proc/*`, `/sys/*`, `.env*`, `.netrc`, `.gitconfig`,
+`.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`, SSH keys by name
+(`id_rsa`, `id_ed25519`, …) anywhere, `*.tfstate`, `.git/config`, `.ssh/*`,
+`.gnupg/*`, `.aws/*`, `.config/gh/*`, `.ouija/*`, `.ouija.json`, `ouija.json`,
+ouija's global config
 (`~/.config/ouija/*`, that is `os.UserConfigDir()/ouija`, which holds every API
 key and the trusted-project list), `.config/gcloud/*`, and similar sensitive
 locations. Directories match exactly: `/etc` matches `/etc` but not
@@ -91,7 +107,7 @@ too.
 The bash scan reads the command's words as text, so it cannot see a path that
 the command builds while it runs (`cat "$(printf ~/.ss)h/id_rsa"`). Under `ask`
 you see that command in full before it runs. The boundary that holds, whatever
-the command computes, is the [OS sandbox](#os-sandbox-opt-in).
+the command computes, is the [OS sandbox](#os-sandbox).
 
 ## Layer 3: Permission config
 
@@ -150,48 +166,90 @@ static (`echo $(whoami)`) adds nothing. A plain **Yes** runs the command once
 and saves nothing. A `sync.RWMutex` makes the allowlist safe for concurrent
 use.
 
-### OS sandbox (opt-in)
+### OS sandbox
 
 The checks above read the command's *text*, and no reading of text can see a
-path built at run time (`cat $(printf '.%s' env)`). With
-`tools.bash.sandbox.enabled`, the kernel enforces the boundary instead. Each
-command runs in a re-executed copy of the ouija binary, which confines itself
-with Linux Landlock and then execs the shell. The confined process can write
-only inside the project and the temp dir, and read only system directories,
-the project and the paths the config lists. Every process it starts inherits
-the confinement, and none can lift it.
+path built at run time (`cat $(printf '.%s' env)`). The OS sandbox, on by
+default where the OS supports it, has the kernel enforce the boundary instead.
+On Linux each command runs in a re-executed copy of the ouija binary, which
+confines itself with Landlock and then execs the shell; on macOS it runs under
+a Seatbelt profile (`sandbox-exec`) whose paths are passed as parameters, never
+spliced into the profile's text. The confined process can write only inside
+the project, a private temp dir and a private build cache, and read only
+system directories, the project, the parts of the home toolchains builds read
+(`~/go/pkg/mod`, `~/.cargo/registry`, `~/.nvm/versions`, …, never the
+credential files next to them) and the paths the config lists. Every process
+it starts inherits the confinement, and none can lift it. On Windows there is
+no sandbox: bash asks before every command.
+
+The design follows what the other coding agents do (OpenAI Codex, Claude
+Code's sandbox-runtime, Cursor, Gemini CLI), and is stricter on reads: they
+read the whole disk and deny a list of secrets, ouija reads only what it
+lists. As in Cursor, build caches are private: the user's real caches are
+read-only, because tools run later outside the sandbox trust them (go build
+reuses a cached object, npx and pre-commit run cached code), and a writable
+one would let a confined command plant code that escapes it. On macOS the
+Seatbelt profile grants only the system services and sysctls Codex grants,
+denies LaunchServices and Apple events (through them `open` and `osascript`
+start programs outside the sandbox), the Docker socket, other terminals' ttys
+(their keystrokes), the fcntls that write through a read-only descriptor, and
+writes to what git runs on its own in the project: `.git/hooks`,
+`.git/config`, `commondir`, `config.worktree`, `modules/` and `worktrees/`.
+`.git` itself cannot be moved or created there (`mv .git g` would carry the
+hooks past those rules), so `git init` of the project itself needs an
+unsandboxed run.
+
+When the sandbox blocks a command the user needs (a download, a file outside
+the project), the model retries it with `"unsandboxed": true`, and the user
+approves that exact command in a prompt that says it runs outside the
+sandbox. The permission level and the allowlist never skip that prompt, and
+without someone to answer it (MCP, CI) the call is refused.
+`"allowUnsandboxed": false` removes the escape hatch.
 
 The read grants leave out `/proc` (other processes' environments) and `/run`
 (ssh-agent and docker sockets) on purpose. The sandbox also confines
 connections to Unix sockets outside the granted paths (an ssh-agent or tmux
 socket under `/tmp`), connections to abstract Unix sockets (an X11 display),
 and signals to processes outside the sandbox. Those confinements need Landlock
-ABI v9; on an older kernel the sockets would stay reachable. So if the sandbox
-is enabled but cannot be enforced (not Linux, or Landlock older than ABI v9),
-bash refuses to run. ouija also refuses a grant that would cover a credential
+ABI v9; on an older kernel the sockets would stay reachable. So if a config
+enables the sandbox and it cannot be enforced (Windows, or Landlock older than
+ABI v9), bash refuses to run; the default sandbox, which no config asked for,
+falls back to running bash unconfined there, and `ouija doctor` warns. ouija also refuses a grant that would cover a credential
 directory: the home directory, `~/.config`, `/`, or a project root at one of
 those locations.
 
 TCP is closed by default too: a confined command can neither connect (not even
 to `localhost`) nor listen, so it cannot send the project's code anywhere
 over TCP. A project opens the ports it needs (`network.connect`, e.g. `443`
-for downloads, or `network.bind` for a dev server). Landlock filters by port,
-not by host, so an open port is open to every server; and it does not filter
-UDP, so a DNS query can still carry data out. See
+for downloads, or `network.bind` for a dev server). The filter is by port, not
+by host, so an open port is open to every server. Since Landlock ABI v10 UDP
+is filtered as well: a closed sandbox sends no DNS query either (no data out
+through DNS), and opening any TCP port opens DNS (UDP 53) with it, no other
+UDP port. On a kernel with ABI v9, UDP is not filtered, so a DNS query can
+still carry data out. See
 [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
 
 A boundary scoped to the project does **not** cover the following, by design:
 
+- **Network filtering is by TCP port, not by domain.** The other agents send
+  traffic through a proxy with a domain allowlist; ouija does not have one yet,
+  so `network.connect: [443]` opens HTTPS to every server.
 - **The project itself is readable and writable**, its `.env` files included.
   The protected-path checks above still refuse commands that name them, but
   code that builds the path at run time can read them. Keep real secrets out of
   the repository, or out of the sandbox's reach.
-- **`.git` is writable**, so a command can plant a hook or a `core.fsmonitor`
-  setting that runs, unconfined, the next time *you* run git there. (Landlock
-  cannot carve a read-only subtree out of a writable one.) ouija fingerprints
-  `.git/hooks` and `.git/config` around every bash command, sandboxed or not.
-  When one changes, the tool result says so and the chat shows a **git guard**
-  banner: review the change before you run git in that project.
+- **On Linux, `.git` is writable** while the command runs: Landlock cannot
+  carve a read-only subtree out of a writable one (on macOS, Seatbelt denies
+  those writes). So after every confined command ouija puts back what git runs
+  on its own: a hook the command added or changed is removed or restored, and
+  if it added a config entry that runs a command (`core.fsmonitor`,
+  `core.hooksPath`, `core.sshCommand`, a `!` alias, a filter, a credential
+  helper, an `include`, …) the whole `.git/config` goes back to how it was.
+  The result names what was put back. Other commands, unconfined or approved
+  outside the sandbox, still get the **git guard** notice: ouija fingerprints
+  `.git/hooks` and `.git/config` around every bash command and the chat shows a
+  banner when one changes. The file tools refuse `.git/hooks` and `.git/config`
+  on every OS.
 
 ## Layer 5: Doom-loop detection
 
@@ -231,8 +289,12 @@ a command with substitutions or variables) and saves them to the config file;
 A token, step and USD budget bounds cost, and its sanity checks reject negative
 token counts. Secrets come from the config file (`0600`), and ouija never logs
 or traces them. The bash tool sanitizes the environment: `sanitizeEnv()` strips
-credential-like variables (`AWS_*`, `*API_KEY*`, `*SECRET*`, `*TOKEN*`, etc.)
-before it passes the environment to subprocesses. Subprocesses get
+credential-like variables (`AWS_*`, provider prefixes such as `OPENROUTER_*`,
+`*API_KEY*`, `*_KEY`, `*SECRET*`, `*TOKEN*`, `*PRIVATE*`, `*_DSN`,
+`DATABASE_URL`, etc.) and any variable whose value is a URL with a password
+before it passes the environment to subprocesses. It is a denylist: a secret
+under an unusual name still reaches bash, so keep secrets out of the
+environment you start ouija from, or turn on the sandbox. Subprocesses get
 `WaitDelay = 3s` as a safety net against runaway children.
 
 Egress controls stop data from leaving the machine through ouija's outputs. PDF

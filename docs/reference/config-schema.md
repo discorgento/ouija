@@ -34,14 +34,19 @@ print the path in use.
 | `defaults.provider` | `string` | Yes (if defaults block) | Default provider name |
 | `defaults.model` | `string` | Yes (if defaults block) | Default model ID |
 | `theme` | `string` | No | UI color theme: `ouija` (default), `catppuccin`, `dracula`, `mono`. Set by `/theme` in the chat; `OUIJA_THEME` overrides it |
-| `sandbox` | `object` | No | The bash sandbox for **every** project, same keys as [`tools.bash.sandbox`](#toolsbashsandbox). A project cannot turn it off; a trusted one may add paths and ports |
+| `sandbox` | `object` | No | The bash sandbox for **every** project, same keys as [`tools.bash.sandbox`](#toolsbashsandbox). Set, a project cannot turn it off; a trusted one may add paths and ports. `{"enabled": false}` turns the default sandbox off |
 
-`sandbox` here is the way to confine bash in repositories you have not
-trusted: a project's own `tools.bash.sandbox` only applies after `ouija trust`,
-and a cloned repository could otherwise simply leave it off. With
-`"sandbox": {"enabled": true}` in the global config, every project's bash runs
-confined; a trusted project's sandbox section adds its `read`, `write` and
-`network` entries on top, and `enabled: false` there changes nothing.
+The bash sandbox is **on by default** wherever the OS can enforce it. Without
+a `sandbox` key anywhere, ouija confines bash with the defaults below; where
+the OS cannot (Windows, a Linux kernel older than Landlock ABI v9), bash runs
+unconfined and asks before each command, and `ouija doctor` says which.
+
+`sandbox` here makes the sandbox a floor for every project, trusted or not: a
+project's own `tools.bash.sandbox` only applies after `ouija trust`, and with
+`"sandbox": {"enabled": true}` in the global config a trusted project's
+section only adds its `read`, `write` and `network` entries on top
+(`enabled: false` there changes nothing). Set explicitly, the sandbox is
+required: where the OS cannot enforce it, bash refuses to run.
 
 For backward compatibility, ouija still reads the legacy flat
 `provider`/`model` fields at the top level.
@@ -147,7 +152,7 @@ defaults, overlaid by the global config, then by the project config.
 | `streamTimeout` | `int` | `120` | Longest silence, in seconds, allowed from the provider during a streamed call (an idle timeout, not a deadline: an answer that keeps streaming is never cut) |
 | `contextWindow` | `int` | from the model | The model's context size in tokens. ouija cuts each tool result to about a quarter of it and shrinks older history to fit. By default the value comes from the model catalog (4096 for Ollama, its default `num_ctx`; raise it here if your Ollama runs a larger one) |
 | `tools.bash.allowlist` | `[]string` | `null` | Pre-approved bash commands that run without a prompt; the guard rail when the `bash` level is `allow` (see below) |
-| `tools.bash.sandbox` | `object` | off | OS-level confinement of every bash command (Linux Landlock); see below |
+| `tools.bash.sandbox` | `object` | on where supported | OS-level confinement of every bash command (Linux Landlock, macOS Seatbelt); see below |
 | `modelSuggestions` | `map[string][]string` | `null` | Suggested models per provider for the TUI picker autocomplete |
 | `permission` | `PermissionRule` | `null` | Permission defaults (see below) |
 
@@ -189,9 +194,12 @@ Levels:
 
 Protected paths are always denied, whatever the configured level. ouija checks
 both the tool's `path` argument and any path a bash command names. The
-protected paths are the system dirs `/etc/*` and `/var/lib/*`; the files `.env*`, `.gitconfig`, `.netrc`,
-`.npmrc`, `.dockercfg`, `.dockerconfigjson`; and the dirs `.ssh`, `.gnupg`,
-`.aws`, `.docker`, `.kube`, `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`.
+protected paths are the system dirs `/etc/*`, `/var/lib/*`, `/proc/*` and
+`/sys/*`; the files `.env*`, `.gitconfig`, `.netrc`, `.npmrc`, `.dockercfg`,
+`.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`,
+`id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, `*.tfstate`; and the dirs `.ssh`,
+`.gnupg`, `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`, `.config/gcloud`,
+`.config/kube`, `.config/gh`, plus `.git/config`.
 
 ### `tools.bash.sandbox`
 
@@ -210,27 +218,40 @@ protected paths are the system dirs `/etc/*` and `/var/lib/*`; the files `.env*`
 }
 ```
 
-The kernel confines every bash command (Linux, Landlock ABI v9+, which also
-confines Unix sockets and signals outside the sandbox). A command writes only
-inside the project and the temp dir, and reads only the system directories
-(`/usr`, `/etc`, `/lib`, …), the project and the paths listed in `read` /
-`write` (`~/` is your home; relative paths are relative to the project). The
-rest of `$HOME` (`~/.ssh`, `~/.aws`, ouija's own config) stays unreachable,
-whatever the command or its subprocesses do, even through a path built at run
-time.
+The OS confines every bash command: on Linux with Landlock (ABI v9+, which
+also confines Unix sockets and signals outside the sandbox), on macOS with
+Seatbelt (`sandbox-exec`). A command writes only inside the project, a private
+temp dir (`TMPDIR`, one per ouija process) and a private build cache for the
+project (`GOCACHE`, `npm_config_cache`, `PIP_CACHE_DIR`, `XDG_CACHE_HOME`, …
+point into `~/.cache/ouija/sandbox/`). Your real caches stay read-only to it:
+the tools you run later outside the sandbox trust them, so a confined command
+that could write there could plant code that escapes. It reads only the system
+directories (`/usr`, `/etc`, `/lib`, …), the project, the parts of the
+toolchains in your home that builds read (`~/go/pkg/mod`, `~/.cargo/registry`,
+`~/.rustup`, `~/.nvm/versions`, `~/.pyenv/versions`, `~/.m2/repository`,
+`~/.local/bin`, …, never the credentials next to them such as
+`~/.cargo/credentials.toml` or `~/.m2/settings.xml`), git's global ignore files
+and the paths listed in `read` / `write` (`~/` is your home; relative paths are
+relative to the project). The rest of `$HOME` (`~/.ssh`, `~/.aws`, ouija's own
+config, your documents) stays unreachable, whatever the command or its
+subprocesses do, even through a path built at run time.
 
-The sandbox is off by default because build tools keep caches under `$HOME`;
-list those caches (e.g. `~/.cache/go-build`, `~/go/pkg/mod`; `/dev/shm` for
-Python multiprocessing or browser-based tests). ouija refuses a protected
-location in `read`/`write`, or one that contains a credential directory such
-as `~` or `~/.config`, and it refuses to run with such a project root.
-`~/.gitconfig` is protected, so git inside the sandbox runs without your
-global identity: put it in `~/.config/git/config` and list that, or set it in
-the repository. The project itself (its `.env` and `.git` included) stays
-readable and writable; see
-[what the sandbox does not cover](../explanation/security.md#os-sandbox-opt-in).
-Where the OS cannot enforce the sandbox (macOS, Windows, an older kernel), bash
-refuses to run rather than run unconfined.
+List anything else a build needs (`/dev/shm` for Python multiprocessing or
+browser-based tests, a toolchain in an unusual place). ouija refuses a
+protected location in `read`/`write`, or one that contains a credential
+directory such as `~` or `~/.config`, and it refuses to run with such a
+project root. git in the sandbox cannot read `~/.gitconfig` (it may hold a
+token), so ouija runs it with `GIT_CONFIG_GLOBAL=/dev/null` and passes on only
+your `user.name` and `user.email`. The project itself (its `.env` and `.git`
+included) stays readable and writable; see
+[what the sandbox does not cover](../explanation/security.md#os-sandbox).
+When a confined command fails, its result says it ran in the sandbox, so a
+denial is not mistaken for a bug. The model may then retry the same command
+with `"unsandboxed": true`: that runs it outside the sandbox only after you
+approve that exact command in a prompt marked **runs OUTSIDE the bash
+sandbox**, whatever the permission level or the allowlist says, and never
+where no one can approve (MCP, CI). `"allowUnsandboxed": false` turns that
+escape hatch off; in the global config no project can turn it back on.
 
 TCP is closed by default: a confined command can neither open a connection
 (not even to `localhost`) nor listen on a port. `network` opens what a project
@@ -242,8 +263,10 @@ needs:
 | `bind` | `[]int` | TCP ports the command may listen on, e.g. a dev server's port |
 | `all` | `bool` | no network restriction |
 
-Landlock filters TCP by port, not by host: `connect: [443]` allows HTTPS to any
-server. It does not filter UDP, so DNS lookups still go out.
+The filter is by port, not by host: `connect: [443]` allows HTTPS to any
+server. Listing any port also lets names resolve (DNS, UDP 53); with no port
+listed, Linux with Landlock ABI v10+ blocks DNS too (older kernels do not
+filter UDP).
 
 ### `tools.bash.allowlist`
 
