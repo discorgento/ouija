@@ -5,7 +5,7 @@
 #   irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
 #
 # Or, saved, with options:
-#   .\install.ps1 -Version 0.2.0 -InstallDir C:\tools\ouija -NoPath
+#   .\install.ps1 -Version 0.2.0 -InstallDir C:\tools\ouija -NoPath -NoPrompt
 #
 # Nothing needs administrator rights: the folder and the PATH are your
 # user's. ouija is a terminal program - after this, open a new terminal and
@@ -13,7 +13,8 @@
 param(
     [string]$Version = "latest",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\ouija"),
-    [switch]$NoPath
+    [switch]$NoPath,
+    [switch]$NoPrompt # ask nothing (no setup); CI never asks
 )
 
 $ErrorActionPreference = "Stop"
@@ -110,8 +111,20 @@ if (-not $NoPath) {
 }
 
 & (Join-Path $InstallDir "ouija.exe") version
+# In a console, offer to run the setup right away; never in CI.
+$interactive = -not $NoPrompt -and -not $env:CI -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
 Write-Host ""
+if ($interactive) {
+    $answer = Read-Host "Set up ouija now (provider, API key, model)? [Y/n]"
+    if ($answer -eq "" -or $answer -match '^(y|yes|s|sim)$') {
+        & (Join-Path $InstallDir "ouija.exe") setup
+        Write-Host ""
+        Write-Host "Next: open a new terminal, cd into a project and run ``ouija``."
+        Write-Host "The bash tool needs Git for Windows (its sh.exe): https://gitforwindows.org"
+        return
+    }
+}
 Write-Host "Next: open a new terminal, then"
-Write-Host "  ouija setup      # API keys and the default model"
+Write-Host "  ouija setup      # provider, API key and default model (or Ollama: local and free)"
 Write-Host "  ouija            # in a project folder: the chat"
 Write-Host "The bash tool needs Git for Windows (its sh.exe): https://gitforwindows.org"
