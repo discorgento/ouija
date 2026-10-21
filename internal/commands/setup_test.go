@@ -72,6 +72,14 @@ func TestModelOptions(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("options = %q, want %q", got, want)
 	}
+	// The free ones come right after the suggestions, before the paid ones.
+	var order []string
+	for _, o := range modelOptions(nil, []models.Model{{ID: "paid"}, {ID: "x:free"}, {ID: "y", Label: "Y (free)"}}) {
+		order = append(order, o.Value)
+	}
+	if strings.Join(order, ",") != "x:free,y,paid" {
+		t.Errorf("order = %v, want the free models first", order)
+	}
 	// Offline (no list): the suggestions are all there is.
 	if n := len(modelOptions(suggested, nil)); n != 2 {
 		t.Errorf("offline options = %d, want both suggestions", n)

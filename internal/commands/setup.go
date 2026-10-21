@@ -147,7 +147,10 @@ func Setup(args []string) error {
 	if model == "" || !slices.ContainsFunc(modelOpts, func(o huh.Option[string]) bool { return o.Value == model }) {
 		model = modelOpts[0].Value
 	}
-	desc := "★ suggested · type / to search · ↑↓ to move"
+	desc := fmt.Sprintf("%d models · ★ suggested first, then the free ones · ↑↓ to move", len(modelOpts))
+	if len(modelOpts) > 12 {
+		desc = fmt.Sprintf("%d models · type to search, e.g. free · ★ suggested first · ↑↓ to move", len(modelOpts))
+	}
 	var warnings []string
 	switch {
 	case listErr != nil && providers.Keyless(provider):
@@ -242,7 +245,8 @@ func keyForm(name, help, hint string, hasSaved bool, key *string) *huh.Form {
 	).WithTheme(ouijaTheme{}).WithWidth(formWidth)
 }
 
-// modelForm is step 3: the default model, a few rows at a time.
+// modelForm is step 3: the default model, a few rows at a time. A long list
+// opens with the search on: typing filters it right away.
 func modelForm(opts []huh.Option[string], desc string, model *string) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
@@ -251,6 +255,7 @@ func modelForm(opts []huh.Option[string], desc string, model *string) *huh.Form 
 				Description(desc).
 				Options(opts...).
 				Height(12).
+				Filtering(len(opts) > 12).
 				Value(model),
 		).Title(stepTitle(3)),
 	).WithTheme(ouijaTheme{}).WithWidth(formWidth)
@@ -398,16 +403,28 @@ func modelOptions(suggested, list []models.Model) []huh.Option[string] {
 	for _, m := range append(slices.Clone(suggested), list...) {
 		nameW = max(nameW, lipgloss.Width(nameOf(m)))
 	}
-	nameW = min(nameW, 30)
+	nameW = min(nameW, 24)
+	// One row per model: the ID is cut with … so a long one never wraps
+	// (a wrapped row pushed "free" onto a line of its own).
+	const rowW = formWidth - 14 // the box border and padding, the cursor and the ★
 	labelOf := func(m models.Model) string {
-		text := fmt.Sprintf("%-*s", nameW, nameOf(m))
-		if nameOf(m) != m.ID {
-			text += "  " + m.ID
+		name := []rune(nameOf(m))
+		if len(name) > nameW {
+			name = append(name[:nameW-1], '…')
 		}
+		text := fmt.Sprintf("%-*s", nameW, string(name))
+		tail := ""
 		if isFree(m) {
-			text += "  · free"
+			tail = "  · free"
 		}
-		return text + " "
+		if nameOf(m) != m.ID {
+			id := []rune(m.ID)
+			if room := rowW - nameW - 2 - len([]rune(tail)); len(id) > room && room > 1 {
+				id = append(id[:room-1], '…')
+			}
+			text += "  " + string(id)
+		}
+		return text + tail + " "
 	}
 	inList := map[string]bool{}
 	for _, m := range list {
@@ -424,10 +441,14 @@ func modelOptions(suggested, list []models.Model) []huh.Option[string] {
 		opts = append(opts, huh.NewOption("★ "+labelOf(m), m.ID))
 		seen[m.ID] = true
 	}
-	for _, m := range list {
-		if !seen[m.ID] {
-			opts = append(opts, huh.NewOption("  "+labelOf(m), m.ID))
-			seen[m.ID] = true
+	// Then the free ones, then the rest: on a list of hundreds, the free
+	// models are the ones a newcomer looks for.
+	for _, wantFree := range []bool{true, false} {
+		for _, m := range list {
+			if !seen[m.ID] && isFree(m) == wantFree {
+				opts = append(opts, huh.NewOption("  "+labelOf(m), m.ID))
+				seen[m.ID] = true
+			}
 		}
 	}
 	return opts
