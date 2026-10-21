@@ -39,6 +39,16 @@ done
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
+# The folder goes into a shell rc file inside double quotes, where $, `, \
+# and " would run or break as code in every new shell.
+case "$dir" in
+    *[\"\$\`\\]*) die "--dir must not contain \", \$, \` or \\: ${dir}" ;;
+    /*) ;;
+    # A relative folder on PATH is looked up from whatever directory a shell
+    # is in: a repository could put its own "ouija" first.
+    *) die "--dir must be an absolute path (${dir} is not; for your home use \$HOME/...)" ;;
+esac
+
 case "$(uname -s)" in
     Linux) os=linux ;;
     Darwin) os=darwin ;;
@@ -164,7 +174,7 @@ case ":${PATH}:" in *":${dir}:"*) ;; *) on_path=no ;; esac
 if [ "$on_path" = no ]; then
     case "${SHELL:-}" in
         */zsh) rc="$HOME/.zshrc"; line="export PATH=\"${dir}:\$PATH\"" ;;
-        */fish) rc="$HOME/.config/fish/conf.d/ouija.fish"; line="fish_add_path ${dir}" ;;
+        */fish) rc="$HOME/.config/fish/conf.d/ouija.fish"; line="fish_add_path \"${dir}\"" ;;
         *) rc="$HOME/.bashrc"; [ "$(uname -s)" = Darwin ] && rc="$HOME/.bash_profile"; line="export PATH=\"${dir}:\$PATH\"" ;;
     esac
     say ""
