@@ -48,6 +48,11 @@ protected path, so any change to the file invalidates the trust.
 chat saves) are trusted automatically, and ouija never rewrites an untrusted
 file that sets those keys.
 
+The bash sandbox is the exception that goes the other way: enabled in the
+global config (`"sandbox": {"enabled": true}`), it applies to every project,
+trusted or not, and no project config can turn it off. A trusted project can
+only add the paths and ports it needs. `ouija doctor` shows whether it is on.
+
 Without this check, cloning a repository that commits
 `{"permission":{"default":"allow"}}` would give a prompt-injected model
 unattended `bash`, and an `apiKey` override would send your prompts and code to

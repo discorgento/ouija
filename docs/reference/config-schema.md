@@ -34,6 +34,14 @@ print the path in use.
 | `defaults.provider` | `string` | Yes (if defaults block) | Default provider name |
 | `defaults.model` | `string` | Yes (if defaults block) | Default model ID |
 | `theme` | `string` | No | UI color theme: `ouija` (default), `catppuccin`, `dracula`, `mono`. Set by `/theme` in the chat; `OUIJA_THEME` overrides it |
+| `sandbox` | `object` | No | The bash sandbox for **every** project, same keys as [`tools.bash.sandbox`](#toolsbashsandbox). A project cannot turn it off; a trusted one may add paths and ports |
+
+`sandbox` here is the way to confine bash in repositories you have not
+trusted: a project's own `tools.bash.sandbox` only applies after `ouija trust`,
+and a cloned repository could otherwise simply leave it off. With
+`"sandbox": {"enabled": true}` in the global config, every project's bash runs
+confined; a trusted project's sandbox section adds its `read`, `write` and
+`network` entries on top, and `enabled: false` there changes nothing.
 
 For backward compatibility, ouija still reads the legacy flat
 `provider`/`model` fields at the top level.

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/discorgento/ouija/engine"
@@ -59,6 +60,7 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 	cfg := engine.DefaultConfig()
 	applyGlobalConfig(cfg, globalCfg)
 	applyProjectConfig(cfg, projectCfg, cfgPath, explicit != "")
+	applyGlobalSandbox(cfg, globalCfg)
 	// Resolve the effective API key for the final provider into cfg.APIKey, so
 	// the value is explicit in the config rather than hidden in a global store.
 	cfg.APIKey = resolveAPIKey(cfg.Provider, globalCfg, projectCfg)
@@ -104,6 +106,60 @@ func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
 		dir = parent
 	}
 	return nil, "", nil, nil
+}
+
+// applyGlobalSandbox makes the global sandbox a floor no project can lower.
+// It runs after the project overlay: a project's sandbox that is off (or
+// absent) is replaced by the global one, and an enabled one keeps its extra
+// paths and ports on top of the global ones. Only a trusted project reaches
+// here with a sandbox section at all; an untrusted one had it stripped.
+func applyGlobalSandbox(cfg *engine.Config, globalCfg *ouijaconfig.Config) {
+	if globalCfg == nil || globalCfg.Sandbox == nil || !globalCfg.Sandbox.Enabled {
+		return
+	}
+	if cfg.Tools == nil {
+		cfg.Tools = &engine.ToolsConfig{}
+	} else {
+		tools := *cfg.Tools // the project's struct is not ours to change
+		cfg.Tools = &tools
+	}
+	if cfg.Tools.Bash == nil {
+		cfg.Tools.Bash = &engine.BashConfig{}
+	} else {
+		bash := *cfg.Tools.Bash
+		cfg.Tools.Bash = &bash
+	}
+	cfg.Tools.Bash.Sandbox = mergeSandbox(globalCfg.Sandbox, cfg.Tools.Bash.Sandbox)
+}
+
+// mergeSandbox is the global sandbox plus what an enabled project sandbox
+// adds: its extra read/write paths and TCP ports. A disabled or absent one
+// adds nothing.
+func mergeSandbox(global, project *engine.SandboxConfig) *engine.SandboxConfig {
+	out := &engine.SandboxConfig{
+		Enabled: true,
+		Read:    slices.Clone(global.Read),
+		Write:   slices.Clone(global.Write),
+	}
+	if global.Network != nil {
+		n := *global.Network
+		n.Connect, n.Bind = slices.Clone(n.Connect), slices.Clone(n.Bind)
+		out.Network = &n
+	}
+	if project == nil || !project.Enabled {
+		return out
+	}
+	out.Read = append(out.Read, project.Read...)
+	out.Write = append(out.Write, project.Write...)
+	if p := project.Network; p != nil {
+		if out.Network == nil {
+			out.Network = &engine.SandboxNetwork{}
+		}
+		out.Network.All = out.Network.All || p.All
+		out.Network.Connect = append(out.Network.Connect, p.Connect...)
+		out.Network.Bind = append(out.Network.Bind, p.Bind...)
+	}
+	return out
 }
 
 // applyGlobalConfig merges the user's global config (~/.config/ouija/config.json)

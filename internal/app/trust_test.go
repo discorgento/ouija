@@ -198,3 +198,61 @@ func TestProjectRootStaysInProject(t *testing.T) {
 		t.Fatalf("a trusted projectRoot left the project through a symlink: %s", cfg.ProjectRoot)
 	}
 }
+
+// A sandbox enabled in the global config confines bash in every project: an
+// untrusted project gets it as is, and a trusted one cannot turn it off, only
+// add the paths and ports it needs.
+func TestGlobalSandboxIsAFloor(t *testing.T) {
+	isolateGlobalConfig(t)
+	if err := ouijaconfig.Save(&ouijaconfig.Config{
+		Defaults: &ouijaconfig.Defaults{Provider: "ollama", Model: "x"},
+		Sandbox: &engine.SandboxConfig{Enabled: true, Read: []string{"~/go/pkg/mod"},
+			Network: &engine.SandboxNetwork{Connect: []uint16{443}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".ouija", "config.json")
+	t.Chdir(dir)
+	sandboxOf := func() *engine.SandboxConfig {
+		t.Helper()
+		cfg, _, err := DiscoverConfig("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Tools == nil || cfg.Tools.Bash == nil || cfg.Tools.Bash.Sandbox == nil {
+			t.Fatal("no sandbox in the effective config")
+		}
+		return cfg.Tools.Bash.Sandbox
+	}
+
+	// Untrusted project that tries to turn it off: the global one applies.
+	writeProjectConfig(t, path, `{"tools":{"bash":{"sandbox":{"enabled":false}}}}`)
+	if sb := sandboxOf(); !sb.Enabled || !slices.Equal(sb.Read, []string{"~/go/pkg/mod"}) ||
+		sb.Network == nil || !slices.Equal(sb.Network.Connect, []uint16{443}) {
+		t.Fatalf("untrusted project: sandbox = %+v", sb)
+	}
+
+	// Trusted project that turns it off: still on.
+	if err := Trust(path); err != nil {
+		t.Fatal(err)
+	}
+	if sb := sandboxOf(); !sb.Enabled {
+		t.Fatal("a trusted project turned the global sandbox off")
+	}
+
+	// Trusted project that adds what it needs: added on top of the global one.
+	writeProjectConfig(t, path, `{"tools":{"bash":{"sandbox":{"enabled":true,"read":["vendor"],"network":{"connect":[5432]}}}}}`)
+	if err := Trust(path); err != nil {
+		t.Fatal(err)
+	}
+	if sb := sandboxOf(); !sb.Enabled || !slices.Equal(sb.Read, []string{"~/go/pkg/mod", "vendor"}) ||
+		!slices.Equal(sb.Network.Connect, []uint16{443, 5432}) || sb.Network.All {
+		t.Fatalf("trusted project: sandbox = %+v, network = %+v", sb, sb.Network)
+	}
+
+	// The global config itself is left as it was.
+	if g, _ := ouijaconfig.Load(); g == nil || !slices.Equal(g.Sandbox.Network.Connect, []uint16{443}) {
+		t.Fatalf("the merge changed the global config: %+v", g)
+	}
+}
