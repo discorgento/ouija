@@ -66,7 +66,24 @@ checks it against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in
 folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` or fish's config) when it is
 not there yet, and whether to run `ouija setup` now. In CI, or with
 `--no-prompt`, it asks nothing and prints what to do instead. To pass options
-(`--version 0.2.0`, `--dir <dir>`, `--no-prompt`), put them after `sh -s --`.
+(`--version 0.2.0`, `--dir <dir>`, `--no-prompt`, `--require-provenance`), put
+them after `sh -s --`.
+
+### Build provenance
+
+The checksum proves the archive matches `SHA256SUMS`, but both come from the
+same release. Every archive also carries a **build provenance attestation**,
+signed (through Sigstore) by this repository's release workflow on GitHub
+Actions: it proves the archive was built from this repository's source by that
+workflow, so an archive swapped on the release page fails it. When the
+[GitHub CLI](https://cli.github.com) is installed and logged in, both
+installers verify it and refuse to install on a failure. Without `gh` they say
+the provenance was not checked; `--require-provenance` (`-RequireProvenance` on
+Windows) makes them refuse instead. To check an archive by hand:
+
+```sh
+gh attestation verify ouija_0.5.1_linux_amd64.tar.gz --repo discorgento/ouija
+```
 
 To install by hand, check and extract the archive:
 

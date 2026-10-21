@@ -96,7 +96,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija7" -NoPath
+          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija7" -NoPath -RequireProvenance
           & "$env:RUNNER_TEMP\ouija7\ouija.exe" version
 
       - name: Windows PowerShell 5.1
@@ -104,7 +104,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija5" -NoPath
+          ./scripts/install.ps1 -InstallDir "$env:RUNNER_TEMP\ouija5" -NoPath -RequireProvenance
           & "$env:RUNNER_TEMP\ouija5\ouija.exe" version
 
   # The same for install.sh, on Linux and macOS (Apple silicon), in the
@@ -126,7 +126,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          sh scripts/install.sh --dir "$RUNNER_TEMP/ouija"
+          sh scripts/install.sh --require-provenance --dir "$RUNNER_TEMP/ouija"
           "$RUNNER_TEMP/ouija/ouija" version
           test -x "$RUNNER_TEMP/ouija/ouija-mcp"
 
