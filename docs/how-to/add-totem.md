@@ -130,6 +130,21 @@ if err := eng.Config().TotemConfig("review", &c); err != nil {
 }
 ```
 
+### Optional: Hints
+
+A totem that changes nothing in the project can say so, and MCP hosts may then
+run it without asking first:
+
+```go
+func (t *Totem) Hints() registry.Hints { return registry.Hints{ReadOnly: true} }
+```
+
+The MCP server turns it into the tool's annotations (`readOnlyHint: true`,
+`destructiveHint: false`). A totem without `Hints` gets none, and hosts treat
+it as one that may change things. Hints only inform the host: the engine's
+permission gate still decides what every tool call may do, whatever the totem
+claims.
+
 ### Optional: Renderer
 
 If your result type implements `Render() string`, the CLI prints its output in

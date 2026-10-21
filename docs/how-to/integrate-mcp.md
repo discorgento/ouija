@@ -101,6 +101,9 @@ In Cursor settings, add a new MCP server with command `ouija` and argument `mcp`
    the result.
 3. The budget ceilings apply, and the host asks for your approval before each
    call. Each call gets a fresh engine, so each has its own budget.
+   A totem that only reads (such as `review`) is listed with the
+   `readOnlyHint` annotation, so a host may run it without asking; the ones
+   that write files carry no annotation and keep the host's confirmation.
 4. The host receives the result as a tool response.
 
 Calls run concurrently, so a long `ouija_task` does not block `ping`,

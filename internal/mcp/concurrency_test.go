@@ -221,6 +221,27 @@ func TestToolsListUsesTotemInputSchema(t *testing.T) {
 	}
 }
 
+// A totem that only reads (review) is annotated read-only for MCP hosts; the
+// ones that write files get no annotations, so hosts keep asking.
+func TestToolsListAnnotations(t *testing.T) {
+	res := resultOf(t, call(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	tools, _ := res["tools"].([]any)
+	got := map[string]any{}
+	for _, raw := range tools {
+		tool, _ := raw.(map[string]any)
+		got[tool["name"].(string)] = tool["annotations"]
+	}
+	review, _ := got[defaultPrefix+"review"].(map[string]any)
+	if review["readOnlyHint"] != true || review["destructiveHint"] != false {
+		t.Errorf("review annotations = %v, want read-only and not destructive", got[defaultPrefix+"review"])
+	}
+	for _, name := range []string{"task", "doc", "sticker"} {
+		if a, ok := got[defaultPrefix+name]; ok && a != nil {
+			t.Errorf("%s writes files but is annotated %v", name, a)
+		}
+	}
+}
+
 // tools/call hands every argument to the totem: Task from "task", and all of
 // them as Params.
 func TestToolCallPassesParams(t *testing.T) {

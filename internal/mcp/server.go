@@ -293,13 +293,29 @@ func (s *Server) handleLine(ctx context.Context, line []byte, out *bufio.Writer)
 func toolList(prefix string) []map[string]any {
 	var tools []map[string]any
 	for _, m := range registry.List() {
-		tools = append(tools, map[string]any{
+		tool := map[string]any{
 			"name":        prefix + m.Name(),
 			"description": m.Summary(),
 			"inputSchema": registry.InputSchema(m), // the totem's own, or {task}
-		})
+		}
+		if a := annotations(m); a != nil {
+			tool["annotations"] = a
+		}
+		tools = append(tools, tool)
 	}
 	return tools
+}
+
+// annotations are the MCP tool annotations of a totem that declares itself
+// read-only, so a host may run it without asking. Without that, a tool gets
+// none, and MCP's defaults (not read-only, possibly destructive) apply. Every
+// totem calls a model provider, so it is open-world either way.
+func annotations(t registry.Totem) map[string]any {
+	h, ok := t.(registry.Hinter)
+	if !ok || !h.Hints().ReadOnly {
+		return nil
+	}
+	return map[string]any{"readOnlyHint": true, "destructiveHint": false, "openWorldHint": true}
 }
 
 func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcRequest) {
