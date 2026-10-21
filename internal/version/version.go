@@ -19,4 +19,4 @@
 package version
 
 // Version is the ouija release version. Overridable with `-ldflags -X`.
-var Version = "0.4.0" // x-release-please-version
+var Version = "0.5.0" // x-release-please-version
