@@ -165,7 +165,14 @@ ABI v9; on an older kernel the sockets would stay reachable. So if the sandbox
 is enabled but cannot be enforced (not Linux, or Landlock older than ABI v9),
 bash refuses to run. ouija also refuses a grant that would cover a credential
 directory: the home directory, `~/.config`, `/`, or a project root at one of
-those locations. Network access is not restricted. See
+those locations.
+
+TCP is closed by default too: a confined command can neither connect (not even
+to `localhost`) nor listen, so it cannot send the project's code anywhere
+over TCP. A project opens the ports it needs (`network.connect`, e.g. `443`
+for downloads, or `network.bind` for a dev server). Landlock filters by port,
+not by host, so an open port is open to every server; and it does not filter
+UDP, so a DNS query can still carry data out. See
 [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
 
 A boundary scoped to the project does **not** cover the following, by design:

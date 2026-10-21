@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -64,6 +66,48 @@ func TestBashSandboxConfinesTheCommand(t *testing.T) {
 	run("echo pwned > " + filepath.Join(secretDir, "new"))
 	if _, err := os.Stat(filepath.Join(secretDir, "new")); err == nil {
 		t.Error("a write outside the sandbox landed")
+	}
+}
+
+// TCP is closed by default under the sandbox: a confined command cannot reach
+// even a server on localhost. A port the config lists opens that port only,
+// and `all` lifts the restriction.
+func TestBashSandboxNetwork(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found (the test connects with bash's /dev/tcp)")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+	dial := fmt.Sprintf(`bash -c 'exec 3<>/dev/tcp/127.0.0.1/%d && echo CONNECTED'`, port)
+
+	for _, tc := range []struct {
+		name    string
+		network *SandboxNetwork
+		want    bool
+	}{
+		{"default: no TCP", nil, false},
+		{"another port allowed", &SandboxNetwork{Connect: []uint16{port + 1}}, false},
+		{"this port allowed", &SandboxNetwork{Connect: []uint16{port}}, true},
+		{"all allowed", &SandboxNetwork{All: true}, true},
+	} {
+		_, _, run := sandboxFixture(t, &SandboxConfig{Enabled: true, Network: tc.network})
+		got := strings.Contains(fmtData(run(dial)), "CONNECTED")
+		if got != tc.want {
+			t.Errorf("%s: connected = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

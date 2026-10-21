@@ -194,7 +194,8 @@ protected paths are the system dirs `/etc/*` and `/var/lib/*`; the files `.env*`
       "sandbox": {
         "enabled": true,
         "read": ["~/go/pkg/mod"],
-        "write": ["~/.cache/go-build"]
+        "write": ["~/.cache/go-build"],
+        "network": { "connect": [443] }
       }
     }
   }
@@ -221,7 +222,20 @@ the repository. The project itself (its `.env` and `.git` included) stays
 readable and writable; see
 [what the sandbox does not cover](../explanation/security.md#os-sandbox-opt-in).
 Where the OS cannot enforce the sandbox (macOS, Windows, an older kernel), bash
-refuses to run rather than run unconfined. Network access is not restricted.
+refuses to run rather than run unconfined.
+
+TCP is closed by default: a confined command can neither open a connection
+(not even to `localhost`) nor listen on a port. `network` opens what a project
+needs:
+
+| Key | Type | Effect |
+|---|---|---|
+| `connect` | `[]int` | TCP ports the command may connect to, e.g. `[443]` to download dependencies over HTTPS |
+| `bind` | `[]int` | TCP ports the command may listen on, e.g. a dev server's port |
+| `all` | `bool` | no network restriction |
+
+Landlock filters TCP by port, not by host: `connect: [443]` allows HTTPS to any
+server. It does not filter UDP, so DNS lookups still go out.
 
 ### `tools.bash.allowlist`
 

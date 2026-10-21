@@ -33,14 +33,25 @@ func sandboxAvailable() error {
 // sandboxAvailable checked in the parent: the filesystem (connecting to Unix
 // sockets by path included) and the scopes — abstract Unix sockets and
 // signals to processes outside the sandbox, which RestrictPaths alone left
-// open (an X11 abstract socket, `kill` of any of the user's processes). The
-// network is not restricted, as documented.
+// open (an X11 abstract socket, `kill` of any of the user's processes) — and,
+// unless the policy allows all of it, TCP: connecting and listening only on
+// the ports it lists (none by default). UDP is not filtered by Landlock.
 func applySandbox(p sandboxPolicy) error {
 	cfg := landlock.Config{HandledAccessFS: landlock.V10.HandledAccessFS, Scoped: landlock.V10.Scoped}
-	return cfg.BestEffort().Restrict(
+	rules := []landlock.Rule{
 		landlock.RODirs(p.ReadDirs...).IgnoreIfMissing(),
 		landlock.ROFiles(p.ReadFiles...).IgnoreIfMissing(),
 		landlock.RWDirs(p.WriteDirs...).IgnoreIfMissing(),
 		landlock.RWFiles(p.WriteFiles...).IgnoreIfMissing(),
-	)
+	}
+	if !p.NetAll {
+		cfg.HandledAccessNet = landlock.V10.HandledAccessNet
+		for _, port := range p.ConnectTCP {
+			rules = append(rules, landlock.ConnectTCP(port))
+		}
+		for _, port := range p.BindTCP {
+			rules = append(rules, landlock.BindTCP(port))
+		}
+	}
+	return cfg.BestEffort().Restrict(rules...)
 }

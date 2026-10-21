@@ -105,6 +105,18 @@ type SandboxConfig struct {
 	Enabled bool     `json:"enabled"`
 	Read    []string `json:"read,omitempty"`  // extra readable paths; `~/` = home, relative = project
 	Write   []string `json:"write,omitempty"` // extra writable paths
+	// Network is the TCP a confined command may use. Nil (the default) is
+	// none: no outgoing connection and no listening port.
+	Network *SandboxNetwork `json:"network,omitempty"`
+}
+
+// SandboxNetwork lists the TCP ports a confined command may use. Landlock
+// filters TCP by port, not by host, and does not filter UDP (so DNS lookups
+// still go out).
+type SandboxNetwork struct {
+	Connect []uint16 `json:"connect,omitempty"` // ports it may connect to, e.g. 443
+	Bind    []uint16 `json:"bind,omitempty"`    // ports it may listen on
+	All     bool     `json:"all,omitempty"`     // no network restriction at all
 }
 
 // TotemConfig decodes the settings of totem name (Totems[name]) into v. When

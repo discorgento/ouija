@@ -5,8 +5,8 @@ package engine
 // With the sandbox on, a command runs in a re-executed copy of the current
 // binary that first confines itself with the OS — on Linux, Landlock: write
 // only inside the project and the temp dir, read only system directories, the
-// project and the paths the config lists, so never $HOME's credentials — and
-// then execs the shell. The confinement is inherited by every process the
+// project and the paths the config lists, so never $HOME's credentials; no TCP
+// beyond the ports the config lists — and then execs the shell. The confinement is inherited by every process the
 // command starts and cannot be lifted.
 
 import (
@@ -35,6 +35,10 @@ type sandboxPolicy struct {
 	ReadFiles  []string `json:"readFiles"`  // read single files
 	WriteDirs  []string `json:"writeDirs"`  // read and write, recursively
 	WriteFiles []string `json:"writeFiles"` // read and write single files (devices)
+
+	NetAll     bool     `json:"netAll"`     // TCP is not restricted
+	ConnectTCP []uint16 `json:"connectTCP"` // ports it may connect to
+	BindTCP    []uint16 `json:"bindTCP"`    // ports it may listen on
 }
 
 // The child side runs before main, from any binary that links the engine
@@ -160,6 +164,11 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 		}
 		p.ReadDirs = append(p.ReadDirs, read...)
 		p.WriteDirs = append(p.WriteDirs, write...)
+		if n := sb.Network; n != nil {
+			p.NetAll = n.All
+			p.ConnectTCP = append(p.ConnectTCP, n.Connect...)
+			p.BindTCP = append(p.BindTCP, n.Bind...)
+		}
 	}
 	return p, nil
 }
