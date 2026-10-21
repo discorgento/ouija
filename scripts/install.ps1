@@ -22,6 +22,13 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue" # the progress bar slows downloads a lot
 $repo = "discorgento/ouija"
 
+# A relative folder on PATH is looked up from whatever directory a shell is
+# in: a repository could put its own ouija.exe first.
+if (-not [System.IO.Path]::IsPathRooted($InstallDir) -or $InstallDir -match '^[\\/][^\\/]') {
+    throw "-InstallDir must be an absolute path such as C:\tools\ouija ($InstallDir is not)."
+}
+$InstallDir = [System.IO.Path]::GetFullPath($InstallDir)
+
 if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
     throw "ouija ships Windows builds for x64 (amd64) only; this machine is $env:PROCESSOR_ARCHITECTURE."
 }
