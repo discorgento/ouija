@@ -226,7 +226,7 @@ func keyForm(name, help, hint string, hasSaved bool, key *string) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
-				Title("Paste your "+name+" API key").
+				Title("Paste your " + name + " API key").
 				Description(help).
 				Prompt("› ").
 				Placeholder(hint).

@@ -12,5 +12,5 @@ func printBanner() {
 		art.Print("project-aware AI assistant")
 		return
 	}
-	art.Animate("project-aware AI assistant")
+	art.Seance("project-aware AI assistant")
 }
