@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/discorgento/ouija/compare/v0.5.0...v0.5.1) (2026-10-21)
+
+
+### Documentation
+
+* **install:** lead with the one-command install and show it ([e468696](https://github.com/discorgento/ouija/commit/e468696778db668f4c02af9af45aef8ca4380d30))
+
 ## [0.5.0](https://github.com/discorgento/ouija/compare/v0.4.0...v0.5.0) (2026-10-21)
 
 
