@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/atomicfile"
 )
 
@@ -36,6 +37,11 @@ type Config struct {
 
 	// Theme is the UI's color theme (internal/theme; "" is ouija's own).
 	Theme string `json:"theme,omitempty"`
+
+	// Sandbox, when enabled, confines bash in every project, trusted or not:
+	// a repository's own config cannot turn it off, only add the paths and
+	// ports it needs once trusted (see internal/app).
+	Sandbox *engine.SandboxConfig `json:"sandbox,omitempty"`
 
 	// Legacy fields — kept for backward compat with old configs.
 	Provider string `json:"provider,omitempty"`
