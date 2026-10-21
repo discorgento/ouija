@@ -251,24 +251,33 @@ func (r *report) providerAPI(cfg *engine.Config) {
 // asks before every command.
 func (r *report) sandbox() {
 	cfg, _, err := app.DiscoverConfig("")
-	on := err == nil && cfg.Tools != nil && cfg.Tools.Bash != nil && cfg.Tools.Bash.Sandbox != nil && cfg.Tools.Bash.Sandbox.Enabled
+	sb := engine.DefaultSandbox() // what the engine runs with when no config sets one
+	if err == nil && cfg.Tools != nil && cfg.Tools.Bash != nil && cfg.Tools.Bash.Sandbox != nil {
+		sb = cfg.Tools.Bash.Sandbox
+	}
 	avail := engine.SandboxAvailable()
 	switch {
-	case on && avail == nil:
+	case sb.Enabled && avail == nil:
 		net := "TCP closed"
-		if n := cfg.Tools.Bash.Sandbox.Network; n != nil && (n.All || len(n.Connect) > 0 || len(n.Bind) > 0) {
+		if n := sb.Network; n != nil && (n.All || len(n.Connect) > 0 || len(n.Bind) > 0) {
 			net = "TCP open on the ports the config lists"
 			if n.All {
 				net = "network not restricted"
 			}
 		}
-		r.ok("bash sandbox", "on — Landlock confines every command ("+net+")")
-	case on:
+		how := "on"
+		if sb.Optional {
+			how = "on (the default)"
+		}
+		r.ok("bash sandbox", how+" — the OS confines every command ("+net+")")
+	case sb.Enabled && sb.Optional:
+		r.warn("bash sandbox", "on by default, but this machine cannot enforce it, so bash runs unconfined (it asks before every command): "+avail.Error())
+	case sb.Enabled:
 		r.fail("bash sandbox", "on in the config, but this machine cannot enforce it, so bash refuses to run: "+avail.Error())
 	case avail == nil:
-		r.warn("bash sandbox", "off — this machine supports it: add \"sandbox\": {\"enabled\": true} to "+ouijaconfig.Path()+" to confine bash in every project")
+		r.warn("bash sandbox", "off in the config — this machine supports it: remove \"enabled\": false to confine bash")
 	default:
-		r.info("bash sandbox", "not available here ("+avail.Error()+"); bash asks before every command")
+		r.info("bash sandbox", "off, and not available here ("+avail.Error()+"); bash asks before every command")
 	}
 }
 

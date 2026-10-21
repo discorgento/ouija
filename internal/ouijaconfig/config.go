@@ -79,19 +79,29 @@ func (c *Config) HasKey(provider string) bool {
 }
 
 // Path returns the XDG config path ~/.config/ouija/config.json (or
-// $XDG_CONFIG_HOME/ouija/config.json).
+// $XDG_CONFIG_HOME/ouija/config.json), or "" when there is no absolute config
+// directory (HOME unset, a relative XDG_CONFIG_HOME). It used to fall back to
+// the relative .config/ouija/config.json: inside a cloned repository that is
+// the repository's own file, so it could ship a "global" config that trusts
+// its project config and turns the sandbox off.
 func Path() string {
 	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = ".config"
+	if err != nil || !filepath.IsAbs(dir) {
+		return ""
 	}
 	return filepath.Join(dir, "ouija", "config.json")
 }
+
+// errNoConfigDir is Save's error when Path has no answer.
+var errNoConfigDir = errors.New("no config directory: set HOME (or an absolute XDG_CONFIG_HOME)")
 
 // Load reads the config file. Returns nil, nil when the file does not exist
 // (first run) — callers should prompt the user to run `ouija setup`.
 func Load() (*Config, error) {
 	p := Path()
+	if p == "" {
+		return nil, nil // no config directory: run without a global config, trusting nothing
+	}
 	fi, err := os.Stat(p)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -122,6 +132,9 @@ func Load() (*Config, error) {
 // Save writes the config to the XDG path with permission 0600.
 func Save(cfg *Config) error {
 	p := Path()
+	if p == "" {
+		return errNoConfigDir
+	}
 	if err := os.MkdirAll(filepath.Dir(p), dirPerm); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}

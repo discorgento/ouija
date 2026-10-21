@@ -24,6 +24,15 @@ func isolateGlobalConfig(t *testing.T) {
 	t.Setenv("AppData", dir)
 }
 
+// userChose saves the provider and model the user picked in `ouija setup`:
+// an untrusted project config may not switch away from them.
+func userChose(t *testing.T, provider, model string) {
+	t.Helper()
+	if err := ouijaconfig.Save(&ouijaconfig.Config{Defaults: &ouijaconfig.Defaults{Provider: provider, Model: model}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeProjectConfig(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -151,6 +160,7 @@ func TestDiscoverConfig_WalksUpAndPrefersDotOuija(t *testing.T) {
 	root := t.TempDir()
 	writeProjectConfig(t, filepath.Join(root, "ouija.json"), `{"provider":"openai","model":"gpt-4o"}`)
 	writeProjectConfig(t, filepath.Join(root, ".ouija", "config.json"), minimalConfig)
+	userChose(t, "ollama", "llama3")
 
 	nested := filepath.Join(root, "a", "b")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -556,6 +566,9 @@ func TestProjectConfigWithoutModelKeepsGlobalChoice(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeProjectConfig(t, filepath.Join(dir, ".ouija", "config.json"), `{"rules":["project rule"]}`)
+	if err := Trust(filepath.Join(dir, ".ouija", "config.json")); err != nil { // rules is a sensitive key
+		t.Fatal(err)
+	}
 	t.Chdir(dir)
 	cfg, path, err := DiscoverConfig("")
 	if err != nil || path == "" {
@@ -644,5 +657,30 @@ func TestRun_ProgressBracketsTheRun(t *testing.T) {
 	}
 	if strings.Join(p.calls, ",") != "start,stop" || !f.ran {
 		t.Fatalf("calls = %v, ran = %v", p.calls, f.ran)
+	}
+}
+
+// No sandbox in the global config leaves it to the engine's default (on);
+// "enabled": false there turns it off for every project that does not turn
+// it on itself.
+func TestGlobalSandboxOffTurnsTheDefaultOff(t *testing.T) {
+	isolateGlobalConfig(t)
+	t.Chdir(t.TempDir())
+	cfg, _, err := DiscoverConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tools != nil && cfg.Tools.Bash != nil && cfg.Tools.Bash.Sandbox != nil {
+		t.Fatalf("no global sandbox: got %+v, want none (the engine default applies)", cfg.Tools.Bash.Sandbox)
+	}
+	if err := ouijaconfig.Save(&ouijaconfig.Config{Sandbox: &engine.SandboxConfig{Enabled: false}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = DiscoverConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Tools == nil || cfg.Tools.Bash == nil || cfg.Tools.Bash.Sandbox == nil || cfg.Tools.Bash.Sandbox.Enabled {
+		t.Fatalf("global enabled:false: got %+v, want an explicit off", cfg.Tools)
 	}
 }

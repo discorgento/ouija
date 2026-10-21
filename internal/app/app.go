@@ -50,8 +50,8 @@ func DiscoverConfig(explicit string) (*engine.Config, string, error) {
 	// Sensitive fields are cleared on every untrusted file, whatever the key
 	// detection says: what the user sees warned about is not the guard.
 	if projectCfg != nil && explicit == "" && !trusted(globalCfg, cfgPath, data) {
-		stripUntrusted(projectCfg)
-		if keys, _ := sensitiveKeysIn(data); len(keys) > 0 {
+		stripUntrusted(projectCfg, globalCfg)
+		if keys, _ := sensitiveKeysIn(data, globalCfg); len(keys) > 0 {
 			slog.Warn("untrusted project config: ignoring "+strings.Join(keys, ", ")+
 				" — run `ouija trust` to apply them", "path", cfgPath)
 		}
@@ -94,6 +94,9 @@ func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
 		for _, rel := range []string{".ouija/config.json", ".ouija.json", "ouija.json"} {
 			p := filepath.Join(dir, rel)
 			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				if err := staysInDir(p, dir); err != nil {
+					return nil, "", nil, err
+				}
 				// A broken file is an error: silently skipping it would run
 				// with the parent's or the global config instead.
 				return load(p)
@@ -108,19 +111,57 @@ func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
 	return nil, "", nil, nil
 }
 
+// staysInDir refuses a discovered config whose real file lies outside dir,
+// the directory it was found in. A repository can ship .ouija.json as a
+// symlink: to another project's trusted config it would borrow that trust (it
+// is keyed on the real file), and to ~/.config/ouija/config.json a chat save
+// would overwrite the global config, API keys and sandbox included. A symlink
+// that stays inside the directory is fine.
+func staysInDir(p, dir string) error {
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return err
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	if rel, err := filepath.Rel(realDir, real); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%s points outside %s (to %s): ouija does not load a project config from elsewhere — copy the file instead of linking it", p, dir, real)
+	}
+	return nil
+}
+
 // applyGlobalSandbox makes the global sandbox a floor no project can lower.
 // It runs after the project overlay: a project's sandbox that is off (or
 // absent) is replaced by the global one, and an enabled one keeps its extra
 // paths and ports on top of the global ones. Only a trusted project reaches
 // here with a sandbox section at all; an untrusted one had it stripped.
 func applyGlobalSandbox(cfg *engine.Config, globalCfg *ouijaconfig.Config) {
-	if globalCfg == nil || globalCfg.Sandbox == nil || !globalCfg.Sandbox.Enabled {
+	if globalCfg == nil || globalCfg.Sandbox == nil {
+		return // the engine's default sandbox applies, unless the project set one
+	}
+	if !globalCfg.Sandbox.Enabled {
+		// Turned off globally: off, unless a trusted project turns it on.
+		if cfg.Tools == nil || cfg.Tools.Bash == nil || cfg.Tools.Bash.Sandbox == nil {
+			setBashSandbox(cfg, &engine.SandboxConfig{Enabled: false})
+		}
 		return
 	}
+	var project *engine.SandboxConfig
+	if cfg.Tools != nil && cfg.Tools.Bash != nil {
+		project = cfg.Tools.Bash.Sandbox
+	}
+	setBashSandbox(cfg, mergeSandbox(globalCfg.Sandbox, project))
+}
+
+// setBashSandbox sets cfg's bash sandbox on copies of its tools sections:
+// the project's structs are not ours to change.
+func setBashSandbox(cfg *engine.Config, sb *engine.SandboxConfig) {
 	if cfg.Tools == nil {
 		cfg.Tools = &engine.ToolsConfig{}
 	} else {
-		tools := *cfg.Tools // the project's struct is not ours to change
+		tools := *cfg.Tools
 		cfg.Tools = &tools
 	}
 	if cfg.Tools.Bash == nil {
@@ -129,7 +170,7 @@ func applyGlobalSandbox(cfg *engine.Config, globalCfg *ouijaconfig.Config) {
 		bash := *cfg.Tools.Bash
 		cfg.Tools.Bash = &bash
 	}
-	cfg.Tools.Bash.Sandbox = mergeSandbox(globalCfg.Sandbox, cfg.Tools.Bash.Sandbox)
+	cfg.Tools.Bash.Sandbox = sb
 }
 
 // mergeSandbox is the global sandbox plus what an enabled project sandbox
@@ -137,9 +178,10 @@ func applyGlobalSandbox(cfg *engine.Config, globalCfg *ouijaconfig.Config) {
 // adds nothing.
 func mergeSandbox(global, project *engine.SandboxConfig) *engine.SandboxConfig {
 	out := &engine.SandboxConfig{
-		Enabled: true,
-		Read:    slices.Clone(global.Read),
-		Write:   slices.Clone(global.Write),
+		Enabled:          true,
+		Read:             slices.Clone(global.Read),
+		Write:            slices.Clone(global.Write),
+		AllowUnsandboxed: global.AllowUnsandboxed,
 	}
 	if global.Network != nil {
 		n := *global.Network
@@ -148,6 +190,11 @@ func mergeSandbox(global, project *engine.SandboxConfig) *engine.SandboxConfig {
 	}
 	if project == nil || !project.Enabled {
 		return out
+	}
+	// A project may forbid the escape hatch, never allow it over the global.
+	if !project.UnsandboxedAllowed() {
+		forbid := false
+		out.AllowUnsandboxed = &forbid
 	}
 	out.Read = append(out.Read, project.Read...)
 	out.Write = append(out.Write, project.Write...)

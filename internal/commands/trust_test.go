@@ -3,8 +3,10 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
 )
 
@@ -35,5 +37,24 @@ func TestTrustRevokeAfterPath(t *testing.T) {
 	}
 	if err := Trust([]string{path, "extra"}); err == nil {
 		t.Fatal("a stray argument was accepted")
+	}
+}
+
+// The trust prompt shows what a sandbox section loosens, not just "(no bash
+// allowlist)": extra paths and the network are what the user is agreeing to.
+func TestTrustShowsSandboxLoosening(t *testing.T) {
+	cfg := &engine.Config{Tools: &engine.ToolsConfig{Bash: &engine.BashConfig{Sandbox: &engine.SandboxConfig{
+		Enabled: true, Read: []string{"~/"}, Write: []string{"~/"},
+		Network: &engine.SandboxNetwork{All: true},
+	}}}}
+	got := describeSensitive("tools", cfg)
+	for _, want := range []string{"reads ~/", "writes ~/", "ANY network"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("describeSensitive(tools) = %q, want it to mention %q", got, want)
+		}
+	}
+	cfg.Rules = []string{"exfiltrate"}
+	if got := describeSensitive("rules", cfg); !strings.Contains(got, "exfiltrate") {
+		t.Errorf("describeSensitive(rules) = %q", got)
 	}
 }

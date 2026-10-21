@@ -192,17 +192,26 @@ func TestDoctor_Sandbox(t *testing.T) {
 	}
 	avail := engine.SandboxAvailable()
 
-	off := write("")
+	// No sandbox in any config: the default one, on where the OS has it.
+	def := write("")
 	switch {
-	case avail == nil && !strings.Contains(off, "bash sandbox     off — this machine supports it"):
+	case avail == nil && !strings.Contains(def, "bash sandbox     on (the default) — the OS confines every command (TCP closed)"):
+		t.Errorf("default sandbox on a machine that supports it:\n%s", def)
+	case avail != nil && !strings.Contains(def, "bash runs unconfined"):
+		t.Errorf("default sandbox on a machine without it:\n%s", def)
+	}
+
+	off := write(`,"sandbox":{"enabled":false}`)
+	switch {
+	case avail == nil && !strings.Contains(off, "bash sandbox     off in the config — this machine supports it"):
 		t.Errorf("sandbox off on a machine that supports it:\n%s", off)
 	case avail != nil && !strings.Contains(off, "not available here"):
-		t.Errorf("sandbox on a machine without it:\n%s", off)
+		t.Errorf("sandbox off on a machine without it:\n%s", off)
 	}
 
 	on := write(`,"sandbox":{"enabled":true}`)
 	switch {
-	case avail == nil && !strings.Contains(on, "bash sandbox     on — Landlock confines every command (TCP closed)"):
+	case avail == nil && !strings.Contains(on, "bash sandbox     on — the OS confines every command (TCP closed)"):
 		t.Errorf("global sandbox on:\n%s", on)
 	case avail != nil && !strings.Contains(on, "cannot enforce it"):
 		t.Errorf("global sandbox on, machine without it:\n%s", on)

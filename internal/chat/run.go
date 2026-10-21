@@ -108,7 +108,9 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 			// command to config.json, so one keystroke silently allowlisted
 			// it forever. Session also persists, because the user asked for
 			// the approval to outlive this run.
-			if resp.allowed && resp.forSession && baseTool(tool) == "bash" {
+			// Not from a run outside the sandbox: that approval lifts the
+			// confinement of one command, it is no reason to allowlist it.
+			if resp.allowed && resp.forSession && baseTool(tool) == "bash" && input["unsandboxed"] != true {
 				if cmd, ok := input["command"].(string); ok {
 					// Only a fully static command is learned, one pattern per
 					// simple command: approving `echo $(whoami)` must not
