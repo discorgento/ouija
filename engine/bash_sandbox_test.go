@@ -445,3 +445,54 @@ func TestUnsandboxedApprovalCannotBeBorrowed(t *testing.T) {
 		}
 	}
 }
+
+// With no permission config bash is refused (write tier); asking to run it
+// outside the sandbox must not get further than that (#27).
+func TestUnsandboxedWithoutPermissionConfigIsRefused(t *testing.T) {
+	eng := newTestEngine(&mockProvider{}, t.TempDir())
+	eng.tools.sandbox = DefaultSandbox()
+	asked := false
+	am := NewApprovalManager()
+	am.SetCallback(func(context.Context, string, map[string]any) (ApprovalResult, error) {
+		asked = true
+		return ApprovalResult{Allowed: true}, nil
+	})
+	eng.SetApprovalManager(am)
+	res := eng.runner.Run(context.Background(), "t", ToolCall{Name: "bash", Input: map[string]any{"command": "echo RAN", "unsandboxed": true}}, nil, nil)
+	if strings.Contains(res.String(), "RAN") || asked {
+		t.Fatalf("ran (asked=%v): %s", asked, res.String())
+	}
+}
+
+// A toolchain grant that is a symlink to credentials is dropped, not
+// followed (#25).
+func TestHomeGrantSymlinkToCredentialsIsDropped(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	key := filepath.Join(home, ".ssh", "id_rsa")
+	if err := os.MkdirAll(filepath.Dir(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key, []byte("TOPSECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".local"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".ssh"), filepath.Join(home, ".local", "lib")); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	policy, err := buildSandboxPolicy(t.TempDir(), DefaultSandbox())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range policy.ReadDirs {
+		if strings.HasPrefix(d, filepath.Join(home, ".ssh")) || d == filepath.Join(home, ".local", "lib") {
+			t.Fatalf("the grant followed the symlink to %s", d)
+		}
+	}
+	_, _, run := sandboxFixture(t, DefaultSandbox())
+	if res := run("cat " + filepath.Join(home, ".local", "lib", "id_rsa")); strings.Contains(fmtData(res), "TOPSECRET") {
+		t.Fatal("the key was readable through the symlinked grant")
+	}
+}
