@@ -17,7 +17,9 @@ answer is no. Each layer below is a hard rule first and a preference second.
 ## Layer 1: Filesystem sandbox
 
 Every file tool stays inside the project root. `SafeJoin()` checks the path
-lexically and rejects `../` traversal. ouija then resolves symlinks one path
+lexically and rejects `../` traversal. An absolute path names that file: one
+inside the project works like its relative path, one outside is refused like
+`../` (or goes through the approval for a path outside the project). ouija then resolves symlinks one path
 component at a time, rather than calling `EvalSymlinks` on the full path, so it
 detects an escape even when the final target does not exist yet. It covers a
 dangling symlink too: ouija follows it to the missing target that a write would
@@ -316,6 +318,9 @@ through DNS), and opening any TCP port opens DNS (UDP 53) with it, no other
 UDP port. On a kernel with ABI v9 Landlock does not filter UDP: with no port
 open the seccomp filter below refuses UDP sockets anyway, but once a port is
 open any UDP traffic goes out, DNS queries that can carry data included.
+With no port open, npm and pip are also told not to retry (`npm_config_fetch_retries=0`, `PIP_RETRIES=0`, unless you
+set them), so a registry they can never reach fails at once instead of after
+a minute of retries.
 
 Landlock filters TCP and UDP and no other protocol. MPTCP, which the kernel
 enables by default, reaches any server past Landlock's TCP rules, and so
@@ -408,10 +413,11 @@ A boundary scoped to the project does **not** cover the following, by design:
   command. In a project with more than 50,000 directories the search stops
   early, and the result says so. The result names what was put back. It is
   narrower than macOS's up-front denial: a git directory moved away is not
-  brought back. Other commands, unconfined or approved outside the
-  sandbox, still get the **git guard** notice: ouija fingerprints the same
-  files around every bash command and the chat shows a banner when one
-  changes. The file tools refuse `.git/hooks` and `.git/config` on every OS.
+  brought back. A confined command that only made ordinary changes
+  (`git init`, a remote, `user.name`) gets no notice. Other commands,
+  unconfined or approved outside the sandbox, get the **git guard** notice:
+  ouija fingerprints the same files around every bash command and the chat
+  shows a banner when one changes. The file tools refuse `.git/hooks` and `.git/config` on every OS.
 - **Other project files that tools run are not watched.** The project is
   writable, so a confined command can change what a build or an editor runs
   later, unconfined: `.yarnrc.yml` (`yarnPath`), a project `.npmrc`,
