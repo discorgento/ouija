@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -137,11 +139,18 @@ func openIn(r *os.Root, rootAbs, full string, flag int, perm fs.FileMode, lc *li
 	// cancellation reaches a blocked open.
 	flag |= openNonblock
 	if rel, ok := rootRel(rootAbs, full); ok {
-		if f, err = r.OpenFile(rel, flag, perm); err != nil {
-			return nil, err
-		}
-	} else if f, err = os.OpenFile(full, flag, perm); err != nil {
-		return nil, err // an approved escape
+		f, err = r.OpenFile(rel, flag, perm)
+	} else {
+		f, err = os.OpenFile(full, flag, perm) // an approved escape
+	}
+	if errors.Is(err, syscall.ENXIO) {
+		// A non-blocking write open of a FIFO with no reader: refused as
+		// any other file that is not regular, whatever the OS calls it
+		// ("no such device or address", "device not configured").
+		return nil, fmt.Errorf("%s is not a regular file", full)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if err := verifyOpened(f, rootAbs, full, flag&(os.O_WRONLY|os.O_RDWR) != 0, lc); err != nil {
 		f.Close()
