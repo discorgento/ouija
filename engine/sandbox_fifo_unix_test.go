@@ -33,7 +33,7 @@ func TestOpenResolvedRefusesAFIFO(t *testing.T) {
 		go func() { done <- tool() }()
 		select {
 		case out := <-done:
-			if !strings.Contains(out, "not a regular file") && !strings.Contains(out, "no such device") {
+			if !strings.Contains(out, "not a regular file") {
 				t.Errorf("%s: a FIFO was opened: %s", name, out)
 			}
 		case <-time.After(3 * time.Second):
