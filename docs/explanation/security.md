@@ -80,7 +80,8 @@ Some paths are **always blocked**, whatever the permission level: `/etc/*`,
 `.git/config`, `.git/hooks/*`, `.ssh/*`, `.gnupg/*`, `.aws/*`,
 `.password-store/*`, `.config/gh/*`, `.ouija/*`, `.ouija.json`, `ouija.json`,
 token files inside tool dirs (`.cargo/credentials.toml`, `.m2/settings.xml`,
-…), ouija's global config
+`~/.config/composer/auth.json`, `~/.config/pip/pip.conf`, …), browser
+profiles, ouija's global config
 (`~/.config/ouija/*`, that is `os.UserConfigDir()/ouija`, which holds every API
 key and the trusted-project list), `.config/gcloud/*`, and similar sensitive
 locations. Directories match exactly: `/etc` matches `/etc` but not

@@ -218,18 +218,24 @@ protected paths are:
   `/private/etc/*` and `/private/var/lib/*`;
 - the files `.env*`, `.gitconfig`, `.netrc`, `.npmrc`, `.dockercfg`,
   `.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`,
-  `.vault-token`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, `*.tfstate`,
-  `*.tfstate.backup`, and ouija's own `.ouija.json` and `ouija.json`;
+  `.vault-token`, `.yarnrc.yml`, `.s3cfg`, `.terraformrc`, `id_rsa`, `id_dsa`,
+  `id_ecdsa`, `id_ed25519`, `*.tfstate`, `*.tfstate.backup`, and ouija's own
+  `.ouija.json` and `ouija.json`;
 - the dirs `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`,
-  `.password-store`, `.config/gcloud`, `.config/kube`, `.config/gh`, and
-  ouija's global config dir;
+  `.password-store`, `.mozilla`, `.config/gcloud`, `.config/kube`,
+  `.config/gh`, `.config/hub`, `.config/glab-cli`, `.config/google-chrome`,
+  `.config/chromium`, and ouija's global config dir (also by its real path
+  when the config dir is a symlink);
 - a repository's `.git/config` and `.git/hooks`;
 - the token files inside tool dirs: `.cargo/credentials`,
   `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
-  `.gradle/gradle.properties`, `huggingface/token`, `uv/credentials`,
-  `.docker/config.json`, `git/credentials`,
-  `.terraform.d/credentials.tfrc.json`, `rclone/rclone.conf`,
-  `share/keyrings` and `etc/npmrc`.
+  `.gradle/gradle.properties`, `.docker/config.json`,
+  `.terraform.d/credentials.tfrc.json`, `.composer/auth.json`,
+  `.gem/credentials`; and, in your home directory only (in a project these
+  are ordinary paths), `huggingface/token`, `uv/credentials`,
+  `git/credentials`, `rclone/rclone.conf`, `share/keyrings`,
+  `share/kwalletd`, `composer/auth.json`, `pip/pip.conf`,
+  `containers/auth.json` and `etc/npmrc`.
 
 ### `tools.bash.sandbox`
 
@@ -264,8 +270,9 @@ toolchains in your home that builds read (`~/go/pkg/mod`, `~/.cargo/registry`,
 each installed version's `bin` and `lib`, such as
 `~/.nvm/versions/node/*/{bin,lib}` or `~/.pyenv/versions/*/{bin,lib}`, not the
 whole version dir, whose `etc` holds an `npmrc`; never the credentials next to
-them such as `~/.cargo/credentials.toml` or `~/.m2/settings.xml`), git's
-global ignore files
+them such as `~/.cargo/credentials.toml` or `~/.m2/settings.xml`; a grant that
+is a symlink counts by its real path, and is dropped when that path holds
+credentials), git's global ignore files
 and the paths listed in `read` / `write` (`~/` is your home; relative paths are
 relative to the project). The rest of `$HOME` (`~/.ssh`, `~/.aws`, ouija's own
 config, your documents) stays unreachable, whatever the command or its

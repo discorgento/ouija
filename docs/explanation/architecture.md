@@ -143,10 +143,15 @@ the resolved absolute path, and bash commands. A protected path always yields
   (`.config/ouija`, or wherever `os.UserConfigDir()` puts it);
 - registry and model-hub token files inside tool dirs: `.cargo/credentials`,
   `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
-  `.gradle/gradle.properties`, `huggingface/token`, `uv/credentials`,
-  `.docker/config.json`, `git/credentials`,
-  `.terraform.d/credentials.tfrc.json`, `rclone/rclone.conf`,
-  `share/keyrings`, `etc/npmrc`;
+  `.gradle/gradle.properties`, `.docker/config.json`,
+  `.terraform.d/credentials.tfrc.json`, `.composer/auth.json`,
+  `.gem/credentials`; and, under the home directory only, `huggingface/token`,
+  `uv/credentials`, `git/credentials`, `rclone/rclone.conf`, `share/keyrings`,
+  `share/kwalletd`, `composer/auth.json`, `pip/pip.conf`,
+  `containers/auth.json`, `etc/npmrc`;
+- browser profiles and other CLIs' tokens: `.mozilla`, `.config/google-chrome`,
+  `.config/chromium`, `.config/hub`, `.config/glab-cli`, `.yarnrc.yml`,
+  `.s3cfg`, `.terraformrc`;
 - system directories: `/etc/**`, `/var/lib/**`, `/proc/**`, `/sys/**`, and on
   macOS `/private/etc/**` and `/private/var/lib/**`.
 
