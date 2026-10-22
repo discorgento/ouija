@@ -17,3 +17,7 @@ func linkCount(_ string, fi os.FileInfo) uint64 {
 
 // longName is the identity on Unix, which has no short names.
 func longName(p string) string { return p }
+
+// openNonblock keeps an open from waiting on a FIFO (a reader or writer that
+// never comes) or a device; regular files read and write as without it.
+const openNonblock = syscall.O_NONBLOCK

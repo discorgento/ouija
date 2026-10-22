@@ -365,3 +365,85 @@ func TestDeleteFileUnderSymlinkedRoot(t *testing.T) {
 		t.Fatal("deleted the project root")
 	}
 }
+
+// write_file and edit_file rewrite the file in place: an executable script
+// stays executable, and a shorter content leaves no tail of the old one.
+func TestWriteAndEditKeepModeAndTruncate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no executable bit on Windows")
+	}
+	root := t.TempDir()
+	p := filepath.Join(root, "run.sh")
+	if err := os.WriteFile(p, []byte("#!/bin/sh\necho a long line\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if res := writeFileTool(context.Background(), root, map[string]any{"path": "run.sh", "content": "#!/bin/sh\n"}); res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	if res := editFileTool(context.Background(), root, map[string]any{"path": "run.sh", "oldString": "sh\n", "newString": "sh\nx\n"}); res.Error != nil {
+		t.Fatal(res.Error)
+	}
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "#!/bin/sh\nx\n" {
+		t.Errorf("content = %q", b)
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Errorf("mode = %v, want 0755", fi.Mode().Perm())
+	}
+}
+
+// The file tools read git metadata but never write it: beyond .git/config
+// and hooks, info/attributes runs filters, objects/info/alternates pulls
+// objects from elsewhere, and a .git file at any depth points git at another
+// repository.
+func TestGitMetadataIsNotWritten(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{".git/HEAD": "ref: refs/heads/main\n", ".git/objects/info/alternates": "", "sub/.git": "gitdir: ../.git\n"})
+	ctx := context.Background()
+	for _, p := range []string{".git/HEAD", ".git/info/attributes", ".git/objects/info/alternates", ".git/commondir", "sub/.git", "new/.git", ".GIT/HEAD"} {
+		if res := writeFileTool(ctx, root, map[string]any{"path": p, "content": "x"}); res.Error == nil {
+			t.Errorf("write_file %s was allowed", p)
+		}
+		if res := deleteFileTool(ctx, root, map[string]any{"path": p}); res.Error == nil {
+			t.Errorf("delete_file %s was allowed", p)
+		}
+		if lvl := NewDefaultPermissionConfig().Check("write_file", filepath.Join(root, p)); lvl != Deny {
+			t.Errorf("Check(write_file, %s) = %v, want deny", p, lvl)
+		}
+	}
+	if _, err := SafeWriteFile(ctx, root, ".git/info/attributes", []byte("x"), 0o644); err == nil {
+		t.Error("SafeWriteFile wrote .git/info/attributes")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "info")); err == nil {
+		t.Error(".git/info was created")
+	}
+	if res := readFileTool(ctx, root, map[string]any{"path": ".git/HEAD"}); res.Error != nil || !strings.Contains(res.Data, "refs/heads/main") {
+		t.Errorf("read of .git/HEAD: %+v", res)
+	}
+	if res := writeFileTool(ctx, root, map[string]any{"path": ".github/workflows/ci.yml", "content": "x"}); res.Error != nil {
+		t.Errorf(".github is not .git: %+v", res.Error)
+	}
+}
+
+// edit_file, and its preview shown before the approval prompt, read a file
+// whole: one past maxEditBytes is refused instead of read into memory.
+func TestEditRefusesAHugeFile(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "big.txt")
+	if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(p, maxEditBytes+1); err != nil {
+		t.Fatal(err)
+	}
+	res := editFileTool(context.Background(), root, map[string]any{"path": "big.txt", "oldString": "x", "newString": "y"})
+	if res.Error == nil || !strings.Contains(res.Error.Message, "larger than") {
+		t.Fatalf("a huge file was edited: %s", res.String())
+	}
+	if fi, _ := os.Stat(p); fi.Size() != maxEditBytes+1 {
+		t.Fatal("the huge file changed")
+	}
+}

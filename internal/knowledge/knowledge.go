@@ -3,6 +3,7 @@ package knowledge
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,22 +17,23 @@ const (
 	FileName = "docs/knowledge.md"
 )
 
-// resolvePath returns the knowledge file under dir, through the sandbox: a
-// docs/ or knowledge.md symlink planted in a repo must not make Load read
-// (into every prompt) or Save append to a file outside the project, or a
-// protected one.
-func resolvePath(dir string) (string, error) {
-	return engine.SafeResolve(context.Background(), dir, FileName)
+// openFile opens the knowledge file under dir, through the sandbox: a docs/
+// or knowledge.md symlink planted in a repo — before the check or swapped in
+// after it — must not make Load read (into every prompt) or Save append to a
+// file outside the project, or a protected one.
+func openFile(dir string, flag int) (*os.File, error) {
+	return engine.SafeOpenFile(context.Background(), dir, FileName, flag, 0o644)
 }
 
 // Load reads the knowledge file from the current directory.
 // Returns empty string if the file doesn't exist or can't be read.
 func Load(dir string) string {
-	path, err := resolvePath(dir)
+	f, err := openFile(dir, os.O_RDONLY)
 	if err != nil {
 		return ""
 	}
-	b, err := os.ReadFile(path)
+	defer f.Close()
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return ""
 	}
@@ -49,26 +51,17 @@ func Save(dir, fact string) error {
 		return fmt.Errorf("empty directory")
 	}
 
-	path, err := resolvePath(dir)
+	// SafeOpenFile creates docs/ too.
+	f, err := openFile(dir, os.O_APPEND|os.O_CREATE|os.O_WRONLY)
 	if err != nil {
 		return fmt.Errorf("knowledge file: %w", err)
 	}
-	dirPath := filepath.Dir(path)
-
-	if err := os.MkdirAll(dirPath, 0o755); err != nil {
-		return fmt.Errorf("create docs dir: %w", err)
-	}
+	defer f.Close()
 
 	var header string
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if fi, err := f.Stat(); err == nil && fi.Size() == 0 {
 		header = fmt.Sprintf("# Knowledge — %s\n\n", filepath.Base(dir))
 	}
-
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("open knowledge file: %w", err)
-	}
-	defer f.Close()
 
 	if header != "" {
 		if _, err := f.WriteString(header); err != nil {

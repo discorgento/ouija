@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,49 @@ func TestHardLinkToADeepOrNewCredential(t *testing.T) {
 	}
 	if !linksToProtected(filepath.Join(root, "b.txt")) {
 		t.Error("a hard link to a key created after the cache was filled was not caught")
+	}
+}
+
+// A hard link inside the project is the protected file under another name:
+// .env linked as notes.txt was read and grepped without a prompt, and
+// .git/config linked as notes.txt was written. pnpm's node_modules, hard
+// links from its store, stays readable.
+func TestHardLinkToProjectSecretRefused(t *testing.T) {
+	root, store := t.TempDir(), t.TempDir()
+	writeTree(t, root, map[string]string{".env": "API_KEY=s3cr3t\n", ".git/config": "[core]\n"})
+	if err := os.WriteFile(filepath.Join(store, "index.js"), []byte("module.exports = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for link, target := range map[string]string{
+		"notes.txt":                     filepath.Join(root, ".env"),
+		"cfg.txt":                       filepath.Join(root, ".git", "config"),
+		"node_modules/pkg/index.js":     filepath.Join(store, "index.js"),
+		"node_modules/pkg/notes.txt":    filepath.Join(root, ".env"),
+		"node_modules/pkg/notes-cfg.md": filepath.Join(root, ".git", "config"),
+	} {
+		if err := os.Link(target, filepath.Join(root, filepath.FromSlash(link))); err != nil {
+			t.Skipf("hard links: %v", err)
+		}
+	}
+	ctx := context.Background()
+	for _, p := range []string{"notes.txt", "node_modules/pkg/notes.txt", "node_modules/pkg/notes-cfg.md"} {
+		if res := readFileTool(ctx, root, map[string]any{"path": p}); res.Error == nil {
+			t.Errorf("read_file %s handed out a protected file: %q", p, res.Data)
+		}
+	}
+	if res := grepTool(ctx, root, map[string]any{"pattern": "s3cr3t|core"}); strings.Contains(res.Data, "s3cr3t") || strings.Contains(res.Data, "core") {
+		t.Errorf("grep found the linked secrets: %q", res.Data)
+	}
+	if res := writeFileTool(ctx, root, map[string]any{"path": "cfg.txt", "content": "[core]\n\tfsmonitor = evil\n"}); res.Error == nil {
+		t.Error("write_file wrote .git/config through a hard link")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, ".git", "config")); string(b) != "[core]\n" {
+		t.Errorf(".git/config is now %q", b)
+	}
+	if res := readFileTool(ctx, root, map[string]any{"path": "node_modules/pkg/index.js"}); res.Error != nil {
+		t.Errorf("a pnpm-linked file in node_modules: %+v", res.Error)
 	}
 }

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,18 +22,28 @@ func writeFileTool(ctx context.Context, root string, in map[string]any) ToolResu
 	// Containment check (handles both lexical and symlink escapes, plus
 	// pre-approved escapes via context). resolve() walks intermediate path
 	// components so symlink directories are detected even when the final
-	// file doesn't exist yet — no TOCTOU gap.
+	// file doesn't exist yet; the directories and the file are then made
+	// and opened through the project's os.Root (openResolved), so a link
+	// swapped in after the check is not followed.
 	full, err := resolve(ctx, root, p)
 	if err != nil {
 		return errPermissionDenied(err.Error())
 	}
+	if err := checkGitWrite(full); err != nil {
+		return errPermissionDenied(err.Error())
+	}
 
 	dir := filepath.Dir(full)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := mkdirResolved(root, dir); err != nil {
 		return errInternal(fmt.Sprintf("mkdir %s: %v", dir, err))
 	}
 
-	if err := writeKeepingMode(full, []byte(content)); err != nil {
+	f, err := openResolved(root, full, os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return errInternal(fmt.Sprintf("write %s: %v", p, err))
+	}
+	defer f.Close()
+	if err := rewrite(f, []byte(content)); err != nil {
 		return errInternal(fmt.Sprintf("write %s: %v", p, err))
 	}
 
@@ -51,10 +62,19 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	if err != nil {
 		return errPermissionDenied(err.Error())
 	}
+	if err := checkGitWrite(full); err != nil {
+		return errPermissionDenied(err.Error())
+	}
 
-	b, err := os.ReadFile(full)
+	// One open for the read and the write: the file edited is the one read.
+	f, err := openResolved(root, full, os.O_RDWR, 0)
 	if err != nil {
 		return errNotFound(fmt.Sprintf("read %s: %v", p, err))
+	}
+	defer f.Close()
+	b, err := readEditable(f)
+	if err != nil {
+		return errInvalidInput(fmt.Sprintf("edit %s: %v", p, err))
 	}
 	orig := string(b)
 
@@ -68,7 +88,7 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	}
 
 	updated := strings.Replace(orig, oldStr, newStr, 1)
-	if err := writeKeepingMode(full, []byte(updated)); err != nil {
+	if err := rewrite(f, []byte(updated)); err != nil {
 		return errInternal(fmt.Sprintf("write %s: %v", p, err))
 	}
 
@@ -77,14 +97,15 @@ func editFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	return ToolResult{Data: fmt.Sprintf("✓ edited %s\n%s", p, diff)}
 }
 
-// writeKeepingMode writes data to path, keeping an existing file's
-// permissions (an executable script stays executable); new files get 0644.
-func writeKeepingMode(path string, data []byte) error {
-	mode := fs.FileMode(0o644)
-	if fi, err := os.Stat(path); err == nil {
-		mode = fi.Mode().Perm()
+// rewrite replaces the contents of f, an open file, with data. Opened, not
+// recreated: an existing file keeps its permissions (an executable script
+// stays executable); a new one got 0644 when it was opened.
+func rewrite(f *os.File, data []byte) error {
+	if err := f.Truncate(0); err != nil {
+		return err
 	}
-	return os.WriteFile(path, data, mode)
+	_, err := f.WriteAt(data, 0)
+	return err
 }
 
 // deleteFileTool removes a file or a directory with its contents (the
@@ -96,6 +117,9 @@ func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolRes
 
 	full, err := resolve(ctx, root, p)
 	if err != nil {
+		return errPermissionDenied(err.Error())
+	}
+	if err := checkGitWrite(full); err != nil {
 		return errPermissionDenied(err.Error())
 	}
 
@@ -122,10 +146,29 @@ func deleteFileTool(ctx context.Context, root string, in map[string]any) ToolRes
 	if held := protectedInside(full); len(held) > 0 {
 		return errPermissionDenied(fmt.Sprintf("refusing to delete %s: it holds protected files (%s)", p, strings.Join(held, ", ")))
 	}
-	if err := os.RemoveAll(full); err != nil {
+	if err := removeResolved(rootAbs, full); err != nil {
 		return errInternal(fmt.Sprintf("delete %s: %v", p, err))
 	}
 	return ToolResult{Data: fmt.Sprintf("✓ deleted %s", p)}
+}
+
+// removeResolved removes full and what it holds; inside the project through
+// an os.Root, so a parent directory swapped for a symlink after the checks
+// cannot redirect the removal out of the project.
+func removeResolved(rootAbs, full string) error {
+	// The parent through rootRel; the last name is removed as itself (a
+	// link, not its target).
+	dir, ok := rootRel(rootAbs, filepath.Dir(full))
+	if !ok {
+		return os.RemoveAll(full) // an approved escape
+	}
+	rel := filepath.Join(dir, filepath.Base(full))
+	r, err := os.OpenRoot(rootAbs)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return r.RemoveAll(rel)
 }
 
 // protectedInside lists (up to five) the protected entries under dir, relative
@@ -254,7 +297,9 @@ func writeFilePreview(ctx context.Context, root string, in map[string]any) strin
 		lineInfo = "1 line (empty)"
 	}
 
-	preview := fmt.Sprintf("will %s %s (%s, %d bytes%s)", action, p, lineInfo, len(content), existing)
+	// Where the write lands, not the name asked: a symlink notes.txt →
+	// Makefile previewed as "overwrite notes.txt".
+	preview := fmt.Sprintf("will %s %s (%s, %d bytes%s)", action, targetLabel(root, p), lineInfo, len(content), existing)
 	return preview
 }
 
@@ -287,11 +332,30 @@ func editFilePreview(ctx context.Context, root string, in map[string]any) string
 	if err != nil {
 		return ""
 	}
-	b, err := os.ReadFile(full)
+	f, err := openResolved(root, full, os.O_RDONLY, 0)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	b, err := readEditable(f)
 	if err != nil {
 		return ""
 	}
 	return BuildDiffSnippet(string(b), oldStr, newStr)
+}
+
+// maxEditBytes is the largest file edit_file reads whole. The preview reads
+// the file before the approval prompt, so a multi-gigabyte file in a
+// repository would otherwise exhaust memory before anyone was asked.
+const maxEditBytes = 16 << 20
+
+// readEditable reads a file for edit_file, refusing one past maxEditBytes.
+func readEditable(f *os.File) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(f, maxEditBytes+1))
+	if err == nil && len(b) > maxEditBytes {
+		return nil, fmt.Errorf("the file is larger than %d MB; edit it with bash instead", maxEditBytes>>20)
+	}
+	return b, err
 }
 
 func editFileDef() toolEntry {
@@ -322,27 +386,33 @@ func deleteFilePreview(ctx context.Context, root string, in map[string]any) stri
 		return "will delete " + p + " (outside sandbox?)"
 	}
 
-	fi, fiErr := os.Stat(full)
+	// What is removed: the last name as itself (a link, not its target), in
+	// its parent directory as reached on disk.
+	name := filepath.Join(physicalPath(filepath.Dir(full)), filepath.Base(full))
+	if rootAbs, err := canonRoot(root); err == nil && within(rootAbs, name) {
+		name, _ = filepath.Rel(rootAbs, name)
+	}
+	fi, fiErr := os.Lstat(full)
 	if fiErr != nil {
-		return "will delete " + p + " (not found locally — may already be gone)"
+		return "will delete " + name + " (not found locally — may already be gone)"
 	}
 
 	if fi.IsDir() {
 		entries, _ := os.ReadDir(full)
 		if len(entries) == 0 {
-			return fmt.Sprintf("will delete empty directory %s", p)
+			return fmt.Sprintf("will delete empty directory %s", name)
 		}
-		return fmt.Sprintf("⚠ will delete directory %s (%d items inside)", p, len(entries))
+		return fmt.Sprintf("⚠ will delete directory %s (%d items inside)", name, len(entries))
 	}
 
-	return fmt.Sprintf("will delete %s (%d bytes, mod %s)", p, fi.Size(), fi.ModTime().Format("06-01-02 15:04"))
+	return fmt.Sprintf("will delete %s (%d bytes, mod %s)", name, fi.Size(), fi.ModTime().Format("06-01-02 15:04"))
 }
 
 func deleteFileDef() toolEntry {
 	return toolEntry{
 		def: ToolDef{
 			Name:        "delete_file",
-			Description: "Delete a file or empty dir.",
+			Description: "Delete a file, or a directory with everything in it (refused if it holds a protected file).",
 			Schema: schema.Obj(map[string]any{
 				"path": schema.Str("file path"),
 			}, "path"),

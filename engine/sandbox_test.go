@@ -212,3 +212,78 @@ func TestResolveRejectsDanglingSymlinkEscape(t *testing.T) {
 		t.Fatalf("in-root dangling link rejected: %v", err)
 	}
 }
+
+// A symlink swapped in after resolve approved the path is not followed: the
+// open goes through the project's os.Root (no way out) and the opened file is
+// checked against the policy again (no protected file inside).
+func TestOpenResolvedRefusesASymlinkSwappedInAfterTheCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	ctx := context.Background()
+	root, outside := t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	writeTree(t, outside, map[string]string{"secret.txt": "OUTSIDE"})
+	writeTree(t, root, map[string]string{"notes.txt": "notes", "out.txt": "out", ".env": "TOKEN=1"})
+	swap := func(name, target string) string {
+		full, err := resolve(ctx, root, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(full); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, full); err != nil {
+			t.Fatal(err)
+		}
+		return full
+	}
+
+	out := swap("out.txt", secret)
+	if f, err := openResolved(root, out, os.O_RDONLY, 0); err == nil {
+		f.Close()
+		t.Error("a read followed a link swapped in to a file outside the project")
+	}
+	if f, err := openResolved(root, out, os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
+		f.Close()
+		t.Error("a write followed a link swapped in to a file outside the project")
+	}
+	notes := swap("notes.txt", filepath.Join(root, ".env"))
+	if f, err := openResolved(root, notes, os.O_RDONLY, 0); err == nil {
+		f.Close()
+		t.Error("a read followed a link swapped in to .env")
+	}
+	if f, err := openResolved(root, notes, os.O_RDWR, 0); err == nil {
+		f.Close()
+		t.Error("a write followed a link swapped in to .env")
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "OUTSIDE" {
+		t.Errorf("the outside file changed: %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, ".env")); string(b) != "TOKEN=1" {
+		t.Errorf(".env changed: %q", b)
+	}
+}
+
+// os.Root refuses absolute symlinks; a project's own absolute link to a file
+// inside it still reads, since the open uses the path resolve judged.
+func TestReadFileThroughAnAbsoluteSymlinkInsideTheProject(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{"src/real.txt": "content"})
+	if err := os.Symlink(filepath.Join(root, "src"), filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	res := readFileTool(context.Background(), root, map[string]any{"path": "alias/real.txt"})
+	if res.Error != nil || !strings.Contains(res.Data, "content") {
+		t.Fatalf("read through an absolute link inside the project: %+v", res)
+	}
+	if res := writeFileTool(context.Background(), root, map[string]any{"path": "alias/new.txt", "content": "x"}); res.Error != nil {
+		t.Fatalf("write through an absolute link inside the project: %+v", res.Error)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "src", "new.txt")); string(b) != "x" {
+		t.Fatalf("src/new.txt = %q", b)
+	}
+}

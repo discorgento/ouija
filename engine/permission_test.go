@@ -310,6 +310,72 @@ func TestProtectedPathFoldsCase(t *testing.T) {
 	}
 }
 
+// Folding is on for every OS: Linux has case-insensitive directories too
+// (ext4 casefold, vfat, exFAT), where `.ENV` opens `.env`.
+func TestProtectedPathFoldsCaseByDefault(t *testing.T) {
+	if !foldCase {
+		t.Fatal("case folding is off")
+	}
+	for _, p := range []string{"/p/.ENV", "/p/APP/ETC/env.php", "/p/server.KEY", "/home/u/.SSH/id_rsa"} {
+		if !isProtectedPath(p) {
+			t.Errorf("%s not protected", p)
+		}
+	}
+}
+
+// Secrets projects keep in their own tree: read tools are allowed without
+// approval, so anything left off the list goes to the provider.
+func TestProjectSecretsAreProtected(t *testing.T) {
+	for _, p := range []string{
+		"/p/app/etc/env.php", "/p/wp-config.php", "/p/blog/wp-config.php",
+		"/p/config/database.yml", "/p/config/master.key", "/p/config/credentials/production.key",
+		"/p/config/credentials.yml.enc", "/p/auth.json", "/p/sub/auth.json",
+		"/p/certs/server.pem", "/p/tls.key", "/p/sign.p12", "/p/sign.pfx",
+		"/p/android/release.jks", "/p/android/debug.keystore",
+		"/p/credentials.json", "/p/deploy-sa.json", "/p/service-account.json",
+		"/p/infra/terraform.tfvars", "/p/infra/prod.auto.tfvars", "/p/.htpasswd",
+		"/p/.yarnrc", "/p/.bundle/config", "/p/.dev.vars", "/p/local.settings.json",
+		"/p/kubeconfig", "/p/.kube/config", "/p/.docker/config.json",
+		"/p/config/secrets.yml", "/p/secrets.yaml",
+	} {
+		if !isProtectedPath(p) {
+			t.Errorf("%s not protected", p)
+		}
+	}
+	// Ordinary source next to them stays readable.
+	for _, p := range []string{
+		"/p/package.json", "/p/composer.json", "/p/tsconfig.json", "/p/app/etc/config.php",
+		"/p/app/etc/di.xml", "/p/config/routes.rb", "/p/config/application.yml",
+		"/p/src/keys.go", "/p/src/monkey.ts", "/p/docs/key.md", "/p/infra/variables.tf",
+		"/p/src/auth.ts", "/p/README.md",
+		".key", "/p/.key", // a jq filter in a bash command, not a key file
+	} {
+		if isProtectedPath(p) {
+			t.Errorf("%s protected", p)
+		}
+	}
+}
+
+// Every git config and hook directory runs code on the next git command once
+// written, not only the top-level .git/config and .git/hooks.
+func TestGitConfigsAndHooksAreProtected(t *testing.T) {
+	for _, p := range []string{
+		"/p/.git/config", "/p/.git/hooks", "/p/.git/hooks/pre-commit", "/p/.git/config.worktree",
+		"/p/.git/modules/lib/config", "/p/.git/modules/lib/hooks/post-checkout",
+		"/p/.git/modules/a/modules/b/config", "/p/.git/worktrees/wt/config.worktree",
+		"/p/vendor/lib/.git/config", "/p/vendor/lib/.git/hooks/pre-push", ".git/config",
+	} {
+		if !isProtectedPath(p) {
+			t.Errorf("%s not protected", p)
+		}
+	}
+	for _, p := range []string{"/p/.git/HEAD", "/p/.git/modules/lib/HEAD", "/p/src/config", "/p/hooks/useAuth.ts", "/p/.github/hooks/x"} {
+		if isProtectedPath(p) {
+			t.Errorf("%s protected", p)
+		}
+	}
+}
+
 // The running sandbox is the global floor merged in; saving must not write it
 // into the project file, where (trusted) it outlived the global setting.
 func TestSaveConfigAtKeepsTheProjectsOwnSandbox(t *testing.T) {
