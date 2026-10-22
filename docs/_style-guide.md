@@ -67,6 +67,21 @@ func Hello() string {
 🔮 ouija docs — [Index](../index.md) · [Related](related.md)
 ```
 
+## Images
+
+Every screenshot and GIF uses the same markup, centred and 800 pixels wide,
+with an `alt` text that says what the image shows:
+
+```html
+<p align="center">
+  <img src="../../assets/screens/chat-welcome.png" alt="What it shows" width="800">
+</p>
+```
+
+Screenshots of the chat come from `make screens`, never from a hand-made
+capture, so they share one size, font and frame and show the current version.
+The banner keeps its own width.
+
 ## Links
 
 Relative links only (no absolute paths, no `https://` for internal pages), so
