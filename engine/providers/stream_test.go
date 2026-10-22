@@ -157,3 +157,53 @@ func TestListOpenRouterFiltersModels(t *testing.T) {
 		t.Fatalf("models = %+v; want a/chat, z/chat", got)
 	}
 }
+
+// repeatReader streams s n times without holding n copies.
+func repeatReader(s string, n int) io.Reader {
+	rs := make([]io.Reader, n)
+	for i := range rs {
+		rs[i] = strings.NewReader(s)
+	}
+	return io.MultiReader(rs...)
+}
+
+// A stream of small events that never ends is cut at maxReplyBytes of text or
+// tool input: each event is within the per-event limit, but the reply would
+// otherwise grow until memory runs out.
+func TestStreamTotalSizeCap(t *testing.T) {
+	chunk := strings.Repeat("x", 1<<20)
+	n := maxReplyBytes>>20 + 2
+	for name, tc := range map[string]struct {
+		anthropic bool
+		event     string
+	}{
+		"openai text":       {false, `data: {"choices":[{"index":0,"delta":{"content":"` + chunk + `"}}]}` + "\n\n"},
+		"openai tool input": {false, `data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"x","arguments":"` + chunk + `"}}]}}]}` + "\n\n"},
+		"anthropic text":    {true, "event: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"" + chunk + "\"}}\n\n"},
+		"anthropic tool input": {true, "event: content_block_start\ndata: {\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t\",\"name\":\"x\",\"input\":{}}}\n\n" +
+			"event: content_block_delta\ndata: {\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"" + chunk + "\"}}\n\n"},
+	} {
+		var p engine.Provider
+		var c *Client
+		if tc.anthropic {
+			a := NewAnthropic("k")
+			p, c = a, a.client
+		} else {
+			o := NewOpenAI("k")
+			p, c = o, o.client
+		}
+		c.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(repeatReader(tc.event, n)),
+				Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Request: r}, nil
+		})
+		var err error
+		for _, e := range p.Chat(context.Background(), engine.ChatRequest{Model: "m"}) {
+			if e != nil {
+				err = e
+			}
+		}
+		if err == nil || !strings.Contains(err.Error(), "MiB of text and tool input") {
+			t.Errorf("%s: err = %v, want the response size cap", name, err)
+		}
+	}
+}

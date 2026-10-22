@@ -440,6 +440,13 @@ func (t *Tracer) WritePerfettoFile(path string) error {
 		return err
 	}
 	defer f.Close()
+	// The mode above applies to a new file only: an existing trace kept
+	// whatever mode it had, 0644 say. A device (/dev/stdout) is left alone.
+	if st, err := f.Stat(); err == nil && st.Mode().IsRegular() && st.Mode().Perm() != 0o600 {
+		if err := f.Chmod(0o600); err != nil {
+			return err
+		}
+	}
 	return t.WritePerfetto(f)
 }
 

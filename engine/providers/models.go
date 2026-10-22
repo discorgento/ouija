@@ -80,6 +80,11 @@ func listCacheKey(endpoint, apiKey string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
+// maxModelPages caps the pages ListModels follows. The real list fits in one
+// page of 1000; an endpoint that always answers has_more would otherwise keep
+// the listing going forever.
+const maxModelPages = 50
+
 // ListModels lists the models the key can use (GET /v1/models, every page).
 func (a *Anthropic) ListModels(ctx context.Context) ([]engine.ModelInfo, error) {
 	if a.apiKey == "" {
@@ -88,7 +93,7 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]engine.ModelInfo, error) 
 	headers := map[string]string{"x-api-key": a.apiKey, "anthropic-version": "2023-06-01"}
 	var out []engine.ModelInfo
 	after := ""
-	for {
+	for range maxModelPages {
 		u := anthropicModelsURL + "?limit=1000"
 		if after != "" {
 			u += "&after_id=" + url.QueryEscape(after)
@@ -118,8 +123,13 @@ func (a *Anthropic) ListModels(ctx context.Context) ([]engine.ModelInfo, error) 
 		if !page.HasMore || page.LastID == "" {
 			return out, nil
 		}
+		// A cursor that does not move would fetch the same page again.
+		if page.LastID == after {
+			return nil, engine.ErrProvider("anthropic: list models: the next page cursor did not advance")
+		}
 		after = page.LastID
 	}
+	return nil, engine.ErrProvider(fmt.Sprintf("anthropic: list models: more than %d pages", maxModelPages))
 }
 
 // anthropicModelsURL is the models endpoint (a variable for tests).

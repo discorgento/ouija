@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -69,4 +70,27 @@ func TestOpenAICompatListModels(t *testing.T) {
 	}
 	var lister engine.ModelLister = refused
 	_ = lister
+}
+
+// A models endpoint that always has more ends the listing: with a cursor that
+// does not move, at once; with one that does, after maxModelPages pages.
+func TestAnthropicListModelsStops(t *testing.T) {
+	for name, next := range map[string]func(page int) string{
+		"stuck cursor":   func(int) string { return "same" },
+		"endless cursor": func(page int) string { return fmt.Sprintf("m%d", page) },
+	} {
+		a := NewAnthropic("k")
+		pages := 0
+		a.client.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			pages++
+			if pages > maxModelPages+5 {
+				t.Fatalf("%s: still listing after %d pages", name, pages)
+			}
+			body := fmt.Sprintf(`{"data":[{"id":"m"}],"has_more":true,"last_id":%q}`, next(pages))
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
+		})
+		if _, err := a.ListModels(context.Background()); err == nil {
+			t.Errorf("%s: ListModels returned no error", name)
+		}
+	}
 }
