@@ -343,7 +343,7 @@ var commandUsage = map[string]string{
 	"config":   "usage: ouija config\n  Same wizard as `ouija setup`.",
 	"init":     "usage: ouija init\n  Interactive: write .ouija/config.json for this project (provider, model, optional key).",
 	"doctor":   "usage: ouija doctor\n  Check the config, the provider key and the harness wiring.",
-	"trust":    "usage: ouija trust [--revoke] [path]\n  Review and trust the project config (its permission, tools and sandbox, apiKey, systemPrompt, rules, projectRoot, a raised budget and a provider or model other than yours then apply).",
+	"trust":    "usage: ouija trust [--revoke] [--yes] [path]\n  Review and trust the project config (its permission, tools and sandbox, apiKey, systemPrompt, rules, totem dimensions, projectRoot, a raised budget and a provider or model other than yours then apply).\n  Asks before it records the trust; --yes skips the question, for scripts.",
 	"learn":    "usage: ouija learn [fact…]\n  Without a fact: show what was learned. A fact starting with - goes after --: ouija learn -- \"-v means verbose\"",
 	"generate": "usage: ouija generate totem [--external [dir]]\n  Scaffold a totem: in this ouija checkout, or as a standalone module with --external.",
 	"chat":     "usage: ouija chat [--continue|-c] [--config <file>] [--trace-file <file>]\n  Interactive chat with the project; --continue resumes this project's latest conversation.",

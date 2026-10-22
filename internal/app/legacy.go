@@ -20,6 +20,9 @@ func LoadProjectConfig(path string) (*engine.Config, error) {
 
 // parseProjectConfig is LoadProjectConfig on the file's contents.
 func parseProjectConfig(b []byte) (*engine.Config, error) {
+	if err := refuseDuplicateKeys(b); err != nil {
+		return nil, err
+	}
 	cfg, err := engine.ParseConfig(b)
 	if err != nil {
 		return nil, err

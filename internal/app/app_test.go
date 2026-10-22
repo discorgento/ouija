@@ -684,3 +684,27 @@ func TestGlobalSandboxOffTurnsTheDefaultOff(t *testing.T) {
 		t.Fatalf("global enabled:false: got %+v, want an explicit off", cfg.Tools)
 	}
 }
+
+// Discovery does not climb above the home directory: a config there (in
+// /home, or /) belongs to someone else and would apply to every project of
+// the user's.
+func TestDiscoveryStopsAtHome(t *testing.T) {
+	isolateGlobalConfig(t)
+	top := t.TempDir()
+	home := filepath.Join(top, "home")
+	proj := filepath.Join(home, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	writeProjectConfig(t, filepath.Join(top, ".ouija.json"), `{"model":"planted"}`)
+	t.Chdir(proj)
+	if _, got, _, err := findConfigFile(""); err != nil || got != "" {
+		t.Fatalf("findConfigFile = %q, %v; want nothing found above home", got, err)
+	}
+	// The home directory itself is still searched.
+	writeProjectConfig(t, filepath.Join(home, ".ouija.json"), `{"model":"mine"}`)
+	if _, got, _, err := findConfigFile(""); err != nil || got != filepath.Join(home, ".ouija.json") {
+		t.Fatalf("findConfigFile = %q, %v; want the home config", got, err)
+	}
+}

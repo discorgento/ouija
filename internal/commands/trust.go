@@ -1,26 +1,46 @@
 package commands
 
 import (
+	"bufio"
 	"cmp"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"os"
+	"sort"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/app"
 	"github.com/discorgento/ouija/internal/ouijaconfig"
 	"github.com/discorgento/ouija/internal/termsafe"
 )
 
-// Trust implements `ouija trust [--revoke] [path]`: it trusts the project
-// config (the one discovery finds from the current directory, or path), so
-// its permission, bash allowlist, apiKey and systemPrompt keys apply. It shows
-// what those keys grant before recording the trust; any later change to the
-// file lapses it.
+// trustIn and trustInteractive are the confirmation's input and whether it
+// comes from a person at a terminal; tests replace them.
+var (
+	trustIn          io.Reader = os.Stdin
+	trustInteractive           = func() bool { return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd()) }
+)
+
+// errTrustUnconfirmed is returned when nobody can confirm the trust: no
+// terminal and no --yes.
+var errTrustUnconfirmed = errors.New("not trusted: confirming needs a terminal — review the keys above and run `ouija trust --yes` to trust them")
+
+// Trust implements `ouija trust [--revoke] [--yes] [path]`: it trusts the
+// project config (the one discovery finds from the current directory, or
+// path), so its sensitive keys apply. It shows in full what those keys grant,
+// then asks before recording the trust (--yes skips the question); any later
+// change to the file lapses it. What is trusted is the exact contents shown.
 func Trust(args []string) error {
 	fs := flag.NewFlagSet("trust", flag.ContinueOnError)
 	revoke := fs.Bool("revoke", false, "forget the trust recorded for the project config")
+	var yes bool
+	fs.BoolVar(&yes, "yes", false, "trust without asking (for scripts; review the file first)")
+	fs.BoolVar(&yes, "y", false, "shorthand for --yes")
 	if err := fs.Parse(args); err != nil {
 		return app.ErrUsage // flag already printed why
 	}
@@ -32,7 +52,7 @@ func Trust(args []string) error {
 			return app.ErrUsage
 		}
 		if fs.NArg() > 0 {
-			return fmt.Errorf("unexpected arguments: %v (usage: ouija trust [--revoke] [path])", fs.Args())
+			return fmt.Errorf("unexpected arguments: %v (usage: ouija trust [--revoke] [--yes] [path])", fs.Args())
 		}
 	}
 	if path == "" {
@@ -50,28 +70,46 @@ func Trust(args []string) error {
 		if err := app.Untrust(path); err != nil {
 			return err
 		}
-		fmt.Printf("✓ No longer trusted: %s\n", path)
+		fmt.Printf("✓ No longer trusted: %s\n", termsafe.Clean(path))
 		return nil
 	}
 
-	cfg, err := engine.LoadConfig(path)
-	if err != nil {
-		return fmt.Errorf("load %s: %w", path, err)
-	}
-	keys, err := app.SensitiveKeys(path)
+	rev, err := app.ReviewProjectConfig(path)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Project config: %s\n", path)
-	if len(keys) == 0 {
+	fmt.Printf("Project config: %s\n", termsafe.Clean(path))
+	if len(rev.Keys) == 0 {
 		fmt.Println("  It sets no security-sensitive keys.")
 	}
-	for _, k := range keys {
+	hidden := false
+	for _, k := range rev.Keys {
 		// The values come from the file under review: an escape sequence in
-		// one could erase the lines above it and hide what is granted.
-		fmt.Printf("  %-13s %s\n", k, termsafe.Clean(describeSensitive(k, cfg)))
+		// one could erase the lines above it and hide what is granted, and
+		// an invisible character (a Unicode tag spells ASCII only a model
+		// sees) could hide an instruction. Reveal shows both as \u{…}.
+		raw := describeSensitive(k, rev.Config)
+		hidden = hidden || termsafe.Hidden(raw)
+		desc := termsafe.Reveal(raw)
+		fmt.Printf("  %-13s %s\n", k, strings.ReplaceAll(desc, "\n", "\n                "))
 	}
-	if err := app.Trust(path); err != nil {
+	if hidden {
+		fmt.Println("  ⚠ It holds invisible or control characters, shown above as \\u{…}: a model reads text there that a terminal does not show.")
+	}
+	if len(rev.Keys) > 0 && !yes {
+		if !trustInteractive() {
+			return errTrustUnconfirmed
+		}
+		fmt.Print("Trust this config? [y/N] ")
+		line, _ := bufio.NewReader(trustIn).ReadString('\n')
+		if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			fmt.Println("Not trusted; ouija keeps ignoring those keys.")
+			return nil
+		}
+	}
+	// The bytes shown, not the file as it is now: a change made while the
+	// question was open stays untrusted.
+	if err := app.TrustContents(path, rev.Data); err != nil {
 		return err
 	}
 	fmt.Println("✓ Trusted. Any change to the file needs `ouija trust` again.")
@@ -117,19 +155,74 @@ func describeSensitive(key string, cfg *engine.Config) string {
 	case "budget":
 		return fmt.Sprintf("raises the budget above the defaults: maxTokens %d, maxSteps %d", cfg.Budget.MaxTokens, cfg.Budget.MaxSteps)
 	case "rules":
-		return fmt.Sprintf("adds to the system message: %q", strings.Join(cfg.Rules, " | "))
+		// Not %q: it would hide an invisible character as an escape Trust
+		// cannot tell apart; Trust reveals them itself.
+		return `adds to the system message: "` + strings.Join(cfg.Rules, " | ") + `"`
 	case "apiKey":
 		return "overrides your API key for provider " + cfg.Provider
 	case "projectRoot":
 		return fmt.Sprintf("moves the sandbox root to %q (it must stay inside the project)", cfg.ProjectRoot)
 	case "systemPrompt":
-		p := strings.Join(strings.Fields(cfg.SystemPrompt), " ")
-		if len(p) > 70 {
-			p = strings.ToValidUTF8(p[:70], "") + "…"
-		}
-		return fmt.Sprintf("%q", p)
+		// In full: the end of a long prompt is where an instruction hides.
+		return "replaces the system message with:\n" + cfg.SystemPrompt
+	case "totems":
+		return describeTotems(cfg.Totems)
+	case "modelSuggestions":
+		return describeSuggestions(cfg.ModelSuggestions)
+	case "streamTimeout":
+		return fmt.Sprintf("waits up to %ds for a silent provider", cfg.StreamTimeout)
+	case "contextWindow":
+		return fmt.Sprintf("sends up to %d tokens of context per call — check what it costs", cfg.ContextWindow)
+	case "costPer1M":
+		return fmt.Sprintf("prices tokens at $%g in / $%g out per 1M: below zero, budget.maxUSD never trips", cfg.CostPer1MInput, cfg.CostPer1MOutput)
 	}
 	return ""
+}
+
+// describeSuggestions lists the models the /model picker would offer first,
+// per provider.
+func describeSuggestions(sug map[string][]string) string {
+	providers := make([]string, 0, len(sug))
+	for p := range sug {
+		providers = append(providers, p)
+	}
+	sort.Strings(providers)
+	parts := make([]string, 0, len(providers))
+	for _, p := range providers {
+		parts = append(parts, p+": "+strings.Join(sug[p], ", "))
+	}
+	return "offers these models first in /model: " + strings.Join(parts, "; ")
+}
+
+// describeTotems lists, per totem, the settings an untrusted file cannot
+// apply: dimensions in full (they go into the prompts) and the passes.
+func describeTotems(totems map[string]json.RawMessage) string {
+	names := make([]string, 0, len(totems))
+	for name := range totems {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		var sec struct {
+			Passes     int      `json:"passes"`
+			Dimensions []string `json:"dimensions"`
+		}
+		if json.Unmarshal(totems[name], &sec) != nil {
+			continue
+		}
+		var p []string
+		if sec.Passes > 0 {
+			p = append(p, fmt.Sprintf("%d passes", sec.Passes))
+		}
+		if len(sec.Dimensions) > 0 {
+			p = append(p, `dimensions added to the prompts: "`+strings.Join(sec.Dimensions, " | ")+`"`)
+		}
+		if len(p) > 0 {
+			parts = append(parts, name+": "+strings.Join(p, ", "))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // describeSandbox says what an enabled project sandbox adds: the paths bash
