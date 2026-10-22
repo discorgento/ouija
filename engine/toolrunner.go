@@ -340,8 +340,13 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 		entry = r.journal.snapshot(ctx, r.tools.Root(), rawPath)
 	}
 	res := r.tools.Run(ctx, call)
-	if res.Error != nil && entry >= 0 {
-		r.journal.discard(entry)
+	if res.Error != nil {
+		// A failed call (file not found, invalid path, timeout) showed as a
+		// success in the trace.
+		span.SetError(strings.ToLower(strings.ReplaceAll(res.Error.Code, "_", " ")))
+		if entry >= 0 {
+			r.journal.discard(entry)
+		}
 	}
 	if call.Name == "bash" {
 		recordBashResult(span, res)
