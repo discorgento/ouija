@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"math/big"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -366,6 +367,15 @@ func (s *Server) handleToolCall(ctx context.Context, out *bufio.Writer, req rpcR
 		s.writeToolResult(out, req.ID, "unknown tool: "+p.Name, true)
 		return
 	}
+	// Started from / or the home folder (a harness that launches servers
+	// there), the sandbox a totem runs in would be every file of the user:
+	// its file tools could read and search the whole home and write into it.
+	// Refuse, as resources/read does, rather than run there.
+	if broadRoot(s.root) {
+		s.logf("tools/call %s refused: broad project root %s", p.Name, s.root)
+		s.writeToolResult(out, req.ID, broadRootToolError(s.root), true)
+		return
+	}
 	s.logf("tools/call %s", p.Name)
 
 	task, _ := p.Arguments["task"].(string)
@@ -576,9 +586,22 @@ func (s *Server) readResource(ctx context.Context, uri string) ([]byte, string, 
 	case fi.Size() > maxResourceBytes:
 		return nil, "", fmt.Errorf("file too large (%d bytes, limit %d): %s", fi.Size(), maxResourceBytes, rel)
 	}
-	data, err := os.ReadFile(full)
+	// Opened through the sandbox, not by name: a link swapped in after the
+	// checks above must not be followed. The opened file is checked again.
+	f, err := engine.SafeOpenFile(ctx, s.root, rel, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, "", fmt.Errorf("cannot read %s: %w", rel, pathlessError(err))
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err != nil || !fi.Mode().IsRegular() {
+		return nil, "", fmt.Errorf("not a regular file: %s", rel)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxResourceBytes+1))
+	switch {
+	case err != nil:
+		return nil, "", fmt.Errorf("cannot read %s: %w", rel, pathlessError(err))
+	case int64(len(data)) > maxResourceBytes:
+		return nil, "", fmt.Errorf("file too large (limit %d bytes): %s", maxResourceBytes, rel)
 	}
 	return data, mimeType(rel), nil
 }
@@ -594,8 +617,24 @@ func pathlessError(err error) error {
 
 // broadRoot reports whether root is a filesystem root, the home folder or a
 // folder above it — after resolving symlinks: a root linked to / passed the
-// check made on its spelling.
+// check made on its spelling. The home folder is taken both from the
+// environment ($HOME, %USERPROFILE%) and from the account database, since an
+// empty or redirected HOME would otherwise skip the check; when neither
+// names one, it fails closed on any root fewer than three levels deep
+// (/home/me, C:\Users\me).
 func broadRoot(root string) bool {
+	var homes []string
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		homes = append(homes, h)
+	}
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		homes = append(homes, u.HomeDir)
+	}
+	return broadRootOf(root, homes)
+}
+
+// broadRootOf is broadRoot with the candidate home folders given.
+func broadRootOf(root string, homes []string) bool {
 	real := func(p string) string {
 		p = filepath.Clean(p)
 		if r, err := filepath.EvalSymlinks(p); err == nil {
@@ -607,12 +646,32 @@ func broadRoot(root string) bool {
 	if filepath.Dir(root) == root {
 		return true
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return false
+	if len(homes) == 0 {
+		depth := 0
+		for _, part := range strings.Split(root[len(filepath.VolumeName(root)):], string(filepath.Separator)) {
+			if part != "" {
+				depth++
+			}
+		}
+		return depth < 3
 	}
-	rel, err := filepath.Rel(root, real(home))
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	for _, home := range homes {
+		rel, err := filepath.Rel(root, real(home))
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// broadRootToolError is the tool result of a call refused because the project
+// root is / or the home folder. It names the fix: the agent relays it to the
+// user, who is the one who can change where the host starts the server. The
+// CONFIG prefix matches toolErrorText, so an agent can branch on it.
+func broadRootToolError(root string) string {
+	return "CONFIG: tools are off: the project root is " + root +
+		" (the filesystem root or the home folder), so a totem could read and write all your files. " +
+		"Start the MCP server from a project directory: set the server's cwd in the host config."
 }
 
 // maxResourceBytes caps one resources/read.
