@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -270,6 +271,13 @@ func (r *report) sandbox() {
 			how = "on (the default)"
 		}
 		r.ok("bash sandbox", how+" — the OS confines every command ("+net+")")
+		switch {
+		case runtime.GOOS != "linux":
+		case engine.SandboxEndsDetachedJobs():
+			r.ok("bash jobs", "each command runs in a PID namespace of its own: nothing it starts outlives it")
+		default:
+			r.warn("bash jobs", "user namespaces are forbidden here, so a process a command detaches (setsid) can outlive it and write in the project later")
+		}
 	case sb.Enabled && sb.Optional:
 		r.warn("bash sandbox", "on by default, but this machine cannot enforce it, so bash runs unconfined (it asks before every command): "+avail.Error())
 	case sb.Enabled:

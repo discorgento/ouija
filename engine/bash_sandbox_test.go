@@ -496,3 +496,35 @@ func TestHomeGrantSymlinkToCredentialsIsDropped(t *testing.T) {
 		t.Fatal("the key was readable through the symlinked grant")
 	}
 }
+
+// The default sandbox falling back to unconfined bash says so, once per
+// process; a sandbox the machine enforces, or one turned off, says nothing.
+func TestSandboxFallbackIsAnnounced(t *testing.T) {
+	saved := checkSandbox
+	checkSandbox = func() error { return fmt.Errorf("%w: Landlock ABI 6 is too old, need 9", errSandboxUnsupported) }
+	var shown []string
+	SetSandboxFallbackNotice(func(msg string) { shown = append(shown, msg) })
+	t.Cleanup(func() {
+		checkSandbox = saved
+		SetSandboxFallbackNotice(func(msg string) { fmt.Fprintln(os.Stderr, "ouija: ⚠ "+msg) })
+		sandboxFallbackNotice.once = false
+	})
+	sandboxFallbackNotice.once = false
+
+	if w := SandboxFallbackWarning(DefaultSandbox()); !strings.Contains(w, "ABI 6") || !strings.Contains(w, "unconfined") {
+		t.Errorf("warning = %q", w)
+	}
+	for _, sb := range []*SandboxConfig{nil, {Enabled: false}, {Enabled: true}} {
+		if w := SandboxFallbackWarning(sb); w != "" {
+			t.Errorf("%+v: warned %q", sb, w)
+		}
+	}
+	tools := NewTools(t.TempDir())
+	tools.sandbox = DefaultSandbox()
+	for range 2 {
+		tools.Run(context.Background(), ToolCall{Name: "bash", Input: map[string]any{"command": "true"}})
+	}
+	if len(shown) != 1 || !strings.Contains(shown[0], "unconfined") {
+		t.Errorf("shown = %q, want the warning once", shown)
+	}
+}

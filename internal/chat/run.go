@@ -34,6 +34,7 @@ func Run(eng *engine.Engine, buildProvider ProviderFactory, system, configPath s
 	fmt.Fprintf(os.Stdout, "\x1b]2;ouija\x07")
 
 	m := newModel(eng, buildProvider, system, configPath)
+	m.noticeSandboxFallback(eng)
 	if opts.Continue {
 		m.continueLatest()
 	}

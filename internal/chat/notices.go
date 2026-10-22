@@ -161,3 +161,16 @@ func liveToolsKey(sum engine.TurnSummary) string {
 	}
 	return fmt.Sprintf("%d/%d/%d", len(sum.Tools), done, failed)
 }
+
+// ─── Sandbox fallback ─────────────────────────────────────────────────
+
+// noticeSandboxFallback says in the transcript, when the chat starts, that
+// bash runs unconfined because this machine cannot enforce the default
+// sandbox — before, only `ouija doctor` said so. The engine's own stderr
+// notice is silenced: the TUI owns the terminal.
+func (m *model) noticeSandboxFallback(eng *engine.Engine) {
+	engine.SetSandboxFallbackNotice(nil)
+	if w := eng.SandboxWarning(); w != "" {
+		m.say("banner", "⚠ "+w)
+	}
+}
