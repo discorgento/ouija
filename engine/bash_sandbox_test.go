@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -526,5 +527,34 @@ func TestSandboxFallbackIsAnnounced(t *testing.T) {
 	}
 	if len(shown) != 1 || !strings.Contains(shown[0], "unconfined") {
 		t.Errorf("shown = %q, want the warning once", shown)
+	}
+}
+
+// With no port open, npm and pip are told not to retry: npm otherwise spent
+// over a minute on a registry it could never reach. A port open, or a value
+// the user set, leaves them alone.
+func TestClosedSandboxTurnsOffPackageManagerRetries(t *testing.T) {
+	t.Setenv("npm_config_fetch_retries", "")
+	t.Setenv("PIP_RETRIES", "")
+	closed, err := buildSandboxPolicy(t.TempDir(), &SandboxConfig{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"npm_config_fetch_retries=0", "PIP_RETRIES=0"} {
+		if !slices.Contains(closed.Env, want) {
+			t.Errorf("closed network: %s missing from %v", want, closed.Env)
+		}
+	}
+	open, err := buildSandboxPolicy(t.TempDir(), &SandboxConfig{Enabled: true, Network: &SandboxNetwork{Connect: []uint16{443}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(open.Env, "npm_config_fetch_retries=0") {
+		t.Error("a port open: retries turned off anyway")
+	}
+	t.Setenv("PIP_RETRIES", "3")
+	mine, _ := buildSandboxPolicy(t.TempDir(), &SandboxConfig{Enabled: true})
+	if slices.Contains(mine.Env, "PIP_RETRIES=0") {
+		t.Error("the user's PIP_RETRIES was overridden")
 	}
 }

@@ -350,7 +350,24 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 			p.BindTCP = append(p.BindTCP, n.Bind...)
 		}
 	}
+	if !p.NetAll && len(p.ConnectTCP) == 0 {
+		p.Env = append(p.Env, offlineRetryEnv()...)
+	}
 	return p, nil
+}
+
+// offlineRetryEnv turns off the package managers' retries where no
+// connection can succeed: npm retried a refused registry for over a minute,
+// with the model waiting, before it said the network was down. A value the
+// user set is kept.
+func offlineRetryEnv() []string {
+	var env []string
+	for _, kv := range []string{"npm_config_fetch_retries=0", "PIP_RETRIES=0"} {
+		if name, _, _ := strings.Cut(kv, "="); os.Getenv(name) == "" {
+			env = append(env, kv)
+		}
+	}
+	return env
 }
 
 // guardedDirs are the credential directories a sandbox grant must never
