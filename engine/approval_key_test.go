@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -158,5 +160,90 @@ func TestApprovalKeyCoversArgumentsBesideThePath(t *testing.T) {
 	// The file tools keep one approval per file for the session.
 	if approvalSessionKey("edit_file", "/p/a.go", map[string]any{"old": "1"}) != approvalSessionKey("edit_file", "/p/a.go", map[string]any{"old": "2"}) {
 		t.Error("edit_file: a session approval no longer covers the file")
+	}
+}
+
+// A path the prompt cannot show as it is never reaches it: a newline pushed
+// the real target (…/../../Makefile) out of a cut prompt line.
+func TestPathWithControlCharRefusedBeforePrompt(t *testing.T) {
+	root := t.TempDir()
+	am := NewApprovalManager()
+	prompts := 0
+	am.SetCallback(func(context.Context, string, map[string]any) (ApprovalResult, error) {
+		prompts++
+		return ApprovalResult{Allowed: true}, nil
+	})
+	r := NewToolRunner(ToolRunnerConfig{
+		Tools: NewTools(root),
+		Gate:  &gateState{permConfig: NewDefaultPermissionConfig(), approvalMgr: am},
+		Doom:  &DoomDetector{},
+	})
+	for _, tool := range []string{"write_file", "read_file", "delete_file"} {
+		for _, p := range []string{"docs/notes.md\n\n  will create docs/notes.md/../../Makefile", "a\tb", "a‮b", "a\x1b[2Jb"} {
+			res := r.Run(context.Background(), "t", ToolCall{Name: tool, Input: map[string]any{"path": p, "content": "x"}}, nil, nil)
+			if res.Error == nil || res.Error.Code != ErrCodeInvalidInput {
+				t.Fatalf("%s %q: %+v, want refused", tool, p, res)
+			}
+		}
+	}
+	if prompts != 0 {
+		t.Fatalf("%d prompts for paths that are refused", prompts)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Makefile")); err == nil {
+		t.Fatal("the Makefile was written")
+	}
+}
+
+// The prompt is given the file the write lands on, cleaned and followed, and
+// the name it is reached by; a session approval covers that file, so a
+// symlink later pointed elsewhere asks again.
+func TestApprovalShowsAndKeysThePhysicalTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root := t.TempDir()
+	for _, f := range []string{"Makefile", "notes.txt", "README"} {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("orig"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	am := NewApprovalManager()
+	var asked []map[string]any
+	am.SetCallback(func(_ context.Context, _ string, in map[string]any) (ApprovalResult, error) {
+		asked = append(asked, in)
+		return ApprovalResult{Allowed: true, ForSession: true}, nil
+	})
+	r := NewToolRunner(ToolRunnerConfig{
+		Tools: NewTools(root),
+		Gate:  &gateState{permConfig: NewDefaultPermissionConfig(), approvalMgr: am},
+		Doom:  &DoomDetector{},
+	})
+	write := func(p, content string) {
+		t.Helper()
+		if res := r.Run(context.Background(), "t", ToolCall{Name: "write_file", Input: map[string]any{"path": p, "content": content}}, nil, nil); res.Error != nil {
+			t.Fatalf("write %s: %+v", p, res.Error)
+		}
+	}
+	write("docs/x/../../README", "1")
+	if got := asked[0]["_path"]; got != "README" {
+		t.Fatalf("_path = %v, want the cleaned README", got)
+	}
+	write("notes.txt", "2") // a plain file: approved for the session
+	if err := os.Remove(filepath.Join(root, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("Makefile", filepath.Join(root, "notes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	write("notes.txt", "3")
+	if len(asked) != 3 {
+		t.Fatalf("%d prompts; the session approval of notes.txt covered its swap to the Makefile", len(asked))
+	}
+	last := asked[2]
+	if last["_path"] != "Makefile" || last["_via"] != "notes.txt" {
+		t.Fatalf("prompt names _path=%v _via=%v, want Makefile via notes.txt", last["_path"], last["_via"])
+	}
+	if p, _ := last["_preview"].(string); !strings.Contains(p, "notes.txt → Makefile (symlink)") {
+		t.Fatalf("preview %q does not say the write lands on the Makefile", p)
 	}
 }

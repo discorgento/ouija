@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -139,4 +140,101 @@ func linksToProtected(p string) bool {
 // that name a file on disk.
 func isProtectedFile(p string) bool {
 	return isProtectedPath(p) || linksToProtected(p)
+}
+
+// Hard links inside the project. The policy judges a file by its names, so
+// `ln .env notes.txt` handed out .env as notes.txt, and `ln .git/config
+// notes.txt` let write_file rewrite the git config. Finding every other name
+// of a file is not possible, so a file with more than one link is judged by
+// where it is:
+//   - written: never — a write through it changes every other name too;
+//   - read under .git/objects (`git clone --local` links objects): allowed;
+//   - read under node_modules (pnpm links every file from its store):
+//     allowed unless it is one of the project's protected files, found by
+//     a walk of the project made once per call (newLinkCheck);
+//   - read anywhere else: refused. Nothing in a checkout makes hard links,
+//     so this costs little, and it is what fails closed.
+
+// linkCheck holds the project's protected files for one tool call, walked
+// on first need: a grep of a pnpm node_modules opens thousands of linked
+// files and must not walk the project for each.
+type linkCheck struct {
+	done     bool
+	infos    []os.FileInfo
+	complete bool // false: the walk hit maxProjectScan, nothing is known
+}
+
+// maxProjectScan bounds the walk for the project's protected files; past it
+// a linked file in node_modules is refused.
+const maxProjectScan = 200000
+
+// checkHardLinks applies the rules above to fi, the file opened at real (its
+// physical path). Only files inside the project are judged: an approved
+// escape keeps the home-credential check of isProtectedFile.
+func (lc *linkCheck) checkHardLinks(rootAbs, real string, fi os.FileInfo, write bool) error {
+	if !fi.Mode().IsRegular() || !within(rootAbs, real) || linkCount(real, fi) < 2 {
+		return nil
+	}
+	rel, _ := filepath.Rel(rootAbs, real)
+	rel = policyName(filepath.ToSlash(rel), foldCase, false)
+	switch {
+	case write:
+		return fmt.Errorf("%s has other names (hard links): writing it would change them too", rel)
+	case containsComponentPair(rel, "/", ".git", "objects"):
+		return nil
+	case containsComponent(rel, "/", "node_modules"):
+		if lc.isProtected(rootAbs, fi) {
+			return fmt.Errorf("path is protected (a hard link to a protected file): %s", rel)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s has other names (hard links), which may be a protected file's: refused", rel)
+}
+
+// isProtected reports whether fi is one of the project's protected files —
+// true too when the walk could not finish.
+func (lc *linkCheck) isProtected(rootAbs string, fi os.FileInfo) bool {
+	if !lc.done {
+		lc.done = true
+		lc.infos, lc.complete = projectProtectedFiles(rootAbs)
+	}
+	if !lc.complete {
+		return true
+	}
+	for _, known := range lc.infos {
+		if os.SameFile(fi, known) {
+			return true
+		}
+	}
+	return false
+}
+
+// projectProtectedFiles walks the project for the files the policy protects
+// (.env, .git/config, a key…), leaving out node_modules (what is linked
+// there is checked against this) and git's object stores.
+func projectProtectedFiles(rootAbs string) ([]os.FileInfo, bool) {
+	var infos []os.FileInfo
+	seen, complete := 0, true
+	_ = filepath.WalkDir(rootAbs, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if seen++; seen > maxProjectScan {
+			complete = false
+			return fs.SkipAll
+		}
+		if d.IsDir() {
+			if name := d.Name(); name == "node_modules" || (name == "objects" || name == "lfs") && filepath.Base(filepath.Dir(p)) == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Type().IsRegular() && isProtectedPath(p) {
+			if info, err := os.Stat(p); err == nil {
+				infos = append(infos, info)
+			}
+		}
+		return nil
+	})
+	return infos, complete
 }

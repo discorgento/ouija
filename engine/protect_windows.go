@@ -71,3 +71,6 @@ func getLongPathName(p string) (string, bool) {
 		buf = make([]uint16, n)
 	}
 }
+
+// openNonblock: Windows has no FIFOs in the file system to wait on.
+const openNonblock = 0

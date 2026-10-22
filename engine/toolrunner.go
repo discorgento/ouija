@@ -3,12 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 // gateState is the live permission/approval wiring shared by Engine and
@@ -131,6 +133,12 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 
 	// Extract path from input when present (for permission path checks).
 	rawPath, _ := call.Input["path"].(string)
+	// A path the prompt cannot show as it is (a newline, an escape, a bidi
+	// control) is refused before any prompt: see checkPathRunes.
+	if err := checkPathRunes(rawPath); err != nil {
+		span.SetError("hidden character in path")
+		return errInvalidInput(call.Name + ": " + err.Error())
+	}
 
 	checkPath := r.checkPathFor(rawPath)
 
@@ -146,6 +154,14 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 			if strings.ContainsRune(cmd, 0) {
 				span.SetError("NUL in command")
 				return errInvalidInput("bash: the command contains a NUL byte")
+			}
+			// The approval prompt strips what a terminal would hide or
+			// reorder, so a command holding such a character runs as
+			// something other than what was shown: refuse it instead.
+			if i := strings.IndexFunc(cmd, hiddenRune); i >= 0 {
+				r, _ := utf8.DecodeRuneInString(cmd[i:])
+				span.SetError("hidden character in command")
+				return errInvalidInput(fmt.Sprintf("bash: the command contains an invisible or control character (U+%04X); write it without one", r))
 			}
 			if IsDenied(cmd) {
 				span.SetError("denylist")
@@ -242,12 +258,26 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 						}
 						approvalInput["_preview"] = preview
 					}
+					// The file the call touches, as the prompt names it:
+					// cleaned and followed (_path), with the name it is
+					// reached by when that differs (_via).
+					if target, via, ok := approvalTarget(r.tools.Root(), rawPath); ok && rawPath != "" {
+						approvalInput = maps.Clone(approvalInput)
+						if approvalInput == nil {
+							approvalInput = make(map[string]any)
+						}
+						approvalInput["_path"] = target
+						if via != "" {
+							approvalInput["_via"] = via
+						}
+					}
 				}
 				if gate.approvalMgr == nil {
 					span.SetError("denied (no approval UI)")
 					return errRejected("tool '" + call.Name + "' requires approval (no approval UI configured)")
 				}
-				result, aerr := gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, checkPath, call.Input), approvalInput)
+				keyPath := r.keyPathFor(checkPath)
+				result, aerr := gate.approvalMgr.Request(ctx, approvalSessionKey(call.Name, keyPath, call.Input), approvalInput)
 				if aerr != nil {
 					return errRejected(aerr.Error())
 				}
@@ -262,6 +292,12 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 				if result.SkipExecution {
 					doom.ResetCount()
 					return ToolResult{Data: "✓ already applied via external editor"}
+				}
+				// What was approved is the file the prompt showed: a link
+				// swapped while it waited leads elsewhere.
+				if now := r.keyPathFor(checkPath); now != keyPath {
+					span.SetError("target changed")
+					return errRejected("'" + rawPath + "' now leads to " + now + ", not to the file that was approved; call the tool again")
 				}
 				// Fresh human consent for this exact call: the allowlist does
 				// not get a second veto after the user said yes. An answer from
@@ -410,8 +446,19 @@ func (r *ToolRunner) checkPathFor(raw string) string {
 	return raw
 }
 
+// keyPathFor is where the checked path physically lands, for the approval
+// key: approving notes.txt while it is a file must not cover it once it is a
+// link to the Makefile.
+func (r *ToolRunner) keyPathFor(checkPath string) string {
+	if checkPath == "" {
+		return ""
+	}
+	return physicalPath(checkPath)
+}
+
 // approvalSessionKey scopes "approve for session" to the tool's target: the
-// absolute path for the built-in file tools, the exact command for bash, and
+// absolute path for the built-in file tools — where it physically lands, so
+// a symlink later pointed elsewhere asks again — the exact command for bash, and
 // for every other tool its path and all its arguments, so approving one URL
 // does not approve the next. Only a call with no arguments at all is keyed by
 // the bare tool name. The encoding (the tool, a null byte, then the target)
@@ -453,4 +500,21 @@ var pathKeyedTools = map[string]bool{"write_file": true, "edit_file": true, "del
 func allowlistError() ToolResult {
 	return ToolResult{Error: &ToolError{Code: ErrCodeNotAllowed, Message: "command is not in the bash allowlist. " +
 		"Add it to .ouija/config.json (tools.bash.allowlist) or approve it interactively in the TUI."}}
+}
+
+// hiddenRune reports whether r would not show in an approval prompt as it
+// runs: a control character other than newline and tab, a Unicode bidi
+// control (it reorders what follows on screen) or a zero-width character.
+func hiddenRune(r rune) bool {
+	switch {
+	case r == '\n' || r == '\t':
+		return false
+	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
+		return true
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069,
+		r == 0x200e, r == 0x200f, r == 0x061c,
+		r >= 0x200b && r <= 0x200d, r == 0x2060, r == 0xfeff:
+		return true
+	}
+	return false
 }

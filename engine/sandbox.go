@@ -3,10 +3,12 @@ package engine
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf8"
 )
 
 // escapeKey is used with context.Context to pass a pre-approved sandbox escape
@@ -45,6 +47,9 @@ func SafeJoin(root, rel string) (string, error) {
 // (via escapeKey{}), the override path is returned instead: that is an explicit,
 // per-path user consent shown in full, which outranks the default policy.
 func resolve(ctx context.Context, root, p string) (string, error) {
+	if err := checkPathRunes(p); err != nil {
+		return "", err
+	}
 	full, err := SafeJoin(root, p)
 	if err != nil {
 		// Lexical escape — check for pre-approved escape in context
@@ -90,6 +95,178 @@ func approvedEscape(escaped, asked string) (string, error) {
 // re-implement the join and skip the symlink/protected-path checks.
 func SafeResolve(ctx context.Context, root, p string) (string, error) {
 	return resolve(ctx, root, p)
+}
+
+// openResolved opens full, a path resolve approved, without the gap between
+// that check and the open: a symlink swapped in afterwards (notes.txt →
+// ~/.ssh/id_rsa, docs → /etc) would otherwise be followed by a plain
+// os.Open. Inside the project the open goes through an os.Root on the
+// project, which refuses any link leading out of it (see rootRel for the
+// name it is given). Then the opened file is compared with what full names
+// now: a link swapped to a protected file inside the project fails that, as
+// does a hard link to a credential.
+// An approved escape outside the project is opened by path and verified the
+// same way. The open must not truncate: a write opens without O_TRUNC and
+// truncates once the file is verified, so the wrong file is never cut.
+func openResolved(root, full string, flag int, perm fs.FileMode) (*os.File, error) {
+	r, rootAbs, err := openProjectRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return openIn(r, rootAbs, full, flag, perm, &linkCheck{})
+}
+
+// openProjectRoot opens the project as an os.Root, with its canonical path.
+func openProjectRoot(root string) (*os.Root, string, error) {
+	rootAbs, err := canonRoot(root)
+	if err != nil {
+		return nil, "", err
+	}
+	r, err := os.OpenRoot(rootAbs)
+	return r, rootAbs, err
+}
+
+// openIn is openResolved with the project's os.Root already open, and the
+// hard-link check of the call (a search opens many files).
+func openIn(r *os.Root, rootAbs, full string, flag int, perm fs.FileMode, lc *linkCheck) (*os.File, error) {
+	var f *os.File
+	var err error
+	// Non-blocking, then regular files and directories only: opening a FIFO
+	// (mkfifo in the project) waited forever for a writer or reader, and no
+	// cancellation reaches a blocked open.
+	flag |= openNonblock
+	if rel, ok := rootRel(rootAbs, full); ok {
+		if f, err = r.OpenFile(rel, flag, perm); err != nil {
+			return nil, err
+		}
+	} else if f, err = os.OpenFile(full, flag, perm); err != nil {
+		return nil, err // an approved escape
+	}
+	if err := verifyOpened(f, rootAbs, full, flag&(os.O_WRONLY|os.O_RDWR) != 0, lc); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// verifyOpened checks that f is the file full names now, and that this is
+// not a protected file: the check resolve made still holds for what was
+// opened. A file opened to be written must not be git metadata, and a file
+// with other names is judged by checkHardLinks.
+func verifyOpened(f *os.File, rootAbs, full string, write bool, lc *linkCheck) error {
+	got, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !got.Mode().IsRegular() && !got.IsDir() {
+		return fmt.Errorf("%s is not a regular file", full)
+	}
+	real := physicalPath(full)
+	now, err := os.Stat(real)
+	if err != nil || !os.SameFile(got, now) {
+		return fmt.Errorf("%s changed while it was being opened", full)
+	}
+	if isProtectedPath(full) || isProtectedFile(real) {
+		return fmt.Errorf("path is protected (credentials/system files): %s", full)
+	}
+	if write {
+		if err := checkGitWrite(full); err != nil {
+			return err
+		}
+	}
+	return lc.checkHardLinks(rootAbs, real, got, write)
+}
+
+// checkGitWrite refuses a write or delete of git metadata: any path with a
+// component named .git, the directory or a worktree's gitdir file, as named
+// or where it physically lands. Beyond .git/config and hooks (protected
+// against reads too), .git/info/attributes runs filters, objects/info/
+// alternates pulls objects from elsewhere, and a planted .git file points
+// git at another repository. Reads stay allowed (.git/HEAD).
+func checkGitWrite(full string) error {
+	if isGitMetadata(full) || isGitMetadata(physicalPath(full)) {
+		return fmt.Errorf("path is git metadata, which the file tools do not write: %s", full)
+	}
+	return nil
+}
+
+// mkdirResolved creates dir, a directory resolve approved, and its parents —
+// through an os.Root inside the project, so a link swapped in cannot make
+// it create directories elsewhere.
+func mkdirResolved(root, dir string) error {
+	r, rootAbs, err := openProjectRoot(root)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	rel, ok := rootRel(rootAbs, dir)
+	if !ok {
+		return os.MkdirAll(dir, 0o755) // an approved escape
+	}
+	return r.MkdirAll(rel, 0o755)
+}
+
+// rootRel is the name an os.Root on rootAbs opens full by, and false when
+// full, as resolve returned it, is outside the project (an approved escape).
+// It is where full physically lands when that is inside the project, so a
+// project's own absolute symlinks, which os.Root refuses, keep working; the
+// lexical name otherwise, which os.Root then refuses to follow out.
+func rootRel(rootAbs, full string) (string, bool) {
+	if !within(rootAbs, full) {
+		return "", false
+	}
+	if real := physicalPath(full); within(rootAbs, real) {
+		full = real
+	}
+	rel, err := filepath.Rel(rootAbs, full)
+	return rel, err == nil
+}
+
+// SafeOpenFile resolves p under root like SafeResolve and opens it like
+// os.OpenFile, without the gap between the check and the open (see
+// openResolved). flag must not hold O_TRUNC: truncate the returned file.
+func SafeOpenFile(ctx context.Context, root, p string, flag int, perm fs.FileMode) (*os.File, error) {
+	full, err := resolve(ctx, root, p)
+	if err != nil {
+		return nil, err
+	}
+	if flag&(os.O_WRONLY|os.O_RDWR) != 0 {
+		if err := checkGitWrite(full); err != nil {
+			return nil, err
+		}
+	}
+	if flag&os.O_CREATE != 0 {
+		if err := mkdirResolved(root, filepath.Dir(full)); err != nil {
+			return nil, err
+		}
+	}
+	return openResolved(root, full, flag, perm)
+}
+
+// SafeWriteFile is os.WriteFile through SafeOpenFile: it creates the parent
+// directories, keeps an existing file's mode, and truncates only once the
+// opened file passed the checks. It returns where the file was written.
+func SafeWriteFile(ctx context.Context, root, p string, data []byte, perm fs.FileMode) (string, error) {
+	full, err := resolve(ctx, root, p)
+	if err != nil {
+		return "", err
+	}
+	if err := checkGitWrite(full); err != nil {
+		return "", err
+	}
+	if err := mkdirResolved(root, filepath.Dir(full)); err != nil {
+		return "", err
+	}
+	f, err := openResolved(root, full, os.O_WRONLY|os.O_CREATE, perm)
+	if err != nil {
+		return "", err
+	}
+	if err := rewrite(f, data); err != nil {
+		f.Close()
+		return "", err
+	}
+	return full, f.Close()
 }
 
 // resolveSymlinkEscape walks path components from root to full and returns the
@@ -156,6 +333,64 @@ func physicalPathDepth(p string, hops int) string {
 		rest = filepath.Join(filepath.Base(existing), rest)
 		existing = parent
 	}
+}
+
+// checkPathRunes refuses a path holding a control character (newline, tab,
+// escape…) or an invisible or bidi one. The approval prompt shows a path,
+// the tool writes another: `docs/<long name>\n\n  will create docs/x/../../Makefile`
+// read as a harmless file once the prompt cut it, and wrote the Makefile.
+// No real file name needs one.
+func checkPathRunes(p string) error {
+	if i := strings.IndexFunc(p, pathHiddenRune); i >= 0 {
+		r, _ := utf8.DecodeRuneInString(p[i:])
+		return fmt.Errorf("the path contains a control or invisible character (U+%04X); name the file without one", r)
+	}
+	return nil
+}
+
+// pathHiddenRune is hiddenRune plus what a command may hold but a file name
+// should not: newline, tab and the Unicode line and paragraph separators.
+func pathHiddenRune(r rune) bool {
+	return r == '\n' || r == '\t' || r == 0x2028 || r == 0x2029 || hiddenRune(r)
+}
+
+// approvalTarget is the file a call on path p touches, for its approval
+// prompt: project-relative, after the join cleaned the name
+// (docs/x/../../Makefile is Makefile) and symlinks were followed (absolute
+// when that leads out of the project). via is the cleaned name the model
+// gave when it differs: a symlink notes.txt → Makefile shows both. ok is
+// false when p does not join under the project.
+func approvalTarget(root, p string) (target, via string, ok bool) {
+	full, err := SafeJoin(root, p)
+	if err != nil {
+		return "", "", false
+	}
+	rootAbs, err := canonRoot(root)
+	if err != nil {
+		return "", "", false
+	}
+	named, _ := filepath.Rel(rootAbs, full)
+	target = physicalPath(full)
+	if within(rootAbs, target) {
+		target, _ = filepath.Rel(rootAbs, target)
+	}
+	if target != named {
+		via = named
+	}
+	return target, via, true
+}
+
+// targetLabel spells approvalTarget for a preview: "notes.txt", or
+// "notes.txt → Makefile (symlink)"; p as given when it does not resolve.
+func targetLabel(root, p string) string {
+	target, via, ok := approvalTarget(root, p)
+	switch {
+	case !ok:
+		return p
+	case via != "":
+		return via + " → " + target + " (symlink)"
+	}
+	return target
 }
 
 // checkPathSyntax refuses, on Windows, a ':' in a path component after the

@@ -25,7 +25,30 @@ const (
 	// maxGrepLine is how much of one matching line grep prints, around the
 	// match: a 2 MB minified line used to fill the whole result.
 	maxGrepLine = 300
+	// maxReadLine is how much of one line read_file keeps; maxGrepScan how
+	// much of one line grep searches. The rest is read and dropped: a
+	// single-line 300 MB file cost 600 MB, a 4 GB one ran out of memory.
+	maxReadLine = maxToolBytes / 2
+	maxGrepScan = 1 << 20
+	// maxGlobStars caps the "**" in a glob pattern (after merging runs).
+	maxGlobStars = 8
 )
+
+// readLine reads one line of r, its newline included, keeping at most limit
+// bytes of it in buf (reused between calls) and dropping the rest; dropped
+// counts what was dropped.
+func readLine(r *bufio.Reader, buf []byte, limit int) (line []byte, dropped int64, err error) {
+	line = buf[:0]
+	for {
+		chunk, err := r.ReadSlice('\n')
+		keep := min(len(chunk), limit-len(line))
+		line = append(line, chunk[:keep]...)
+		dropped += int64(len(chunk) - keep)
+		if !errors.Is(err, bufio.ErrBufferFull) {
+			return line, dropped, err
+		}
+	}
+}
 
 // skipDirs are the directories a search walk does not enter — below the
 // directory it was asked to search, so a search *inside* node_modules works.
@@ -71,7 +94,7 @@ func readFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	if err != nil {
 		return errInvalidInput(err.Error())
 	}
-	f, err := os.Open(full)
+	f, err := openResolved(root, full, os.O_RDONLY, 0)
 	if err != nil {
 		return errNotFound(err.Error())
 	}
@@ -90,8 +113,18 @@ func readFileTool(ctx context.Context, root string, in map[string]any) ToolResul
 	}
 	var out strings.Builder
 	line, shown := 0, 0
+	var buf []byte
 	for {
-		text, err := r.ReadString('\n')
+		b, dropped, err := readLine(r, buf, maxReadLine)
+		buf = b
+		text := string(b)
+		if dropped > 0 {
+			// Cut on a rune, marked, the newline kept.
+			text = strings.ToValidUTF8(strings.TrimSuffix(text, "\n"), "") + fmt.Sprintf("…[line cut: %d more bytes]", dropped)
+			if err == nil {
+				text += "\n"
+			}
+		}
 		if text != "" {
 			line++
 			if line >= offset {
@@ -140,11 +173,18 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	if err != nil {
 		return errInvalidInput(err.Error())
 	}
-	rootAbs, _ := canonRoot(root)
+	// Each file is opened through the project's os.Root and checked once
+	// open: one swapped for a symlink after the walk saw it is not followed.
+	r, rootAbs, err := openProjectRoot(root)
+	if err != nil {
+		return errInternal(err.Error())
+	}
+	defer r.Close()
 	var out strings.Builder
 	matches := 0
+	lc := &linkCheck{}
 	search := func(p, rel string) error {
-		f, err := os.Open(p)
+		f, err := openIn(r, rootAbs, p, os.O_RDONLY, 0, lc)
 		if err != nil {
 			return nil
 		}
@@ -154,10 +194,14 @@ func grepTool(ctx context.Context, root string, in map[string]any) ToolResult {
 			return nil
 		}
 		// Line by line, so a large file is searched (it used to be skipped
-		// silently over 2 MB, and the answer was "no matches").
+		// silently over 2 MB, and the answer was "no matches"); of a line,
+		// its first maxGrepScan bytes.
+		var buf []byte
 		for n := 1; ; n++ {
-			text, err := r.ReadString('\n')
-			if loc := re.FindStringIndex(text); loc != nil {
+			b, _, err := readLine(r, buf, maxGrepScan)
+			buf = b
+			if loc := re.FindIndex(b); loc != nil {
+				text := string(b)
 				fmt.Fprintf(&out, "%s:%d: %s\n", rel, n, clipAround(strings.TrimRight(text, "\r\n"), loc))
 				if matches++; matches >= maxGrepMatches {
 					return filepath.SkipAll
@@ -222,9 +266,20 @@ func globTool(ctx context.Context, root string, in map[string]any) ToolResult {
 	if _, err := path.Match(strings.ReplaceAll(pattern, "**", "*"), ""); err != nil {
 		return errInvalidInput("glob: " + err.Error())
 	}
+	// Runs of ** are one **, and a pattern holds few: each one multiplies
+	// the ways a path can match (60 of them took minutes per file).
+	segs := slices.Compact(strings.Split(pattern, "/"))
+	stars := 0
+	for _, s := range segs {
+		if s == "**" {
+			stars++
+		}
+	}
+	if stars > maxGlobStars {
+		return errInvalidInput(fmt.Sprintf("glob: at most %d ** in a pattern", maxGlobStars))
+	}
 	rootAbs, _ := canonRoot(root)
 	// Walk only below the pattern's literal prefix (src/**/x.go → src).
-	segs := strings.Split(pattern, "/")
 	prefix := 0
 	for prefix < len(segs)-1 && !strings.ContainsAny(segs[prefix], "*?[") {
 		prefix++
@@ -255,24 +310,34 @@ func globTool(ctx context.Context, root string, in map[string]any) ToolResult {
 }
 
 // matchGlob matches path segments against pattern segments; "**" matches
-// zero or more whole segments, the rest follow path.Match.
+// zero or more whole segments, the rest follow path.Match. Each (pattern,
+// segment) position is solved once: without the memo, n "**" tried every
+// split of the path, exponential in n.
 func matchGlob(pat, segs []string) bool {
-	if len(pat) == 0 {
-		return len(segs) == 0
-	}
-	if pat[0] == "**" {
-		for i := 0; i <= len(segs); i++ {
-			if matchGlob(pat[1:], segs[i:]) {
-				return true
-			}
+	memo := make([]int8, (len(pat)+1)*(len(segs)+1)) // 0 unknown, 1 yes, 2 no
+	var match func(i, j int) bool
+	match = func(i, j int) bool {
+		k := i*(len(segs)+1) + j
+		if memo[k] != 0 {
+			return memo[k] == 1
 		}
-		return false
+		var ok bool
+		switch {
+		case i == len(pat):
+			ok = j == len(segs)
+		case pat[i] == "**":
+			ok = match(i+1, j) || (j < len(segs) && match(i, j+1))
+		case j < len(segs):
+			m, _ := path.Match(pat[i], segs[j])
+			ok = m && match(i+1, j+1)
+		}
+		memo[k] = 2
+		if ok {
+			memo[k] = 1
+		}
+		return ok
 	}
-	if len(segs) == 0 {
-		return false
-	}
-	ok, _ := path.Match(pat[0], segs[0])
-	return ok && matchGlob(pat[1:], segs[1:])
+	return match(0, 0)
 }
 
 func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult {
@@ -284,10 +349,16 @@ func listDirTool(ctx context.Context, root string, in map[string]any) ToolResult
 	if err != nil {
 		return errInvalidInput(err.Error())
 	}
-	entries, err := os.ReadDir(full)
+	d, err := openResolved(root, full, os.O_RDONLY, 0)
 	if err != nil {
 		return errNotFound(err.Error())
 	}
+	defer d.Close()
+	entries, err := d.ReadDir(-1)
+	if err != nil {
+		return errNotFound(err.Error())
+	}
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return strings.Compare(a.Name(), b.Name()) })
 	var out strings.Builder
 	for i, e := range entries {
 		if i == maxListEntries {

@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -120,9 +121,15 @@ func NewDefaultPermissionConfig() *PermissionConfig {
 
 // Check returns the permission level for a tool operating on path.
 // absPath is the absolute filesystem path (empty for non-file tools).
-// Protected paths always return Deny.
+// Protected paths always return Deny, and so does git metadata for the
+// tools that write files.
 func (cfg *PermissionConfig) Check(tool, absPath string) Level {
 	if absPath != "" && isProtectedPath(absPath) {
+		return Deny
+	}
+	// Git metadata is read, never written by the file tools (checkGitWrite):
+	// refused before a prompt asks about it.
+	if absPath != "" && pathKeyedTools[tool] && isGitMetadata(absPath) {
 		return Deny
 	}
 	cfg.mu.RLock()
@@ -136,9 +143,13 @@ func (cfg *PermissionConfig) Check(tool, absPath string) Level {
 // ─── Protected paths ────────────────────────────────────────────────
 
 // foldCase: macOS and Windows filesystems ignore case by default, so `.ENV`
-// opens `.env` and `.SSH/id_rsa` the key — the names are matched lowercased
-// there. A variable so tests can exercise it on Linux.
-var foldCase = runtime.GOOS == "darwin" || runtime.GOOS == "windows"
+// opens `.env` and `.SSH/id_rsa` the key — the names are matched lowercased.
+// On every OS, not only those: Linux has case-insensitive directories too
+// (ext4 casefold, vfat, exFAT, a mounted NTFS or SMB share), where the same
+// spellings open the same files. The cost, `.ENV` refused on a filesystem
+// where it is another file, is accepted — the policy fails closed. A variable
+// so tests can turn it off.
+var foldCase = true
 
 // policyName spells a slash-separated path the way the filesystem will
 // match it, so the protected-name checks see what the OS opens:
@@ -180,7 +191,16 @@ func isProtectedPath(absPath string) bool {
 		".git-credentials", ".pgpass", ".pypirc", ".my.cnf", ".vault-token",
 		".yarnrc.yml", ".s3cfg", ".terraformrc",
 		// SSH keys kept outside ~/.ssh (a key copied into a project).
-		"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519":
+		"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+		// Credentials projects keep in their own tree: WordPress's database
+		// password, a composer auth.json (registry tokens) at any level, a
+		// Google OAuth client or service account, Rails' secrets, the
+		// variables a terraform run is given, an Apache password file,
+		// yarn v1's registry token, Cloudflare Workers' and Azure Functions'
+		// local secrets, a kubeconfig.
+		"wp-config.php", "auth.json", "credentials.json", "service-account.json",
+		"secrets.yml", "secrets.yaml", "credentials.yml.enc", "terraform.tfvars",
+		".htpasswd", ".yarnrc", ".dev.vars", "local.settings.json", "kubeconfig":
 		return true
 	// ouija's own project configs: they may hold an apiKey, and they grant
 	// permissions — a model that could rewrite them would grant its own.
@@ -199,6 +219,16 @@ func isProtectedPath(absPath string) bool {
 	// plain text (terraform.tfstate, .backup, a workspace's copy).
 	if strings.HasSuffix(base, ".tfstate") || strings.HasSuffix(base, ".tfstate.backup") {
 		return true
+	}
+	// Private keys and keystores by extension (server.key, cert.pem, a
+	// signing .p12/.pfx, an Android .jks/.keystore, Rails' config/master.key),
+	// terraform's auto-loaded variables, and a service account named
+	// `<name>-sa.json`. A public certificate in a .pem is refused with them.
+	// A bare `.key` (a jq filter in a bash command) is not a file name.
+	for _, ext := range []string{".pem", ".key", ".p12", ".pfx", ".jks", ".keystore", ".auto.tfvars", "-sa.json"} {
+		if len(base) > len(ext) && strings.HasSuffix(base, ext) {
+			return true
+		}
 	}
 
 	// ── Protected system directories ────────────────────────────────
@@ -239,11 +269,19 @@ func isProtectedPath(absPath string) bool {
 		return true
 	}
 	// The GitHub CLI's token (.config/gh/hosts.yml), and a repository's
-	// .git/config: a remote URL may carry a token, and a written one runs
+	// git config: a remote URL may carry a token, and a written one runs
 	// code on the next git command (core.fsmonitor, core.hooksPath).
-	if containsComponentPair(absPath, sep, ".config", "gh") || containsComponentPair(absPath, sep, ".git", "config") ||
-		containsComponentPair(absPath, sep, ".git", "hooks") {
+	if containsComponentPair(absPath, sep, ".config", "gh") || isGitConfigOrHook(absPath) {
 		return true
+	}
+	// Files that hold a secret only at a known place: Magento's database and
+	// crypt key, Rails' database password, bundler's registry credentials.
+	for _, pair := range [][2]string{
+		{"app/etc", "env.php"}, {"config", "database.yml"}, {".bundle", "config"},
+	} {
+		if containsComponentPair(absPath, sep, pair[0], pair[1]) {
+			return true
+		}
 	}
 	// Package registries' and model hubs' tokens, inside tool directories
 	// whose other parts (caches, toolchains) the sandbox may read. A pair
@@ -300,6 +338,32 @@ func isProtectedPath(absPath string) bool {
 	}
 
 	return false
+}
+
+// isGitConfigOrHook reports whether the slash-separated p is a git config or
+// hook inside any .git directory: .git/config and .git/hooks/*, and the same
+// below it — a submodule's .git/modules/<name>/config and hooks, a
+// worktree's .git/worktrees/<name>/config.worktree, .git/config.worktree.
+// Each runs code on the next git command once written.
+func isGitConfigOrHook(p string) bool {
+	i := strings.LastIndex("/"+p, "/.git/")
+	if i < 0 {
+		return false
+	}
+	parts := strings.Split(p[i+len(".git/"):], "/")
+	if last := parts[len(parts)-1]; last == "config" || last == "config.worktree" {
+		return true
+	}
+	return slices.Contains(parts, "hooks")
+}
+
+// isGitMetadata reports whether p has a component named .git — the
+// directory, anything in it, or a worktree's or submodule's .git file —
+// spelled as the filesystem matches it (case, Win32 trailing dots, 8.3
+// names).
+func isGitMetadata(p string) bool {
+	p = policyName(filepath.ToSlash(longName(p)), foldCase, runtime.GOOS == "windows")
+	return containsComponent(p, "/", ".git")
 }
 
 // homeDir is the user's home directory, normalized like the paths the policy

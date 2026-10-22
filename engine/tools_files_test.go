@@ -1,12 +1,15 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeTree(t *testing.T, root string, files map[string]string) {
@@ -133,5 +136,68 @@ func TestProjectFilesAndRead(t *testing.T) {
 	}
 	if few, _ := ProjectFiles(context.Background(), root, 1); len(few) != 1 {
 		t.Fatalf("limit 1 gave %d files", len(few))
+	}
+}
+
+// One huge line costs a bounded amount of memory: read_file and grep read a
+// line whole, so a 300 MB single-line file took 600 MB and a 4 GB one ran
+// out of memory.
+func TestLongLineReadsAreBounded(t *testing.T) {
+	root := t.TempDir()
+	const size = 64 << 20
+	line := bytes.Repeat([]byte("a"), size)
+	copy(line[10:], "NEEDLE")
+	if err := os.WriteFile(filepath.Join(root, "min.js"), append(line, "\nnext\n"...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	alloc := func(fn func()) uint64 {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		fn()
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	var read, grep ToolResult
+	if n := alloc(func() { read = readFileTool(ctx, root, map[string]any{"path": "min.js"}) }); n > 8<<20 {
+		t.Errorf("read_file allocated %d MB for a %d MB line", n>>20, size>>20)
+	}
+	if read.Error != nil || !strings.Contains(read.Data, "[line cut:") || !strings.Contains(read.Data, "next") {
+		t.Errorf("read_file: %+v", read)
+	}
+	if n := alloc(func() { grep = grepTool(ctx, root, map[string]any{"pattern": "NEEDLE|next"}) }); n > 8<<20 {
+		t.Errorf("grep allocated %d MB for a %d MB line", n>>20, size>>20)
+	}
+	if !strings.Contains(grep.Data, "min.js:1:") || !strings.Contains(grep.Data, "min.js:2:") {
+		t.Errorf("grep: %q", grep.Data)
+	}
+}
+
+// Many ** in a glob cost polynomial time, not exponential: each tried every
+// split of the path.
+func TestGlobManyDoubleStarsIsFast(t *testing.T) {
+	pat := strings.Split(strings.Repeat("**/a/", 8)+"z", "/")
+	segs := strings.Split(strings.Repeat("a/", 60)+"b", "/")
+	done := make(chan bool, 1)
+	go func() { done <- matchGlob(pat, segs) }()
+	select {
+	case got := <-done:
+		if got {
+			t.Fatal("matched a path that does not end in z")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("matchGlob is exponential in the number of **")
+	}
+	if !matchGlob(strings.Split("**/**/a/**/b", "/"), strings.Split("x/a/y/b", "/")) {
+		t.Fatal("** no longer matches")
+	}
+	root := t.TempDir()
+	if res := globTool(context.Background(), root, map[string]any{"pattern": strings.Repeat("**/x/", 9) + "y"}); res.Error == nil {
+		t.Fatal("a pattern with 9 ** was accepted")
+	}
+	writeTree(t, root, map[string]string{"a/b/c.go": ""})
+	if res := globTool(context.Background(), root, map[string]any{"pattern": "**/**/**/*.go"}); !strings.Contains(res.Data, "c.go") {
+		t.Fatalf("runs of ** merged wrongly: %+v", res)
 	}
 }
