@@ -1,6 +1,6 @@
 # Installs ouija on Windows from a GitHub release: downloads the archive,
 # checks it against the release's SHA256SUMS, puts ouija.exe and
-# ouija-mcp.exe in a folder of your user and adds it to your PATH.
+# ouija-mcp.exe in a folder of your user and offers to add it to your PATH.
 #
 #   irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
 #
@@ -13,8 +13,10 @@
 param(
     [string]$Version = "latest",
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\ouija"),
-    [switch]$NoPath,
-    [switch]$NoPrompt, # ask nothing (no setup); CI never asks
+    [switch]$NoPath, # never change the PATH
+    [switch]$AddToPath, # add the folder to your PATH without asking
+    [switch]$NoPrompt, # ask nothing (no PATH change unless -AddToPath, no setup); CI never asks
+    [switch]$Prerelease, # let "latest" be a pre-release too (default: stable only)
     [switch]$RequireProvenance # refuse to install unless the build provenance is verified (needs gh)
 )
 
@@ -57,12 +59,12 @@ $found = $null
 if ($Version -eq "latest") {
     $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases?per_page=10" -Headers $headers
     foreach ($r in $releases) {
-        if ($r.draft -or $r.prerelease) { continue }
+        if ($r.draft -or ($r.prerelease -and -not $Prerelease)) { continue }
         $found = Find-Assets $r
         if ($found) { $release = $r; break }
         Write-Host "$($r.tag_name) has no Windows archive yet (still being built?); trying the release before it"
     }
-    if (-not $release) { throw "no release with a Windows archive and SHA256SUMS found." }
+    if (-not $release) { throw "no release with a Windows archive and SHA256SUMS found (pre-releases are skipped: -Prerelease includes them)." }
 } else {
     $tag = "v" + $Version.TrimStart('v')
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/tags/$tag" -Headers $headers
@@ -91,7 +93,13 @@ try {
     # The checksum only proves the zip matches SHA256SUMS, and both come from
     # the same release. The build provenance ties the zip to this repository's
     # release workflow (Sigstore-signed by GitHub Actions): a swapped zip has
-    # none. Checking it needs the GitHub CLI, logged in or with a token.
+    # none, and one built by any other workflow of the repository is refused
+    # too, as is one the release workflow built from another branch (a
+    # modified copy of it pushed there): releases run on pushes to main only.
+    # Checking it needs the GitHub CLI, logged in or with a token.
+    $workflow = "$repo/.github/workflows/release.yml"
+    $sourceRef = "refs/heads/main"
+    $provenance = $false
     $canVerify = $false
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         if ($env:GH_TOKEN -or $env:GITHUB_TOKEN) {
@@ -102,13 +110,23 @@ try {
         }
     }
     if ($canVerify) {
-        & gh attestation verify $archive --repo $repo *> $null
-        if ($LASTEXITCODE -ne 0) { throw "provenance check failed for $($asset.name): it was not built by $repo's release workflow - not installed." }
-        Write-Host "provenance ok (built by $repo's release workflow)"
+        # Windows PowerShell turns a native command's stderr into terminating
+        # errors under "Stop": the exit code decides here, not the stream.
+        $ErrorActionPreference = "Continue"
+        $ghOut = & gh attestation verify $archive --repo $repo --signer-workflow $workflow --source-ref $sourceRef 2>&1
+        $ErrorActionPreference = "Stop"
+        if ($LASTEXITCODE -ne 0) {
+            $ghOut | Select-Object -Last 3 | ForEach-Object { Write-Warning "$_" }
+            throw "provenance check failed for $($asset.name): it was not built by $workflow on main - not installed."
+        }
+        $provenance = $true
+        Write-Host "provenance ok (built by $workflow)"
     } elseif ($RequireProvenance) {
         throw "-RequireProvenance: the GitHub CLI (gh), logged in, is needed to verify the build provenance - not installed."
     } else {
-        Write-Host "provenance not checked (with the GitHub CLI logged in, the installer verifies it: gh attestation verify <zip> --repo $repo)"
+        Write-Warning "provenance NOT verified - only the checksum was checked, and it comes from the same release as the zip."
+        Write-Warning "Install the GitHub CLI and log in (gh auth login) to have it verified, or check by hand:"
+        Write-Warning "gh attestation verify $($asset.name) --repo $repo --signer-workflow $workflow --source-ref $sourceRef"
     }
 
     # Extract (tar ships with Windows 10+ for the old .tar.gz).
@@ -128,22 +146,39 @@ try {
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
-Write-Host "installed in $InstallDir"
+if ($provenance) {
+    Write-Host "installed in $InstallDir"
+} else {
+    Write-Host "installed in $InstallDir (checksum only: provenance NOT verified)"
+}
 
-# The user's PATH (no admin), and this session's.
+# In a console, questions are asked; never in CI or with -NoPrompt.
+$interactive = -not $NoPrompt -and -not $env:CI -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+
+# The user's PATH (no admin) changes only when you say so: in a console the
+# installer asks (default no), elsewhere -AddToPath does it. This session's
+# PATH gets the folder either way, for the calls below.
 if (-not $NoPath) {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $entries = @($userPath -split ';' | Where-Object { $_ -ne "" })
     if ($entries -notcontains $InstallDir) {
-        [Environment]::SetEnvironmentVariable("Path", (($entries + $InstallDir) -join ';'), "User")
-        Write-Host "added $InstallDir to your PATH"
+        $add = [bool]$AddToPath
+        if (-not $add -and $interactive) {
+            $answer = Read-Host "$InstallDir is not on your PATH. Add it to your user PATH? [y/N]"
+            $add = $answer -match '^(y|yes|s|sim)$'
+        }
+        if ($add) {
+            [Environment]::SetEnvironmentVariable("Path", (($entries + $InstallDir) -join ';'), "User")
+            Write-Host "added $InstallDir to your PATH: new terminals will find ouija"
+        } else {
+            Write-Host "$InstallDir is not on your PATH. Rerun with -AddToPath, or add it under"
+            Write-Host "Settings > System > About > Advanced system settings > Environment Variables, then open a new terminal."
+        }
     }
     if (($env:Path -split ';') -notcontains $InstallDir) { $env:Path = "$env:Path;$InstallDir" }
 }
 
 & (Join-Path $InstallDir "ouija.exe") version
-# In a console, offer to run the setup right away; never in CI.
-$interactive = -not $NoPrompt -and -not $env:CI -and [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
 Write-Host ""
 if ($interactive) {
     $answer = Read-Host "Set up ouija now (provider, API key, model)? [Y/n]"

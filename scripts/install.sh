@@ -7,6 +7,7 @@
 #
 # Options, after `sh -s --` when piped:
 #   --version 0.2.0   a given release instead of the latest
+#   --prerelease      let the latest be a pre-release too (default: stable only)
 #   --dir DIR         where the binaries go (default ~/.local/bin)
 #   --no-prompt       ask nothing: no PATH change, no setup
 #   --require-provenance  refuse to install unless the archive's build
@@ -22,6 +23,7 @@ version="latest"
 dir="${HOME}/.local/bin"
 prompt=yes
 require_provenance=no
+prerelease=no
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -30,8 +32,9 @@ while [ $# -gt 0 ]; do
         --dir) dir="${2:?--dir needs a value}"; shift 2 ;;
         --dir=*) dir="${1#*=}"; shift ;;
         --no-prompt) prompt=no; shift ;;
+        --prerelease) prerelease=yes; shift ;;
         --require-provenance) require_provenance=yes; shift ;;
-        -h|--help) sed -n '2,17p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,18p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown option $1 (try --help)" >&2; exit 2 ;;
     esac
 done
@@ -90,18 +93,32 @@ pick() {
     if [ -n "$a" ] && [ -n "$s" ]; then printf '%s %s\n' "$a" "$s"; fi
 }
 
+# stable prints the tags of a release listing (on stdin) that are not
+# pre-releases, newest first; with --prerelease, every tag. The API puts a
+# release's "tag_name" before its "prerelease"; quotes inside the notes are
+# escaped, so the notes cannot fake either field.
+stable() {
+    grep -oE '"(tag_name|prerelease)": *("[^"]*"|true|false)' |
+        awk -v all="$prerelease" '
+            /"tag_name"/ { t = $0; sub(/^"tag_name": *"/, "", t); sub(/"$/, "", t); next }
+            t != "" && (all == "yes" || /false$/) { print t }
+            { t = "" }'
+}
+
 api="https://api.github.com/repos/${repo}/releases"
 if [ "$version" = "latest" ]; then
     # For a few minutes after a release is cut, CI is still building its
-    # archives: take the newest release that has them.
-    all=$(get "${api}?per_page=10" | urls) || die "could not reach the GitHub API."
+    # archives: take the newest release that has them. Pre-releases are
+    # skipped unless --prerelease asks for them.
+    listing=$(get "${api}?per_page=10") || die "could not reach the GitHub API."
+    all=$(printf '%s\n' "$listing" | urls || true)
     found=""
-    for tag in $(printf '%s\n' "$all" | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p' | awk '!seen[$0]++'); do
-        found=$(printf '%s\n' "$all" | grep "/download/${tag}/" | pick)
+    for tag in $(printf '%s\n' "$listing" | stable); do
+        found=$(printf '%s\n' "$all" | grep -F "/download/${tag}/" | pick)
         [ -n "$found" ] && break
         say "${tag} has no ${os}/${arch} archive yet (still being built?); trying the release before it"
     done
-    [ -n "$found" ] || die "no release with a ${os}/${arch} archive and SHA256SUMS found."
+    [ -n "$found" ] || die "no release with a ${os}/${arch} archive and SHA256SUMS found (pre-releases are skipped: --prerelease includes them)."
 else
     tag="v${version#v}"
     rel=$(get "${api}/tags/${tag}" 2>/dev/null) || die "there is no release ${tag} (see https://github.com/${repo}/releases)."
@@ -127,17 +144,27 @@ say "checksum ok"
 # The checksum only proves the archive matches SHA256SUMS, and both come from
 # the same release. The build provenance ties the archive to this repository's
 # release workflow (Sigstore-signed by GitHub Actions): a swapped archive has
-# none. Checking it needs the GitHub CLI, logged in or with a token.
+# none, and one built by any other workflow of the repository is refused too,
+# as is one the release workflow built from another branch (a modified copy
+# of it pushed there): releases run on pushes to main only.
+# Checking it needs the GitHub CLI, logged in or with a token.
+workflow="${repo}/.github/workflows/release.yml"
+source_ref="refs/heads/main"
+provenance=no
 if command -v gh >/dev/null 2>&1 && { [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || gh auth status >/dev/null 2>&1; }; then
-    if gh attestation verify "$tmp/$name" --repo "$repo" >/dev/null 2>&1; then
-        say "provenance ok (built by ${repo}'s release workflow)"
+    if out=$(gh attestation verify "$tmp/$name" --repo "$repo" --signer-workflow "$workflow" --source-ref "$source_ref" 2>&1); then
+        provenance=yes
+        say "provenance ok (built by ${workflow})"
     else
-        die "provenance check failed for ${name}: it was not built by ${repo}'s release workflow - not installed."
+        printf '%s\n' "$out" | tail -n 3 >&2
+        die "provenance check failed for ${name}: it was not built by ${workflow} on main - not installed."
     fi
 elif [ "$require_provenance" = yes ]; then
     die "--require-provenance: the GitHub CLI (gh), logged in, is needed to verify the build provenance - not installed."
 else
-    say "provenance not checked (with the GitHub CLI logged in, the installer verifies it: gh attestation verify <archive> --repo ${repo})"
+    say "WARNING: provenance NOT verified - only the checksum was checked, and it comes from the same release as the archive."
+    say "         Install the GitHub CLI and log in (gh auth login) to have it verified, or check by hand:"
+    say "         gh attestation verify ${name} --repo ${repo} --signer-workflow ${workflow} --source-ref ${source_ref}"
 fi
 
 mkdir -p "$tmp/x"
@@ -153,7 +180,11 @@ for b in ouija ouija-mcp; do
         mv -f "$dir/.$b.new" "$dir/$b"
     fi
 done
-say "installed in ${dir}"
+if [ "$provenance" = yes ]; then
+    say "installed in ${dir}"
+else
+    say "installed in ${dir} (checksum only: provenance NOT verified)"
+fi
 
 "$dir/ouija" version
 
