@@ -488,6 +488,11 @@ func restoreGitState(root string, before *gitState) []string {
 			if !existed && strings.HasSuffix(p, ".sample") && now.link == "" && !now.dir {
 				continue // git init's samples: git never runs them
 			}
+			if !existed && now.dir {
+				// A new directory runs nothing (git init makes hooks/);
+				// the files in it are judged one by one.
+				continue
+			}
 		case gitKindWorktreeCommondir:
 			// git worktree add: worktrees/<name>/commondir points back at
 			// the git directory.

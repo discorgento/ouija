@@ -58,6 +58,13 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 			res.Data = strings.TrimSpace(res.Data + "\n\n" + note)
 		}
 	}
+	// A confined command's git changes were just checked and what runs was
+	// put back: what is left (git init, a remote, user.name) is ordinary,
+	// and a notice for it only cries wolf. Outside the sandbox nothing was
+	// put back, so the user hears of every change.
+	if confined {
+		return res
+	}
 	if notice := gitGuardNotice(root, before, gitGuardSnapshotOf(root, nested)); notice != "" {
 		if res.Error != nil {
 			res.Error.Message += "\n" + notice

@@ -580,3 +580,31 @@ func TestRestoreKeepsTheUsersHookDirectories(t *testing.T) {
 		t.Error("a file the command added under .git/hooks survived")
 	}
 }
+
+// An ordinary `git init` in the sandbox is left alone and says nothing: the
+// hooks directory it makes, with git's samples, stays, and no notice cries
+// wolf. A hook planted afterwards is still put back, and named.
+func TestConfinedGitInitIsQuiet(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("the restore runs where .git is writable in the sandbox (Linux)")
+	}
+	if err := sandboxAvailable(); err != nil {
+		t.Skipf("no sandbox here: %v", err)
+	}
+	project, _, run := sandboxFixture(t, DefaultSandbox())
+	out := fmtData(run(`git init -q && echo ok`))
+	if strings.Contains(out, GitGuardMarker) {
+		t.Errorf("git init raised a notice:\n%s", out)
+	}
+	samples, _ := filepath.Glob(filepath.Join(project, ".git", "hooks", "*.sample"))
+	if len(samples) == 0 {
+		t.Error("git init's hooks directory and samples were removed")
+	}
+	out = fmtData(run(`printf '#!/bin/sh\necho x\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit`))
+	if _, err := os.Stat(filepath.Join(project, ".git", "hooks", "pre-commit")); err == nil || !strings.Contains(out, "pre-commit") {
+		t.Errorf("a planted hook was not put back and named:\n%s", out)
+	}
+}
