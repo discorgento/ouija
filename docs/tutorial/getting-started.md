@@ -45,9 +45,9 @@ You almost always use `ouija`.
 ouija setup
 ```
 
-The wizard asks for API keys, one field per provider (leave a field blank to
-skip that provider), and for your default provider and model. It writes
-everything to the global config with `0600` permissions:
+The wizard asks three things: the provider, its API key (checked right away;
+Ollama needs none), and your default model, listed live from the provider. It
+writes everything to the global config with `0600` permissions:
 `~/.config/ouija/config.json` on Linux, `~/Library/Application Support/ouija/`
 on macOS, and `%AppData%\ouija\` on Windows.
 
@@ -61,8 +61,9 @@ ouija doctor
 ```
 
 `doctor` prints a checklist of the config files, the provider and model it
-will use, whether the key is present, the registered totems (the agents ouija
-ships), and whether your editor's harness knows about ouija. Each line is
+will use, whether the key is present and works, whether the bash sandbox is
+on, the registered totems (the agents ouija ships), and whether your editor's
+harness knows about ouija. Each line is
 marked ✓ for ok, ! for a warning, or ✗ for a problem.
 
 ## 4. Run your first task
@@ -104,6 +105,9 @@ talk to it. Two behaviors are worth knowing on day one:
   proposed edit first.
 - **You can type while the model works.** Your messages wait in a queue and go
   out when it finishes.
+- **Commands run in a sandbox** on Linux and macOS: they write only inside the
+  project and reach no network. When the sandbox blocks one, the model may ask
+  to run it outside, and you approve that exact command in its own prompt.
 
 Type `/help` inside the chat for every command and shortcut. The full workflow
 is in [Use the chat TUI](../how-to/chat.md).

@@ -20,8 +20,10 @@
 
 `go.mod` declares the runtime dependencies, and Go fetches them automatically,
 so you install nothing by hand. They are the Charm stack for the TUI,
-`mvdan.cc/sh/v3` for parsing bash and `golang.org/x/sync`; everything else is
-the standard library. [Conventions](contribute.md#dependencies) gives the full
+`alecthomas/chroma` for syntax highlighting, `atotto/clipboard` for copying,
+`mvdan.cc/sh/v3` for parsing bash, `landlock-lsm/go-landlock` for the Linux
+bash sandbox and `golang.org/x/sync`; everything else is the standard
+library. [Conventions](contribute.md#dependencies) gives the full
 list and the reason for each.
 
 ## The quick way
@@ -67,7 +69,8 @@ folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` or fish's config) when it is
 not there yet, and whether to run `ouija setup` now. In CI, or with
 `--no-prompt`, it asks nothing and prints what to do instead. To pass options
 (`--version 0.2.0`, `--dir <dir>`, `--no-prompt`, `--require-provenance`), put
-them after `sh -s --`.
+them after `sh -s --`. `--dir` must be an absolute path (`$HOME/...`, not `~`)
+without `"`, `$`, a backtick or `\`.
 
 ### Build provenance
 
@@ -108,7 +111,8 @@ The script downloads the latest release's zip, checks it against
 In a console it offers to run `ouija setup` right away. Then open a **new**
 terminal (Windows Terminal or PowerShell) and run `ouija` in a project folder.
 If you save the script as a file, it accepts `-Version 0.2.0`,
-`-InstallDir <dir>`, `-NoPath` and `-NoPrompt`.
+`-InstallDir <dir>` (an absolute path, such as `C:\tools\ouija`), `-NoPath`,
+`-NoPrompt` and `-RequireProvenance`.
 
 To install by hand, download the zip and extract it (Explorer opens it). Then
 add the folder that holds `ouija.exe` to your `PATH` under *Settings → System

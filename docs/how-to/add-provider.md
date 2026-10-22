@@ -79,6 +79,8 @@ func (m *Mistral) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[en
         //    - req.System → system message
         //    - req.Messages → conversation history
         //    - req.Tools → tool definitions
+        //    - req.NoToolCalls → declare req.Tools (the history refers to
+        //      them) but do not let this call use them: the reply is an answer
         //    - req.Schema → the reply must be this JSON object: a native JSON mode
         //      (response_format), or a forced engine.SubmitTool call whose
         //      input_schema is req.Schema (see anthropic.go)
@@ -127,8 +129,10 @@ key in `cfg.APIKey`, taking the global config's key unless the project config
 overrides it. `app.BuildProvider(name, key)` then passes the key to your
 constructor as its `apiKey` argument. A provider that needs no key, such as
 `ollama`, ignores the argument and registers with
-`Register("ollama", func(string) engine.Provider { … })`. Keys always come
-from the config file, never from the environment.
+`Register("ollama", func(string) engine.Provider { … })`. Also add its name to
+`Keyless` in `engine/providers/registry.go`, so the setup wizard and
+`ouija doctor` do not ask for a key. Keys always come from the
+config file, never from the environment.
 
 ### 6. Register the provider and its models
 

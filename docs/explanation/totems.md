@@ -13,7 +13,7 @@
 A totem is an AI agent you write as ordinary Go code, with types, tests and
 golden files. Underneath, every totem shares one engine that handles the
 expensive, tedious parts: the cost ceiling, the filesystem sandbox, traces,
-falling back to another model provider, and exposing the totem as an MCP tool
+retrying a provider that fails, and exposing the totem as an MCP tool
 (MCP, the Model Context Protocol, is how editors such as Claude Code or Cursor
 call outside tools). The totem itself only decides the order of the work.
 
@@ -57,7 +57,8 @@ of this:
 | Filesystem sandbox (`SafeJoin`, symlink detection) | `Sandbox` | The model cannot write outside the project root |
 | Permission tiers + approval | `ToolRunner` | Write and draft tools need permission; nothing is assumed |
 | Bash allowlist + doom-loop detection | `ToolRunner` | Repeated identical calls get cut off |
-| Provider fallback | `providers/` | If one provider is down, the next is tried |
+| OS sandbox for bash (Landlock, Seatbelt) | `bash_sandbox*.go` | A command cannot reach your credentials or the network, even through a path built at run time |
+| Retries + circuit breaker | `providers/` | A 429 or 5xx is retried with backoff; after 3 failures in a row the provider fails fast for 30s |
 | Structured trace | `Tracer` | Every span can be exported to Perfetto for debugging |
 | MCP export | `mcp/` | Any registered totem becomes a `ouija_<name>` tool |
 

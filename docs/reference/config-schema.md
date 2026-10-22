@@ -35,6 +35,7 @@ print the path in use.
 | `defaults.model` | `string` | Yes (if defaults block) | Default model ID |
 | `theme` | `string` | No | UI color theme: `ouija` (default), `catppuccin`, `dracula`, `mono`. Set by `/theme` in the chat; `OUIJA_THEME` overrides it |
 | `sandbox` | `object` | No | The bash sandbox for **every** project, same keys as [`tools.bash.sandbox`](#toolsbashsandbox). Set, a project cannot turn it off; a trusted one may add paths and ports. `{"enabled": false}` turns the default sandbox off |
+| `trustedProjects` | `map[string]string` | No | Written by `ouija trust`: each trusted project config's absolute path → the SHA-256 of the contents you trusted. Do not edit it by hand |
 
 The bash sandbox is **on by default** wherever the OS can enforce it. Without
 a `sandbox` key anywhere, ouija confines bash with the defaults below; where
@@ -51,7 +52,8 @@ required: where the OS cannot enforce it, bash refuses to run.
 For backward compatibility, ouija still reads the legacy flat
 `provider`/`model` fields at the top level.
 
-File permissions: `0600` (ouija tightens looser permissions on load).
+File permissions: `0600`. On Linux and macOS ouija tightens looser
+permissions on load; on Windows it skips the check.
 
 ## Project config: `.ouija/config.json`
 
@@ -83,6 +85,22 @@ File permissions: `0600` (ouija tightens looser permissions on load).
 | `modelSuggestions` | `map[string][]string` | No | Suggested models per provider, for autocomplete in the TUI model picker |
 
 File permissions: `0600`.
+
+A discovered project config applies its **trust-only keys** only once you
+trust the file with `ouija trust` (see
+[project trust](../explanation/security.md#project-trust)). Until then ouija
+ignores them and warns. The trust-only keys are:
+
+- `permission`
+- `tools` (the bash allowlist and the sandbox section)
+- `apiKey`
+- a `systemPrompt` or `rules` other than the built-in ones
+- a `projectRoot` other than `"."`
+- a `budget` above the defaults (an untrusted file may only lower it)
+- a `provider` or `model` other than your `ouija setup` defaults
+
+A config passed with `--config` is trusted, like any CLI flag, and so is a
+file ouija writes itself (`ouija init`, a chat save).
 
 ## Engine config: `Config` struct
 
@@ -143,7 +161,7 @@ defaults, overlaid by the global config, then by the project config.
 | `totems.doc.brand` | `string` | `""` | Logo text, brand tag and cover footer (`--set brand=…`) |
 | `totems.doc.locale` | `string` | `"en"` | The document's language tag (`--set locale=…`) |
 | `rules` | `[]string` | `[...]` | Project rules injected into prompts |
-| `projectRoot` | `string` | `"."` | Sandbox root for the file tools |
+| `projectRoot` | `string` | `"."` | Root for the file tools and the bash sandbox, relative to the config file's directory (the one holding `.ouija/`). Kept inside that directory (symlinks resolved); applied only from a trusted file |
 | `budget.maxTokens` | `int` | `2000000` | Hard token ceiling |
 | `budget.maxSteps` | `int` | `500` | Hard step ceiling |
 | `budget.maxUSD` | `float64` | `null` | Hard cost ceiling (null = unlimited) |
@@ -194,12 +212,24 @@ Levels:
 
 Protected paths are always denied, whatever the configured level. ouija checks
 both the tool's `path` argument and any path a bash command names. The
-protected paths are the system dirs `/etc/*`, `/var/lib/*`, `/proc/*` and
-`/sys/*`; the files `.env*`, `.gitconfig`, `.netrc`, `.npmrc`, `.dockercfg`,
-`.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`,
-`id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, `*.tfstate`; and the dirs `.ssh`,
-`.gnupg`, `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`, `.config/gcloud`,
-`.config/kube`, `.config/gh`, plus `.git/config`.
+protected paths are:
+
+- the system dirs `/etc/*`, `/var/lib/*`, `/proc` and `/sys`, and on macOS
+  `/private/etc/*` and `/private/var/lib/*`;
+- the files `.env*`, `.gitconfig`, `.netrc`, `.npmrc`, `.dockercfg`,
+  `.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`,
+  `.vault-token`, `id_rsa`, `id_dsa`, `id_ecdsa`, `id_ed25519`, `*.tfstate`,
+  `*.tfstate.backup`, and ouija's own `.ouija.json` and `ouija.json`;
+- the dirs `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`,
+  `.password-store`, `.config/gcloud`, `.config/kube`, `.config/gh`, and
+  ouija's global config dir;
+- a repository's `.git/config` and `.git/hooks`;
+- the token files inside tool dirs: `.cargo/credentials`,
+  `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
+  `.gradle/gradle.properties`, `huggingface/token`, `uv/credentials`,
+  `.docker/config.json`, `git/credentials`,
+  `.terraform.d/credentials.tfrc.json`, `rclone/rclone.conf`,
+  `share/keyrings` and `etc/npmrc`.
 
 ### `tools.bash.sandbox`
 
@@ -209,8 +239,8 @@ protected paths are the system dirs `/etc/*`, `/var/lib/*`, `/proc/*` and
     "bash": {
       "sandbox": {
         "enabled": true,
-        "read": ["~/go/pkg/mod"],
-        "write": ["~/.cache/go-build"],
+        "read": ["~/sdk"],
+        "write": ["/dev/shm"],
         "network": { "connect": [443] }
       }
     }
@@ -223,14 +253,19 @@ also confines Unix sockets and signals outside the sandbox), on macOS with
 Seatbelt (`sandbox-exec`). A command writes only inside the project, a private
 temp dir (`TMPDIR`, one per ouija process) and a private build cache for the
 project (`GOCACHE`, `npm_config_cache`, `PIP_CACHE_DIR`, `XDG_CACHE_HOME`, …
-point into `~/.cache/ouija/sandbox/`). Your real caches stay read-only to it:
+point into `ouija/sandbox/` in the user cache dir: `~/.cache/ouija/sandbox/`
+on Linux, `~/Library/Caches/ouija/sandbox/` on macOS). Your real caches stay
+read-only to it:
 the tools you run later outside the sandbox trust them, so a confined command
 that could write there could plant code that escapes. It reads only the system
 directories (`/usr`, `/etc`, `/lib`, …), the project, the parts of the
 toolchains in your home that builds read (`~/go/pkg/mod`, `~/.cargo/registry`,
-`~/.rustup`, `~/.nvm/versions`, `~/.pyenv/versions`, `~/.m2/repository`,
-`~/.local/bin`, …, never the credentials next to them such as
-`~/.cargo/credentials.toml` or `~/.m2/settings.xml`), git's global ignore files
+`~/.rustup`, `~/.m2/repository`, `~/.local/bin`, …; for a version manager,
+each installed version's `bin` and `lib`, such as
+`~/.nvm/versions/node/*/{bin,lib}` or `~/.pyenv/versions/*/{bin,lib}`, not the
+whole version dir, whose `etc` holds an `npmrc`; never the credentials next to
+them such as `~/.cargo/credentials.toml` or `~/.m2/settings.xml`), git's
+global ignore files
 and the paths listed in `read` / `write` (`~/` is your home; relative paths are
 relative to the project). The rest of `$HOME` (`~/.ssh`, `~/.aws`, ouija's own
 config, your documents) stays unreachable, whatever the command or its
@@ -245,6 +280,11 @@ token), so ouija runs it with `GIT_CONFIG_GLOBAL=/dev/null` and passes on only
 your `user.name` and `user.email`. The project itself (its `.env` and `.git`
 included) stays readable and writable; see
 [what the sandbox does not cover](../explanation/security.md#os-sandbox).
+Because `.git` stays writable, ouija checks it after every confined command:
+it puts back the hooks in `.git/hooks` as they were, and `.git/config` when
+the command added an entry that runs a command (`core.fsmonitor`,
+`core.hooksPath`, a `!` alias, a filter, …). Ordinary changes stay. The
+command's result names what was put back.
 When a confined command fails, its result says it ran in the sandbox, so a
 denial is not mistaken for a bug. The model may then retry the same command
 with `"unsandboxed": true`: that runs it outside the sandbox only after you
@@ -294,16 +334,25 @@ Semantics:
 - A multi-word entry names an exact action, which only bare switches
   (`--prod`, `-v`) may extend: never operands, valued flags (`--out=x`) or
   anything after `--`.
-- A **Session** approval of a command in the TUI adds it here and persists the
-  file. A plain **Yes** runs that one command and is not persisted.
+- A **Session** approval of a command in the TUI adds one pattern per simple
+  command here and saves the file. A command with `$(…)` or a variable adds
+  none, and neither does an approval to run outside the sandbox. ouija
+  refuses to rewrite an untrusted config that sets trust-only keys, so the
+  pattern then lasts only for the session. A plain **Yes** runs that one
+  command and saves nothing.
 
 The full check order is:
 
-1. **Denylist** (hardcoded + semantic analysis) — hard rule, before any prompt
-2. **Protected-path reference** in the command — also before any prompt
-3. **Permission gate** (deny/ask/allow); at `ask`, an allowlist match skips the prompt
-4. **Allowlist enforcement** (only at `allow` level, where it is the guard rail)
-5. **Execution**
+1. **Doom-loop check** — the same tool with identical input three times in a row is refused
+2. **NUL byte** in the command — refused (`bash: the command contains a NUL byte`)
+3. **Denylist** (hardcoded + semantic analysis) — hard rule, before any prompt
+4. **Protected-path reference** in the command — also before any prompt
+5. **`"unsandboxed": true`** — the permission level and the allowlist still
+   apply; refused when `allowUnsandboxed` is `false` or there is no approval
+   UI; otherwise always a prompt
+6. **Permission gate** (deny/ask/allow); at `ask`, an allowlist match skips the prompt
+7. **Allowlist enforcement** (only at `allow` level, where it is the guard rail)
+8. **Execution**
 
 #### Denylist
 
@@ -341,7 +390,9 @@ project config > global config > built-in defaults
 ```
 
 A field missing from a higher-priority layer is inherited from the layer
-below. Validation runs on the merged result.
+below. An untrusted project file loses its trust-only keys before the merge.
+A global `sandbox` is applied last, as a floor no project lowers. Validation
+runs on the merged result.
 
 ---
 

@@ -150,7 +150,7 @@ fmt.Fprintf(os.Stderr, "[ouija] starting agent %s\n", label)
 func TestEngineLoopToolThenSubmit(t *testing.T) {
     mp := &mockProvider{responses: []ChatResponse{
         {ToolCalls: []ToolCall{{ID: "1", Name: "read_file", Input: map[string]any{"path": "f.txt"}}}},
-        {ToolCalls: []ToolCall{{ID: "2", Name: submitTool, Input: map[string]any{"ok": true}}}},
+        {ToolCalls: []ToolCall{{ID: "2", Name: SubmitTool, Input: map[string]any{"ok": true}}}},
     }}
     eng := newTestEngine(mp, t.TempDir())
     res, err := eng.Run(context.Background(), RunRequest{Schema: map[string]any{"type": "object"}, UseTools: true})
@@ -176,16 +176,22 @@ the CLI commands, lives in `internal/` and cannot be imported from outside.
 
 - Runtime: Bubble Tea (`charm.land/bubbletea/v2`, `bubbles/v2`, `lipgloss/v2`,
   `glamour/v2`) and `huh/v2` for the interactive chat TUI and commands,
-  `atotto/clipboard` for paste, `charmbracelet/x/ansi` for terminal styling, and
-  `golang.org/x/sync` (errgroup) plus `mvdan.cc/sh/v3` (shell parsing for the
-  bash tool) in the engine.
+  `alecthomas/chroma/v2` for syntax highlighting in the chat,
+  `atotto/clipboard` for copying a reply or a code block,
+  `charmbracelet/x/ansi` for terminal styling, `charmbracelet/x/term` for
+  terminal detection and `charmbracelet/colorprofile` for the terminal's color
+  support. The engine uses `golang.org/x/sync` (errgroup), `mvdan.cc/sh/v3`
+  (shell parsing for the bash tool) and `landlock-lsm/go-landlock` (the Linux
+  bash sandbox).
 - Everything else comes from the Go standard library.
 - Vendor nothing; `go.mod` manages every dependency.
 
 ## Security-sensitive code
 
-Permission gating, the sandbox (`engine/sandbox.go`), the bash denylist
-(`engine/tools_bash.go`) and config handling all **fail closed**: when in
+Permission gating, the sandbox (`engine/sandbox.go`), the bash OS sandbox
+(`engine/bash_sandbox*.go`) and the git restore after it
+(`engine/git_restore.go`), the bash denylist (`engine/tools_bash.go`), project
+trust (`internal/app/trust.go`) and config handling all **fail closed**: when in
 doubt, they deny. A change that makes any of them more permissive must come
 with tests that prove the previous behaviour was wrong. Without such tests,
 treat it as a security change and open an issue before writing code.
@@ -247,8 +253,10 @@ They are organized by what the reader wants: tutorial, how-to, reference or
 explanation (see the [Index](../index.md)). `docs/_style-guide.md` holds the
 formatting rules and the skeleton for a new page.
 
-The link check in `internal/doccheck` makes `go test ./...` fail when a move
-breaks a relative link or anchor. The same package checks absolute
+The checks in `internal/doccheck` make `go test ./...` fail when a move
+breaks a relative link or anchor, and when the code gains a config key, a CLI
+command or an `OUIJA_*` variable that the reference pages do not mention:
+document it in `docs/reference/` in the same change. The same package checks absolute
 `http(s)://` links, including the README badges, over the network in a
 separate CI job: `DOCCHECK_EXTERNAL=1 go test ./internal/doccheck -run
 TestExternalLinksReachable`.

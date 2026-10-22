@@ -16,7 +16,7 @@ ouija chat --trace-file session.json
 tools on your project, its reply streams in as it is written, and ouija asks
 your permission before any risky tool call.
 
-The [CLI reference](../reference/cli.md#ouija-chat---config-file---trace-file-file)
+The [CLI reference](../reference/cli.md#ouija-chat---continue---config-file---trace-file-file)
 lists every slash command and keyboard shortcut. This page covers the
 workflows around them.
 
@@ -111,11 +111,14 @@ arrow keys:
 - **No** (`n`) — reject it. ouija tells the model to try a different approach.
 - **Session** (`s`) — approve for the rest of the session, **scoped to this
   exact target** (the file path, or the exact bash command). For bash, ouija
-  also adds the command to the allowlist and saves it to the project config
-  file: the discovered `.ouija/config.json`, `.ouija.json` or `ouija.json`, or
-  the `--config` path.
-- **Edit** (`e`) — open the proposed change in `$EDITOR` (or `vi`, if unset)
-  and adjust it before approving.
+  also adds one allowlist pattern per simple command and saves it to the
+  project config file: the discovered `.ouija/config.json`, `.ouija.json` or
+  `ouija.json`, or the `--config` path. A command with `$(…)` or a variable
+  adds no pattern, and neither does an approval to run outside the sandbox.
+  ouija refuses to rewrite an untrusted config that sets trust-only keys; the
+  approval then lasts for this session only.
+- **Edit** (`e`) — open the proposed change in `$EDITOR` (or `vi`, `notepad`
+  on Windows, if unset) and adjust it before approving.
 - **Cancel** (`esc`) — cancel the generation.
 
 Some tools use their own confirm key: `delete_file` asks for `d` (Delete)
@@ -127,6 +130,21 @@ lists the paths.
 After you reject a tool during a generation, ouija rejects every later call to
 that tool until the generation ends. To stop the prompts for a tool you trust,
 use `/permit <tool> allow`.
+
+## When the sandbox blocks a command
+
+On Linux and macOS, bash runs in the OS sandbox by default: a command writes
+only inside the project and reaches no network (see
+[Configure → Bash sandbox](configure.md#bash-sandbox)). When the sandbox blocks
+one, its result says it ran in the sandbox, so the model does not mistake the
+denial for a bug.
+
+The model may then retry the same command with `"unsandboxed": true`. You get
+a prompt marked **runs OUTSIDE the bash sandbox: full access to your files and
+network**, every time, whatever `/permit` or the allowlist says. **Session**
+there covers only that exact command, and it adds nothing to the allowlist. If
+the command needs something regular, such as a port or a path, open it under
+`tools.bash.sandbox` instead.
 
 ## Trusting a command for good
 
@@ -160,9 +178,9 @@ the history.
 ## Exiting
 
 Press `Ctrl+C` or `Ctrl+D` at any time, or type `exit` / `quit` and press Enter.
-After the TUI exits, ouija prints the session's span tree to stderr, followed
-by a one-line summary: messages · tokens · steps, plus cost when pricing is
-set.
+After the TUI exits, ouija prints to stderr a summary card (when the session
+had messages): time, messages, tokens and steps, the model, cost when pricing
+is set, and the files changed. Then it prints the session's span tree.
 
 ---
 

@@ -20,7 +20,9 @@ Priority (highest wins): **project config > global config > built-in defaults**
 
 To find the project config, ouija walks up from the current directory and
 looks for **`.ouija/config.json`** first, then `.ouija.json`, then
-`ouija.json`. It uses the first file it finds.
+`ouija.json`. It uses the first file it finds. A discovered project config
+applies its trust-only keys only once you trust it (see below), and a
+`sandbox` in the global config is a floor no project config lowers.
 
 ## Global setup: `ouija setup`
 
@@ -110,12 +112,49 @@ happens.
 
 ouija validates the config every time it loads it:
 
-- **`Config.Validate()`** checks every field (provider, model, maxNudges,
-  budget limits, `totems.<name>` sections) and joins all the errors with
-  `errors.Join`.
+- **`Config.Validate()`** checks the provider, the model, `maxNudges` and the
+  budget limits, and joins all the errors with `errors.Join`.
 - **`ValidateConfig()`** also checks that the provider is registered.
 
-So a bad config fails at startup, not in the middle of a run.
+So a bad config fails at startup, not in the middle of a run. One exception:
+ouija does not check a `totems.<name>` section up front. A malformed one fails
+when that totem reads it.
+
+## Bash sandbox
+
+The OS confines every bash command, by default, on Linux (Landlock ABI v9+)
+and on macOS (Seatbelt). A confined command writes only inside the project
+and private temp and cache dirs, reads no credentials in your home, and opens
+no TCP connection. `ouija doctor` shows whether the sandbox is on.
+
+When a build needs more, open it under `tools.bash.sandbox` in the project
+config:
+
+```json
+{
+  "tools": {
+    "bash": {
+      "sandbox": {
+        "enabled": true,
+        "read": ["~/sdk"],
+        "write": ["/dev/shm"],
+        "network": { "connect": [443] }
+      }
+    }
+  }
+}
+```
+
+The project section applies only once you trust the file. To turn the sandbox
+off, set `"sandbox": {"enabled": false}` in the global config, or
+`tools.bash.sandbox.enabled` to `false` in a trusted project config (this has
+no effect when the global config sets a `sandbox`).
+
+When a confined command fails, the model may retry it with
+`"unsandboxed": true`. You then get a prompt for that exact command, every
+time. `"allowUnsandboxed": false` in the sandbox section turns that escape off.
+See [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox) for
+every key.
 
 ## Environment variables
 

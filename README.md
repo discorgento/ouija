@@ -261,9 +261,10 @@ covers the details, including `PATH` for each shell and the `@latest` caveat.
 
 - **Go 1.26+** (uses `iter.Seq2`, `log/slog`, `slices`, `errors.Join`, `clear`,
   `range-over-int`). Runtime dependencies live in `go.mod` — the Charm stack
-  (Bubble Tea v2, Bubbles, Lip Gloss, Glamour, Huh), `mvdan.cc/sh/v3`,
-  `charmbracelet/x/ansi`, `atotto/clipboard`, `golang.org/x/sync`; everything
-  else is the standard library.
+  (Bubble Tea v2, Bubbles, Lip Gloss, Glamour, Huh, `charmbracelet/x/ansi`,
+  `x/term`, `colorprofile`), `alecthomas/chroma`, `atotto/clipboard`,
+  `mvdan.cc/sh/v3`, `landlock-lsm/go-landlock`, `golang.org/x/sync`;
+  everything else is the standard library.
 - At least one provider configured via `ouija setup`.
 
 ## Development
@@ -322,7 +323,7 @@ Details: [MCP integration](docs/how-to/integrate-mcp.md).
 ## Security
 
 ouija layers several defenses: a filesystem sandbox, an OS sandbox for bash
-(on by default on Linux and macOS), protected paths,
+(on by default on Linux with Landlock ABI v9+ and on macOS), protected paths,
 permission levels, a bash denylist and allowlist, detection of an agent stuck
 repeating the same call (a "doom loop"), budget ceilings, and credentials
 stripped from the environment of every command it runs. All of them **fail closed**: when a check is inconclusive, the

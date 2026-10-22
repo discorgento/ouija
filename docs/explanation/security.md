@@ -76,9 +76,11 @@ an account the repository's author controls.
 Some paths are **always blocked**, whatever the permission level: `/etc/*`,
 `/var/lib/*`, `/proc/*`, `/sys/*`, `.env*`, `.netrc`, `.gitconfig`,
 `.git-credentials`, `.pgpass`, `.pypirc`, `.my.cnf`, SSH keys by name
-(`id_rsa`, `id_ed25519`, …) anywhere, `*.tfstate`, `.git/config`, `.ssh/*`,
-`.gnupg/*`, `.aws/*`, `.config/gh/*`, `.ouija/*`, `.ouija.json`, `ouija.json`,
-ouija's global config
+(`id_rsa`, `id_ed25519`, …) anywhere, `.npmrc`, `.vault-token`, `*.tfstate`,
+`.git/config`, `.git/hooks/*`, `.ssh/*`, `.gnupg/*`, `.aws/*`,
+`.password-store/*`, `.config/gh/*`, `.ouija/*`, `.ouija.json`, `ouija.json`,
+token files inside tool dirs (`.cargo/credentials.toml`, `.m2/settings.xml`,
+…), ouija's global config
 (`~/.config/ouija/*`, that is `os.UserConfigDir()/ouija`, which holds every API
 key and the trusted-project list), `.config/gcloud/*`, and similar sensitive
 locations. Directories match exactly: `/etc` matches `/etc` but not
@@ -179,8 +181,10 @@ the project, a private temp dir and a private build cache, and read only
 system directories, the project, the parts of the home toolchains builds read
 (`~/go/pkg/mod`, `~/.cargo/registry`, `~/.nvm/versions`, …, never the
 credential files next to them) and the paths the config lists. Every process
-it starts inherits the confinement, and none can lift it. On Windows there is
-no sandbox: bash asks before every command.
+it starts inherits the confinement, and none can lift it. On Windows, and on
+any OS without Landlock ABI v9 or `sandbox-exec`, ouija skips the default
+sandbox: bash runs unconfined and, at the default `ask` level, asks before
+every command.
 
 The design follows what the other coding agents do (OpenAI Codex, Claude
 Code's sandbox-runtime, Cursor, Gemini CLI), and is stricter on reads: they
@@ -261,9 +265,11 @@ fresh agent run or a user approval resets the counter.
 
 ## The order of checks
 
-One function, `ToolRunner.Run`, decides every tool call. It runs the static
-bash gates *before* any prompt, then the permission level, then the allowlist,
-then execution.
+One function, `ToolRunner.Run`, decides every tool call. It runs the
+doom-loop check first, then refuses a bash command with a NUL byte, then runs
+the other static bash gates (denylist, protected paths) *before* any prompt.
+Next comes the prompt for a run outside the sandbox (`"unsandboxed": true`),
+then the permission level, then the allowlist, then execution.
 [Architecture → Tool gating](architecture.md#tool-gating-permissions) lists the
 full order, with the code path for each step.
 
@@ -290,13 +296,17 @@ a command with substitutions or variables) and saves them to the config file;
 
 A token, step and USD budget bounds cost, and its sanity checks reject negative
 token counts. Secrets come from the config file (`0600`), and ouija never logs
-or traces them. The bash tool sanitizes the environment: `sanitizeEnv()` strips
-credential-like variables (`AWS_*`, provider prefixes such as `OPENROUTER_*`,
-`*API_KEY*`, `*_KEY`, `*SECRET*`, `*TOKEN*`, `*PRIVATE*`, `*_DSN`,
-`DATABASE_URL`, etc.) and any variable whose value is a URL with a password
-before it passes the environment to subprocesses. It is a denylist: a secret
-under an unusual name still reaches bash, so keep secrets out of the
-environment you start ouija from, or turn on the sandbox. Subprocesses get
+or traces them. The bash tool sanitizes the environment before it passes it to
+subprocesses. `sanitizeEnv()` strips variables by name (`AWS_*`, `OUIJA_*`,
+provider prefixes such as `OPENROUTER_*`, `*API_KEY*`, `*_KEY`, `*SECRET*`,
+`*TOKEN*`, `*AUTH*`, `*PRIVATE*`, `*_DSN`, `*_PWD`, `DATABASE_URL`, etc.).
+Whatever the name, it also strips a value that holds a known token format
+(`sk-…`, `ghp_…`, `AKIA…`, a JWT, a PEM private key) or a URL or DSN with a
+password. `PATH` is always kept. It is still a denylist: a secret in an
+unusual format under an unusual name still reaches bash. The sandbox, with
+its network closed, keeps such a secret from leaving the machine, but bash
+still sees it, so keep
+secrets out of the environment you start ouija from. Subprocesses get
 `WaitDelay = 3s` as a safety net against runaway children.
 
 Egress controls stop data from leaving the machine through ouija's outputs. PDF

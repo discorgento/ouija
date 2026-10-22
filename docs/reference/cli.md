@@ -90,10 +90,12 @@ into the `task` totem's scout (the agent that first surveys the code).
 
 ### `ouija doctor`
 
-Checks the local setup: binary location, global and project config files,
-resolved provider/model, API key presence, whether the bash sandbox is on (and
-how to turn it on where the machine supports it), registered totems, and
-harness registration status.
+Checks the local setup: binary location (and a warning when the `ouija` on
+`PATH` is a different binary, since harnesses run that one), global and
+project config files, resolved provider/model, API key presence, a live check
+that the key works and the model exists at the provider, the bash sandbox
+status (on, off or not available here, and how to turn it on where the
+machine supports it), registered totems, and harness registration status.
 
 ```sh
 ouija doctor
@@ -104,7 +106,7 @@ code is 0 when there are no problems, and 1 when it finds at least one (e.g. a
 missing API key for a provider that needs one, an invalid config, no totems
 registered).
 
-### `ouija chat [--config <file>] [--trace-file <file>]`
+### `ouija chat [--continue] [--config <file>] [--trace-file <file>]`
 
 Interactive terminal UI (TUI, built with Bubble Tea): a chat that knows the
 project, with file tools, write and exec tools (subject to approval), token
@@ -121,10 +123,11 @@ user cache directory (`ouija/sessions/`, one directory per project, keeping the
 latest 30). A conversation holds what the tools read, so ouija never writes it
 into the project.
 
-When the TUI exits, ouija always prints the session's span tree (the timed
-steps of the session) to stderr, followed by a summary card: time, messages,
-tokens, model, cost (when pricing is set) and the files changed.
-`--trace-file` also writes the Perfetto JSON file.
+When the TUI exits, ouija prints to stderr a summary card first (only when the
+session had messages): time, messages, tokens, model, cost (when pricing is
+set) and the files changed. Then it always prints the session's span tree (the
+timed steps of the session). `--trace-file` also writes the Perfetto JSON
+file.
 
 #### Slash commands (inside the TUI)
 
@@ -187,10 +190,16 @@ named input that the totem declares, typed by its input schema. A `string`
 input keeps the text as typed (`--set ticket=1234`); other inputs are read as
 JSON (`3`, `true`, `["a","b"]`) when they parse, and as a string otherwise.
 
-Registered totems: `task` (analyses the code, then writes a plan), `review`
-(turns the branch's changes into verified findings), `doc` (a client document
-verified against the code), `sticker` (a laptop sticker from project metrics).
-`ouija help` lists them all.
+The built-in totems:
+
+| Command | What it does |
+|---|---|
+| `ouija task "<what>"` | Analyses the code for a task (a scout, then passes per dimension, then a reconcile) and writes a plan to `docs/task-plan.md` |
+| `ouija review` | Reviews the branch's changes: finds problems, has a skeptic verify each one, and reports what holds. Read-only |
+| `ouija doc "<what>"` | Writes a client document verified against the code, as `.html`, `.pdf` (through headless Chrome) and `.md` under `docs/` |
+| `ouija sticker` | Makes a laptop sticker from real project metrics, under `docs/sticker/` |
+
+`ouija help` lists them all, totems you register included.
 
 | Flag | Default | Description |
 |---|---|---|
@@ -234,6 +243,8 @@ starting the server.
 | Tool prefix | `ouija_<totem>` (e.g. `ouija_task`, `ouija_review`, `ouija_doc`, `ouija_sticker`) |
 | Transport | stdio |
 | Budget | The engine budget applies to each call |
+| Limits | A message over 4 MiB gets a parse error; at most 8 tool calls and resource reads run at once (more get `-32000`); an id still in use by a running request gets `-32600` |
+| Resources | Regular files up to 10 MiB; binary files come as a base64 `blob`. Off when the server starts in `/`, the home folder or a folder above it |
 
 `ouija mcp install` touches only the harnesses it detects (OpenCode, Claude
 Code, Cursor), writes a `.bak` before it edits any config file, and never
@@ -242,8 +253,10 @@ overwrites an existing entry. You can safely re-run both `install` and
 
 ### Tools exposed
 
-Each registered totem becomes an MCP tool named `ouija_<name>`, with a single
-`task` string argument. Config discovery follows the same rules as the CLI.
+Each registered totem becomes an MCP tool named `ouija_<name>`. Its arguments
+are the totem's input schema: a single `task` string by default. A read-only
+totem (`review`) carries `readOnlyHint`, so a host may run it without asking.
+Config discovery follows the same rules as the CLI.
 
 ### Resources exposed
 
