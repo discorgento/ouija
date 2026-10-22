@@ -195,6 +195,7 @@ fieldset.hi { border-color: var(--line-hi); box-shadow: 0 0 0 1px rgba(139, 92, 
 .window { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--code-bg); box-shadow: 0 40px 100px rgba(0, 0, 0, .6), 0 0 0 1px rgba(139, 92, 246, .12); }
 .window .titlebar { height: 38px; }
 .window img { width: 100%; height: auto; }
+.window.shot { border: 0; background: none; } /* the screenshot carries its own frame */
 .demo { margin-top: 48px; }
 
 /* ── sections ──────────────────────────────────── */
@@ -413,8 +414,7 @@ footer a { color: var(--muted); text-decoration: none; }
     </div>
 
 
-    <div class="window demo reveal">
-      <div class="titlebar"><i></i><i></i><i></i><span class="t">ouija chat</span></div>
+    <div class="window shot demo reveal">
       <img src="assets/demo.gif" width="802" height="575" alt="ouija doctor checking the setup, then the chat: a failing test, the fix shown as a diff and approved, the test passing, and /review verifying its findings">
     </div>
   </div>
@@ -537,19 +537,19 @@ g, ctx := errgroup.<span class="f">WithContext</span>(ctx)
     </fieldset>
     <div class="gallery">
       <figure class="reveal">
-        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">welcome</span></div><img src="assets/screens/chat-welcome.png" width="1188" height="776" alt="The welcome screen: the logo and four places to start" loading="lazy"></div>
+        <div class="window shot"><img src="assets/screens/chat-welcome.png" width="1600" height="982" alt="The welcome screen: the logo and four places to start" loading="lazy"></div>
         <figcaption>four places to start: <code>@file</code> <code>/task</code> <code>/learn</code> <code>/help</code></figcaption>
       </figure>
       <figure class="reveal">
-        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">conversation</span></div><img src="assets/screens/chat-conversation.png" width="1008" height="776" alt="A reply with its tools, a failed test's output and the diff it applied" loading="lazy"></div>
+        <div class="window shot"><img src="assets/screens/chat-conversation.png" width="1600" height="982" alt="A reply with its tools, a failed test's output and the diff it applied" loading="lazy"></div>
         <figcaption>the tools, the end of a failed test's output and the diff it applied</figcaption>
       </figure>
       <figure class="wide reveal">
-        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">diff</span></div><img src="assets/screens/chat-diff.png" width="1458" height="434" alt="A diff side by side, syntax-highlighted" loading="lazy"></div>
+        <div class="window shot"><img src="assets/screens/chat-diff.png" width="1600" height="982" alt="A diff side by side, syntax-highlighted" loading="lazy"></div>
         <figcaption>on a wide terminal, diffs appear side by side with syntax highlighting; you approve each one before it is written</figcaption>
       </figure>
       <figure class="wide reveal">
-        <div class="window"><div class="titlebar"><i></i><i></i><i></i><span class="t">/task</span></div><img src="assets/screens/chat-task.png" width="1008" height="586" alt="/task in the chat: the scout and the passes drawn live" loading="lazy"></div>
+        <div class="window shot"><img src="assets/screens/chat-task.png" width="1600" height="982" alt="/task in the chat: the scout and the passes drawn live" loading="lazy"></div>
         <figcaption>run totems from the chat: <code>/task "add a cache"</code> draws the scout and the passes live</figcaption>
       </figure>
     </div>
