@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.8.0](https://github.com/discorgento/ouija/compare/v0.7.0...v0.8.0) (2026-10-22)
+
+
+### Features
+
+* **screens:** build the README visuals from the chat model, and rewrite the README ([#31](https://github.com/discorgento/ouija/issues/31)) ([1af8056](https://github.com/discorgento/ouija/commit/1af8056eb3cbcea194bee8f1dfe562589d88d923))
+
+
+### Bug Fixes
+
+* **chat:** show the resolved path in approvals and keep the debug log private ([09ff234](https://github.com/discorgento/ouija/commit/09ff2349074a557fddcd98fcb70921b7fb72831f))
+* **config:** refuse duplicate keys and reveal hidden text in ouija trust ([66c104d](https://github.com/discorgento/ouija/commit/66c104d022dd614fdf2096237a70152d63947dd4))
+* **config:** stop discovery at the home directory whatever its name ([0d31c6e](https://github.com/discorgento/ouija/commit/0d31c6ef0cf0a063012dc776a460a7358db786c7))
+* **engine:** confine bash with seccomp and a PID namespace, and widen the git restore ([6083b7c](https://github.com/discorgento/ouija/commit/6083b7c2ebfe53da51b7fff0ba9bc0ea90d6aac2))
+* **engine:** keep a confined git init quiet ([19a54ce](https://github.com/discorgento/ouija/commit/19a54ceaf30d145dd187dded6e45e633026d9ff4))
+* **engine:** mark failed tool calls on their trace span ([2046cc8](https://github.com/discorgento/ouija/commit/2046cc849f5732c6fec86d8cf3037b1fca3d2786))
+* **engine:** open files through os.Root and show the real target in approvals ([9ab96f5](https://github.com/discorgento/ouija/commit/9ab96f5943d48fb261b30664555a32702f8772ec))
+* **engine:** refuse a FIFO with the same error on every OS ([0f67f3b](https://github.com/discorgento/ouija/commit/0f67f3b4509741de337b55b4c2db34f2c7ba5c2a))
+* **engine:** refuse bash commands with tag and other format characters ([02faa51](https://github.com/discorgento/ouija/commit/02faa51afa97ea05b02c33a23596beb73a94b2f8))
+* **engine:** resolve absolute paths inside the project ([4d2b1a8](https://github.com/discorgento/ouija/commit/4d2b1a8eb85d866a6cda5c47bf7d582088ccd153))
+* **engine:** stop npm and pip retrying in a closed sandbox ([05b3e7f](https://github.com/discorgento/ouija/commit/05b3e7fd87ab2717a6b812213a86ffb8c2a2e89c))
+* **install:** pin provenance to main and make pre-releases opt-in ([1f99ff1](https://github.com/discorgento/ouija/commit/1f99ff1ef18377f3dfe6dfc0fac2e817ddcc991a))
+* **mcp:** count a root's depth before resolving its symlinks ([8724ff7](https://github.com/discorgento/ouija/commit/8724ff7e573ce245338df40f107d3d0bd9590a4f))
+* **mcp:** refuse tool calls from a broad root ([924f384](https://github.com/discorgento/ouija/commit/924f38451b2d6e397d50bc1206ef7fe2079e1b7f))
+* **providers:** refuse cross-host redirects and bound responses ([b3bc83e](https://github.com/discorgento/ouija/commit/b3bc83ea20b28810236da253011053e6f4b9efcd))
+* **totems:** pin the doc encoding and disable git filters in review ([185a4d7](https://github.com/discorgento/ouija/commit/185a4d763ffe7d524658fef106964d3ddeb03456))
+
+
+### Documentation
+
+* **assets:** frame the demo GIF like the install GIF ([fdee0b9](https://github.com/discorgento/ouija/commit/fdee0b9a992ca7d2b049b31494f7ed6aff5fd15c))
+* bring every page in line with the hardened sandbox and trust ([04f0f6a](https://github.com/discorgento/ouija/commit/04f0f6a35078ba8d77212d5b42429783cfa2cec0))
+* fix pages that disagreed with the code ([4d1fc65](https://github.com/discorgento/ouija/commit/4d1fc6515b831f6163ffdfcc9d3c4d492c08b29c))
+* **readme:** put the quick start right after the demo and size every image alike ([56a713e](https://github.com/discorgento/ouija/commit/56a713e0d743113a4c086d570aef89fc023d5a38))
+* **security:** describe absolute paths, the quiet git init and offline retries ([08d9266](https://github.com/discorgento/ouija/commit/08d9266bf6ae5a1b7670ba7929259a63d7b1ea70))
+* **security:** say what a Landlock ABI v9 kernel leaves open for UDP ([f89c888](https://github.com/discorgento/ouija/commit/f89c8888f07f279e5cfa5137f477679a2c8433a0))
+* **site:** let the framed screenshots and demo carry their own title bar ([92b218b](https://github.com/discorgento/ouija/commit/92b218b5f18a18c4d78bd6094fcab93b360758ba))
+* **style:** use one markup for images and make screens for screenshots ([74fd59e](https://github.com/discorgento/ouija/commit/74fd59ef57c3e3f58cd9c015ea44109268f1a96e))
+
 ## [0.7.0](https://github.com/discorgento/ouija/compare/v0.6.0...v0.7.0) (2026-10-22)
 
 
