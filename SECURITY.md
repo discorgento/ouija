@@ -19,6 +19,9 @@ ouija is an AI harness: it runs the tool calls a model proposes (file reads and
 writes, `bash`) inside a project directory. In scope:
 
 - Escaping the filesystem sandbox (`SafeJoin`, symlink resolution, `SafeResolve`)
+- Escaping the bash OS sandbox (Landlock, Seatbelt), or running a command
+  outside it without the user's approval of that exact command
+- Making an untrusted project config apply a trust-only key
 - Bypassing a hard rule: the bash denylist, the protected-path policy, or the
   scrubbing of secrets from the environment
 - Reading or exfiltrating secrets (config files with `0600`, credential-like

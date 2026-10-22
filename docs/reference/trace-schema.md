@@ -29,8 +29,11 @@ The file is one JSON array, and each element is a complete (`ph: "X"`) event.
 | `args` | `map[string]string` | No | Attributes (omitted when empty) |
 
 Attribute values are always strings. A `chat`/`phase2` span carries
-`input_tokens` and `output_tokens`; a `tool.*` span carries `tool` and, for file
-tools, `path`; a failed span adds `error`.
+`input_tokens` and `output_tokens`. A `tool.*` span carries `tool` and, when
+the call has them, `path`, `pattern` (`grep`, `glob`) and `command` (`bash`:
+its first line, cut to 120 bytes). A `bash` span that succeeds also adds
+`output`: the tail of what the command printed (its last 12 lines, at most
+2,000 bytes). A failed span adds `error`.
 
 The category follows from the name: `chat` and `phase2` get `chat`, a name with
 the `tool.` prefix gets `tool`, and anything else gets `agent`.

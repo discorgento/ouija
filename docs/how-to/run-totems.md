@@ -27,8 +27,9 @@ accepts `--config` and `--trace-file` of these.)
 
 ## `ouija task` — verified implementation plans
 
-`task` is the everyday command. Run it inside a project that has a
-`.ouija/config.json`:
+`task` is the everyday command. Run it inside a project. A
+`.ouija/config.json` is optional: without one, the `ouija setup` defaults
+apply.
 
 ```sh
 ouija task "PROJ-1823 — block order placement when the ZIP has no shipping coverage"

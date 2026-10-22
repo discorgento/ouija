@@ -24,13 +24,15 @@ Engine (coordinator)
   │     ├── DoomDetector
   │     ├── PermissionConfig + ApprovalManager
   │     ├── BashAllowlist
-  │     └── Sandbox (SafeJoin, symlink detection)
+  │     ├── Sandbox (SafeJoin, symlink detection)
+  │     └── Bash sandbox (Landlock / Seatbelt, git restore)
   ├── Tracker (budget)
   └── Tracer (in-memory span tree → Perfetto JSON export)
 ```
 
-Everything lives flat in `package engine`; the only sub-package is
-`providers/`. There are no cyclic imports, and the package is about 5k lines.
+Everything lives flat in `package engine`; the sub-packages are `providers/`
+(the model adapters) and `enginetest/` (test helpers). There are no cyclic
+imports, and the package is about 9k lines without its tests.
 
 ## Agent interface + ReAct loop
 
@@ -81,15 +83,22 @@ is true); failing that, it nudges the model back to `submit_result`, up to
 `ToolRunner.Run` is the **only** path a tool call can take. It applies, in
 order:
 
-1. **Static bash gates**: the denylist (with semantic analysis for flag-order
-   variants such as `rm -fr /`, wrappers such as `sudo rm -fr /`, and raw
-   device writes) and references to protected paths (`cat .env`, `~/.ssh/…`).
-   These run *before* any prompt, because no "yes" can override a hard rule.
-2. **Permission level**: `Deny` refuses, `Ask` prompts (unless the bash command
+1. **Doom-loop detection**: the same tool with identical input three times in
+   a row is refused.
+2. **Static bash gates**: a command with a NUL byte is refused, then the
+   denylist (with semantic analysis for flag-order variants such as
+   `rm -fr /`, wrappers such as `sudo rm -fr /`, and raw device writes) and
+   references to protected paths (`cat .env`, `~/.ssh/…`). These run *before*
+   any prompt, because no "yes" can override a hard rule.
+3. **Unsandboxed run**: a bash call with `"unsandboxed": true` still meets the
+   permission level, then always prompts, whatever the level or the allowlist
+   says. It is refused when `allowUnsandboxed` is `false` or no one can
+   approve.
+4. **Permission level**: `Deny` refuses, `Ask` prompts (unless the bash command
    is on the allowlist), `Allow` runs unattended.
-3. **Bash allowlist**: pre-approves known commands so they skip the prompt and,
+5. **Bash allowlist**: pre-approves known commands so they skip the prompt and,
    under `Allow`, acts as the guard rail for unattended runs.
-4. **Execution**: a built-in tool or a scoped `CustomTool`.
+6. **Execution**: a built-in tool or a scoped `CustomTool`.
 
 `Engine` and `ToolRunner` share the permission and approval wiring through one
 `gateState` **pointer**, so a setter can never leave the runner with a stale
@@ -138,6 +147,25 @@ even when the target file does not exist yet, which closes the TOCTOU
 (time-of-check to time-of-use) window. The `delete_file` tool also resolves
 symlinks before it calls `os.RemoveAll`.
 
+The `bash` tool is confined by the OS as well, on by default: Landlock on
+Linux, Seatbelt on macOS. A command can then write only inside the project and
+private temp and cache dirs, whatever path it builds at run time; see
+[Security → OS sandbox](security.md#os-sandbox).
+
+## Built-in tools
+
+| Tool | Parameters |
+|---|---|
+| `read_file` | `path` (required), `offset` (first line, 1-based), `limit` (lines) |
+| `grep` | `pattern` (required, a regex), `path` (a subdir) |
+| `glob` | `pattern` (required, `**` matches any number of dirs) |
+| `list_dir` | `path` (a dir) |
+| `write_file` | `path`, `content` (both required) |
+| `edit_file` | `path`, `oldString` (exact text), `newString` (all required) |
+| `delete_file` | `path` (required; a file or an empty dir) |
+| `bash` | `command` (required), `timeout` (seconds; default 30, max 120), `unsandboxed` (run outside the sandbox, after the user approves) |
+| `submit_result` | the run's schema; offered only when `RunRequest.Schema` is set |
+
 ## Sliding window (context management)
 
 Conversation history never grows without bound: `compact()` runs at the start
@@ -155,6 +183,13 @@ turn, the first user message (the task) stays pinned in front.
 
 This keeps cost predictable and latency low in long chat sessions (15-30
 turns).
+
+With a known `contextWindow`, ouija also fits each request into it. Every tool
+result is cut to as many bytes as the window has tokens (about a quarter of
+the window, at most 40,000 bytes and at least 2,000), with a note asking the
+model for a narrower range. When the history fills more than 60% of the
+window, older tool results shrink to a short stub, then the oldest messages
+leave; the task stays.
 
 ## Budget enforcement
 

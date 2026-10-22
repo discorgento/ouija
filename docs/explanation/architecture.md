@@ -27,15 +27,15 @@ internal/
   ├─ app/         → Orchestration: config discovery, engine setup, totem lifecycle
   ├─ mcp/         → MCP server (stdio) + harness registration (install/status)
   ├─ chat/        → Bubble Tea TUI (interactive chat)
-  ├─ commands/    → CLI commands (setup, init, config, learn, generate, doctor)
+  ├─ commands/    → CLI commands (setup, init, config, trust, learn, generate, doctor)
   ├─ ouijaconfig/ → XDG-compliant config management
   ├─ knowledge/   → Project knowledge storage
   ├─ models/      → Provider/model catalog (in memory, no file I/O)
   ├─ art/         → Shared figlet banner/logo (CLI + TUI)
-  ├─ doccheck/    → Tests that the docs' links, anchors and index stay valid
+  ├─ doccheck/    → Tests that the docs' links, anchors and index stay valid, and that every config key, command and OUIJA_* variable is documented
   ├─ version/     → Build version (injectable via -ldflags -X)
   └─ tools/genimports → Build helper: auto-generates totem import list
-totems/           → Registered totems (task, doc, sticker)
+totems/           → Registered totems (task, review, doc, sticker)
 ```
 
 ## Data flow
@@ -95,19 +95,26 @@ which applies its checks in a fixed order:
    - the hardcoded **denylist** (`IsDenied`) rejects destructive commands
      (`rm -rf /`, fork bombs, raw-device writes, …), with a semantic pass that
      catches flag-order, `sudo`/`sh -c`, and device variants;
+   - a command that contains a NUL byte is refused;
    - `commandRefsProtectedPath` rejects any command that names a protected path.
    These are hard rules: approving the call in the TUI cannot override them.
-4. **Permission check** — `PermissionConfig.Check(tool, path)` returns a `Level`
+4. **Unsandboxed run** — a `bash` call with `"unsandboxed": true`, while the
+   sandbox is on, still meets the permission level (`Deny` refuses it, `Allow`
+   checks the allowlist). It is refused when `allowUnsandboxed` is `false` or
+   there is no approval UI. Otherwise the user is asked every time, in a
+   prompt marked as running outside the sandbox, whatever the level or the
+   allowlist says. An approved call runs and skips the steps below.
+5. **Permission check** — `PermissionConfig.Check(tool, path)` returns a `Level`
    (`Deny` / `Ask` / `Allow`). Protected paths always return `Deny`
    (fail-closed). On `Ask`, a `bash` command already on the allowlist skips the
    prompt; otherwise the approval prompt runs (no approval UI configured ⇒
    denied).
-5. **Bash allowlist** — under `Allow`, a *non-empty* allowlist limits which
+6. **Bash allowlist** — under `Allow`, a *non-empty* allowlist limits which
    commands an unattended run may execute. An *empty* allowlist means "nothing
    pre-approved", not "everything allowed": `Restricts()` is false, so only the
    static gates above restrict commands.
-6. **Execute** — the built-in tool or the extra `CustomTool.Fn`.
-7. **Trace** — the call is recorded as a child span.
+7. **Execute** — the built-in tool or the extra `CustomTool.Fn`.
+8. **Trace** — the call is recorded as a child span.
 
 `NewDefaultPermissionConfig` is the interactive (chat TUI) default: `Default` is
 `Ask`, with `read_file`, `list_dir`, `grep`, and `glob` set to `Allow` and
@@ -128,13 +135,20 @@ the resolved absolute path, and bash commands. A protected path always yields
 
 - filenames: `.env*`, `.gitconfig`, `.netrc`, `.npmrc`,
   `.dockercfg`/`.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`,
-  `.my.cnf`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519`, `*.tfstate`,
-  `*.tfstate.backup`, `.ouija.json`, `ouija.json`;
+  `.my.cnf`, `.vault-token`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519`,
+  `*.tfstate`, `*.tfstate.backup`, `.ouija.json`, `ouija.json`;
 - directories at any path level: `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`,
-  `.azure`, `.ouija`, `.config/gcloud`, `.config/kube`, `.config/gh`,
-  `.git/config`, and ouija's global config (`.config/ouija`, or wherever
-  `os.UserConfigDir()` puts it);
-- system directories: `/etc/**`, `/var/lib/**`, `/proc/**`, `/sys/**`.
+  `.azure`, `.ouija`, `.password-store`, `.config/gcloud`, `.config/kube`,
+  `.config/gh`, `.git/config`, `.git/hooks`, and ouija's global config
+  (`.config/ouija`, or wherever `os.UserConfigDir()` puts it);
+- registry and model-hub token files inside tool dirs: `.cargo/credentials`,
+  `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
+  `.gradle/gradle.properties`, `huggingface/token`, `uv/credentials`,
+  `.docker/config.json`, `git/credentials`,
+  `.terraform.d/credentials.tfrc.json`, `rclone/rclone.conf`,
+  `share/keyrings`, `etc/npmrc`;
+- system directories: `/etc/**`, `/var/lib/**`, `/proc/**`, `/sys/**`, and on
+  macOS `/private/etc/**` and `/private/var/lib/**`.
 
 ## Provider architecture
 

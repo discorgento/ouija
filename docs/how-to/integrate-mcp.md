@@ -17,8 +17,9 @@ ouija's totems to the host as MCP **tools** and the project's files as MCP
 - **Tools** are named `ouija_<totem>`, e.g. `ouija_task`, `ouija_review`,
   `ouija_doc`, `ouija_sticker`.
 - **Resources** use the URI scheme `ouija://project/{path}` and give sandboxed
-  access to files within the project root. Protected paths (credentials,
-  system files) are refused, as with the file tools. When the server starts in
+  access to files within the project root: only regular files, up to 10 MiB
+  each, with a binary file sent as a base64 `blob`. Protected paths
+  (credentials, system files) are refused, as with the file tools. When the server starts in
   `/` or in your home folder, which some hosts do, resources are off: start
   it in a project folder (most hosts take a `cwd` for the server).
 - **Transport** is newline-delimited JSON-RPC 2.0 over stdio. The `initialize`
@@ -101,7 +102,8 @@ In Cursor settings, add a new MCP server with command `ouija` and argument `mcp`
 
 ## How it works
 
-1. The host calls `ouija_<name>` with a task string argument.
+1. The host calls `ouija_<name>` with the totem's arguments: its input schema,
+   a single `task` string by default.
 2. The server finds the config, builds the engine, runs the totem and returns
    the result.
 3. The budget ceilings apply, and the host asks for your approval before each
