@@ -41,7 +41,7 @@ func TestRunOrchestration(t *testing.T) {
 		case strings.HasPrefix(req.System, "You reconcile"):
 			return enginetest.Reply{Text: string(sheet)}
 		case strings.HasPrefix(req.System, "You write professional"):
-			return enginetest.Reply{Text: "```html\n<html><head><title>x</title></head><body>Div</body></html>\n```"}
+			return enginetest.Reply{Text: "```html\n<html><head><title>x</title><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example/\"></head><body>Div</body></html>\n```"}
 		}
 		t.Errorf("unexpected request: %.60q / %.60q", req.System, prompt)
 		return enginetest.Reply{Err: errors.New("unexpected")}
@@ -56,6 +56,9 @@ func TestRunOrchestration(t *testing.T) {
 	md, _ := os.ReadFile(res.MD)
 	if !strings.Contains(string(html), docCSP) || strings.Contains(string(html), "```") {
 		t.Errorf("html lacks the CSP or kept the fence:\n%s", html)
+	}
+	if strings.Contains(string(html), "evil.example") {
+		t.Errorf("html kept the model's meta refresh:\n%s", html)
 	}
 	if !strings.Contains(string(md), "returns an error on zero") {
 		t.Errorf("md lacks the facts:\n%s", md)

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -174,17 +172,11 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 }
 
 // savePlan writes the plan to docs/task-plan.md under root and returns the
-// path. SafeResolve, not SafeJoin: a symlink planted at docs/ or
-// docs/task-plan.md must not point this unattended write outside the root.
+// path. SafeWriteFile, not a join: a symlink planted at docs/ or
+// docs/task-plan.md, even one swapped in mid-write, must not point this
+// unattended write outside the root.
 func savePlan(ctx context.Context, root, content string) (string, error) {
-	dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
-	}
-	return dst, os.WriteFile(dst, []byte(content), 0o644)
+	return engine.SafeWriteFile(ctx, root, "docs/task-plan.md", []byte(content), 0o644)
 }
 
 // taskResult is the typed reconcile output. It implements registry.Renderer.

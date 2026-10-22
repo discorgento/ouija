@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/discorgento/ouija/engine"
@@ -200,7 +202,8 @@ func resolveBase(ctx context.Context, root, base string) (string, error) {
 // branchDiff is everything the branch changes since it left base, committed
 // or not.
 func branchDiff(ctx context.Context, root, base string) (string, error) {
-	out, err := git(ctx, root, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--merge-base", base, "--")
+	out, err := git(ctx, root, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+		"--ignore-submodules=dirty", "--merge-base", base, "--")
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
@@ -208,13 +211,65 @@ func branchDiff(ctx context.Context, root, base string) (string, error) {
 }
 
 // git runs git in root. A repository's own config can make git run commands
-// (an external diff, a textconv filter, an fsmonitor hook), and a review is
-// pointed at code someone else wrote: those are turned off.
+// (an external diff, a textconv filter, an fsmonitor hook, a clean/smudge
+// filter driver its .gitattributes names), and a review is pointed at code
+// someone else wrote: those are turned off. The diff itself turns off the
+// external diff and textconv, and skips the work trees of submodules (where
+// another config would apply); every filter driver any config defines is
+// emptied here, so git reads files as they are.
 func git(ctx context.Context, root string, args ...string) (string, error) {
+	env, err := noFilters(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	return runGit(ctx, root, env, args...)
+}
+
+// noFilters returns the environment with every configured filter driver
+// overridden by an empty one: no clean, smudge or process command, and not
+// required (a required filter that does not run is an error). The overrides
+// go through GIT_CONFIG_COUNT/KEY/VALUE rather than "-c", which cannot carry
+// a driver name holding "=".
+func noFilters(ctx context.Context, root string) ([]string, error) {
+	env := os.Environ()
+	// Listing config runs no driver. Exit status 1 is "no such key".
+	out, err := runGit(ctx, root, env, "config", "-z", "--name-only", "--get-regexp", `^filter\.`)
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return env, nil
+		}
+		return nil, fmt.Errorf("git config: %w", err)
+	}
+	seen := map[string]bool{}
+	n, _ := strconv.Atoi(os.Getenv("GIT_CONFIG_COUNT"))
+	for _, key := range strings.Split(out, "\x00") {
+		// filter.<driver>.<setting>: the driver name may itself hold dots.
+		i := strings.LastIndexByte(key, '.')
+		if !strings.HasPrefix(key, "filter.") || i <= len("filter.") {
+			continue
+		}
+		driver := key[:i]
+		if seen[driver] {
+			continue
+		}
+		seen[driver] = true
+		for _, kv := range [][2]string{{"clean", ""}, {"smudge", ""}, {"process", ""}, {"required", "false"}} {
+			env = append(env,
+				fmt.Sprintf("GIT_CONFIG_KEY_%d=%s.%s", n, driver, kv[0]),
+				fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", n, kv[1]))
+			n++
+		}
+	}
+	return append(env, "GIT_CONFIG_COUNT="+strconv.Itoa(n)), nil
+}
+
+func runGit(ctx context.Context, root string, env []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{
 		"-c", "core.fsmonitor=false", "-c", "core.pager=cat",
 	}, args...)...)
 	cmd.Dir = root
+	cmd.Env = env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

