@@ -65,8 +65,8 @@ curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/inst
 The script picks the archive for your OS and CPU from the latest stable
 release (pre-releases only with `--prerelease`), checks it against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in
 `~/.local/bin`. In a terminal it then asks two questions: whether to add that
-folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` or fish's config) when it is
-not there yet, and whether to run `ouija setup` now. In CI, or with
+folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` (`~/.bash_profile` on
+macOS) or `~/.config/fish/conf.d/ouija.fish`) when it is not there yet, and whether to run `ouija setup` now. In CI, or with
 `--no-prompt`, it asks nothing and prints what to do instead. To pass options
 (`--version 0.2.0`, `--prerelease`, `--dir <dir>`, `--no-prompt`,
 `--require-provenance`), put them after `sh -s --`. `--dir` must be an absolute path (`$HOME/...`, not `~`)

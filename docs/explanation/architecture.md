@@ -67,7 +67,7 @@ CLI args → app.DiscoverConfig()
 ```
 Engine.Run(ctx, req) / Engine.Chat(ctx, req)
   └─ runAgent() → fresh DoomDetector → agent.Run()
-       └─ (*ReAct).Run(ctx, req, msgs)   ← the loop strategy (Agent)
+       └─ (*ReAct).Run(ctx, env, req, msgs)   ← the loop strategy (Agent)
             ├─ streamChat() → provider.Chat() → iter.Seq2[StreamEvent, error]
             ├─ tool execution (gated by ToolRunner, sandboxed)
             ├─ budget tracking
@@ -96,12 +96,14 @@ which applies its checks in a fixed order:
 2. **Doom-loop detection** — the same tool + input three turns in a row is
    blocked.
 3. **Path characters** — a `path` argument with a control character (newline
-   and tab included), a line or paragraph separator, or an invisible or bidi
-   character (`checkPathRunes`) is refused for every tool.
+   and tab included), a line or paragraph separator, or an invisible
+   (zero-width, tag, other format) or bidi character (`checkPathRunes`) is
+   refused for every tool.
 4. **Static bash gates** — for `bash` only, and *before any prompt*:
    - a command that contains a NUL byte is refused, and so is one with a
      character the approval prompt would hide (a control character other
-     than newline and tab, a bidi control, a zero-width character);
+     than newline and tab, a line or paragraph separator, an invisible
+     character: zero-width, tag, other format, or a bidi character);
    - the hardcoded **denylist** (`IsDenied`) rejects destructive commands
      (`rm -rf /`, fork bombs, raw-device writes, …), with a semantic pass that
      catches flag-order, `sudo`/`sh -c`, and device variants;

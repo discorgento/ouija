@@ -130,8 +130,9 @@ type ToolResult struct {
 ```
 
 Each error carries a `Code` (e.g. `NOT_ALLOWED`, `DOOM_LOOP`,
-`PERMISSION_DENIED`), so the agent loop can treat each kind differently: never
-retry a denied tool, always retry a timeout.
+`PERMISSION_DENIED`). The loop does not branch on it: the code reaches the
+model in the tool result, as `ERROR [CODE]: message`, and the model decides
+what to do next.
 
 ## Streaming
 
@@ -147,7 +148,8 @@ Every file tool stays inside the project root, both lexically and physically.
 `SafeJoin` blocks `../`, and `resolveSymlinkEscape` rejects symlinks that point
 outside. It walks the path one component at a time, so it detects a symlink
 even when the target file does not exist yet. The open itself goes through an
-`os.Root` on the project, and ouija checks the opened file again, which closes
+`os.Root` on the project (except the `doc` PDF, which Chrome writes by path),
+and ouija checks the opened file again, which closes
 the TOCTOU (time-of-check to time-of-use) window: a link swapped in after the
 check cannot lead out of the project or onto a protected file. Opens never
 block (a FIFO is refused), a file with several hard links is judged by the
@@ -259,13 +261,13 @@ logging with a handler that writes to `io.Discard`.
 |---|---|
 | `iter.Seq2[T, error]` | Provider streaming (every Chat call) |
 | `range-over-int` | `for i := range len(msgs)` instead of `i < len` |
-| `clear()` | Zeroing slices after compaction and the sliding window |
+| `clear()` | Emptying a map in place: the session approvals, the OpenAI tool-call accumulator |
 | `log/slog` | Structured logging everywhere |
 | `errors.Join` | Config validation collects every error |
 | `slices` package | `slices.Contains` in totem reconcile |
-| `sync.Map` / `sync.Mutex` / `sync.RWMutex` | Thread safety for allowlist, doom detector, budget |
-| `context.AfterFunc` | Streaming cleanup (no race window) |
-| `context.WithTimeout` | Streaming timeout (default 120s) |
+| `sync.Mutex` / `sync.RWMutex` | Thread safety for allowlist, doom detector, budget |
+| `context.AfterFunc` | Closes the response body when a streaming call is cancelled (no race window) |
+| `time.AfterFunc` + `context.WithCancel` | Streaming idle timeout (default 120s), reset by every chunk |
 
 ## Providers
 
@@ -280,10 +282,12 @@ Every LLM backend implements the `Provider` interface: `Name()`,
 | `opencode` | OpenCode Zen gateway (`/chat/completions`); its free tier works only inside the OpenCode app (403 `FreeTierError` elsewhere) |
 | `ollama` | OpenAI-compatible shim, local, free |
 
-All providers share `providers/http.go`, which handles retry with backoff on
-429/5xx responses and parses SSE. It uses `time.NewTimer` (no timer leak),
-`context.AfterFunc` after bufio init (no race window), and the streaming
-timeout (default 120s). The **provider registry** (`providers.Build(name,
+All providers share one HTTP client. `engine/providers/http.go` retries
+429/5xx responses with backoff, sleeping on a `time.NewTimer` (no timer leak).
+`engine/providers/client.go` parses SSE and closes the response body through
+`context.AfterFunc` when the call is cancelled (no race window). The idle
+watchdog behind `streamTimeout` (default 120s) lives in `engine/stream.go`.
+The **provider registry** (`providers.Build(name,
 key)`), a stateless map of constructors, creates provider instances.
 `app.DiscoverConfig` reads the active provider's API key from the config files
 (global first, then the project override) and passes it to the constructor.
