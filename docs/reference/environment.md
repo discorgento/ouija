@@ -15,11 +15,13 @@ below only tune behaviour.
 | `OUIJA_LOG_LEVEL` | engine | Log verbosity: `debug`, `info` (default), `warn`, `error` |
 | `OUIJA_NO_ANIMATION` | chat, CLI | Any value turns off the animations (the intro, the flowing colors, the shimmer) for a still screen |
 | `OUIJA_THEME` | chat, CLI | Color theme for this run (`ouija`, `catppuccin`, `dracula`, `mono`); overrides the config's `theme` |
-| `XDG_CACHE_HOME` | chat TUI, model lists, bash sandbox | The user cache dir: conversations (`ouija/sessions/`), the model list cache (`ouija/models/`) and the bash sandbox's private build cache (`ouija/sandbox/`). Default `~/.cache` (`~/Library/Caches` on macOS) |
+| `XDG_CACHE_HOME` | chat TUI, model lists, bash sandbox | The user cache dir: conversations (`ouija/sessions/`), the `/debug` log (`ouija/chat-debug.log`, mode `0600`), the model list cache (`ouija/models/`) and the bash sandbox's private build cache (`ouija/sandbox/`). Default `~/.cache` (`~/Library/Caches` on macOS, `%LocalAppData%` on Windows) |
 | `XDG_CONFIG_HOME` | config discovery, `ouija mcp install` | Where the global config lives: `$XDG_CONFIG_HOME/ouija/config.json` (default `~/.config`). A relative value is ignored: ouija then runs with no global config and trusts nothing. `ouija mcp install` also uses it to find OpenCode's config |
 | `EDITOR` | chat TUI | Editor that the **Edit** approval option opens (default `vi`; `notepad` on Windows) |
-| `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_COUNT` | bash sandbox | When set, the sandbox keeps your choice. Otherwise it points git at `/dev/null` for the global config and passes on your `user.name` and `user.email` |
+| `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_COUNT` | bash sandbox, `review` totem | When set, the sandbox keeps your choice. Otherwise it points git at `/dev/null` for the global config and passes on your `user.name` and `user.email`. The `review` totem numbers the `GIT_CONFIG_*` entries that turn off the repository's filters after yours |
+| `HOME` | config discovery, sandbox, MCP server | Your home directory: discovery stops there, the sandbox grants and protected paths are computed from it, and `ouija mcp` refuses to serve from it or above it |
 | `TERM` | totems | `TERM=dumb` turns off the live progress board |
+| `ProgramFiles` / `ProgramFiles(x86)` / `LocalAppData` | `doc` totem (Windows) | Where it looks for Chrome or Edge when neither is on `PATH` |
 | `OPENROUTER_BASE_URL` | openrouter provider | Overrides the OpenRouter endpoint |
 | `OPENROUTER_REFERER` / `OPENROUTER_TITLE` | openrouter provider | Attribution headers OpenRouter uses for rankings |
 | `OLLAMA_HOST` | ollama provider | Ollama server address (default `http://localhost:11434`) |

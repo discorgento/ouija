@@ -64,7 +64,7 @@ ouija doctor
 will use, whether the key is present and works, whether the bash sandbox is
 on, the registered totems (the agents ouija ships), and whether your editor's
 harness knows about ouija. Each line is
-marked ✓ for ok, ! for a warning, or ✗ for a problem.
+marked ✓ for ok, · for information, ! for a warning, or ✗ for a problem.
 
 ## 4. Run your first task
 
@@ -97,7 +97,7 @@ ouija chat
 ```
 
 The chat is a full-screen terminal UI with the same tools and engine, but you
-talk to it. Two behaviors are worth knowing on day one:
+talk to it. Three behaviors are worth knowing on day one:
 
 - **Read-only tools run immediately**; tools that write files or run commands
   ask for approval. Answer **Yes** to allow it once, **Session** to trust that

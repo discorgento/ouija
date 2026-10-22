@@ -39,7 +39,8 @@ print the path in use.
 
 The bash sandbox is **on by default** wherever the OS can enforce it. Without
 a `sandbox` key anywhere, ouija confines bash with the defaults below; where
-the OS cannot (Windows, a Linux kernel older than Landlock ABI v9), bash runs
+the OS cannot (Windows, a Linux kernel older than Landlock ABI v9, a Linux CPU
+other than x86-64 and arm64), bash runs
 unconfined and asks before each command, and `ouija doctor` says which.
 
 `sandbox` here makes the sandbox a floor for every project, trusted or not: a
@@ -86,6 +87,16 @@ permissions on load; on Windows it skips the check.
 
 File permissions: `0600`.
 
+A project config that sets a key twice in one object, in any capitalization
+(`"apiKey"` and `"APIKEY"`), is refused with an error: a second copy could
+hide a setting from `ouija trust`.
+
+ouija looks for `.ouija/config.json`, `.ouija.json` and `ouija.json` in the
+working directory and then in each parent, stopping at your home directory
+when the working directory is inside it. On Linux and macOS it skips, with a
+warning, a file owned by another user (root's files count as yours); on
+Windows it skips the check.
+
 A discovered project config applies its **trust-only keys** only once you
 trust the file with `ouija trust` (see
 [project trust](../explanation/security.md#project-trust)). Until then ouija
@@ -95,9 +106,22 @@ ignores them and warns. The trust-only keys are:
 - `tools` (the bash allowlist and the sandbox section)
 - `apiKey`
 - a `systemPrompt` or `rules` other than the built-in ones
+- `modelSuggestions` (the picker would list the file's models first)
 - a `projectRoot` other than `"."`
 - a `budget` above the defaults (an untrusted file may only lower it)
 - a `provider` or `model` other than your `ouija setup` defaults
+- `dimensions` in a `totems` section (they go into the analysis prompts), and
+  more `passes` than the default `3` (an untrusted file may only lower them)
+- a `streamTimeout` above `600` seconds, and a `contextWindow` above the
+  model's size in the catalog (`1000000` for a model the catalog does not
+  know): an untrusted file may only lower them
+- a negative `costPer1MInput` or `costPer1MOutput` (an untrusted file may
+  raise the price, which trips `budget.maxUSD` sooner, but never below `0`)
+
+`budget.maxUSD` needs no trust: there is no dollar ceiling without it, so any
+value an untrusted file sets only lowers it. The `totems.doc` cover fields
+(`client`, `author`, `contact`, `brand`, `locale`) apply untrusted too; the
+document escapes them.
 
 A config passed with `--config` is trusted, like any CLI flag, and so is a
 file ouija writes itself (`ouija init`, a chat save).
@@ -221,12 +245,20 @@ protected paths are:
   `.vault-token`, `.yarnrc.yml`, `.s3cfg`, `.terraformrc`, `id_rsa`, `id_dsa`,
   `id_ecdsa`, `id_ed25519`, `*.tfstate`, `*.tfstate.backup`, and ouija's own
   `.ouija.json` and `ouija.json`;
+- the secrets a project keeps in its own tree: `wp-config.php`, `auth.json`,
+  `credentials.json`, `service-account.json`, `*-sa.json`, `secrets.yml`,
+  `secrets.yaml`, `credentials.yml.enc`, `terraform.tfvars`, `*.auto.tfvars`,
+  `.htpasswd`, `.yarnrc`, `.dev.vars`, `local.settings.json`, `kubeconfig`,
+  `app/etc/env.php`, `config/database.yml` and `.bundle/config`;
+- keys and keystores by extension: `*.pem`, `*.key`, `*.p12`, `*.pfx`,
+  `*.jks`, `*.keystore`;
 - the dirs `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`, `.azure`, `.ouija`,
   `.password-store`, `.mozilla`, `.config/gcloud`, `.config/kube`,
   `.config/gh`, `.config/hub`, `.config/glab-cli`, `.config/google-chrome`,
   `.config/chromium`, and ouija's global config dir (also by its real path
-  when the config dir is a symlink);
-- a repository's `.git/config` and `.git/hooks`;
+  when the config dir is a symlink) and `gcloud` next to it;
+- a repository's git config and hooks: `.git/config`, `.git/config.worktree`,
+  `.git/hooks/*`, and the same under `.git/modules/*` and `.git/worktrees/*`;
 - the token files inside tool dirs: `.cargo/credentials`,
   `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
   `.gradle/gradle.properties`, `.docker/config.json`,
@@ -236,6 +268,10 @@ protected paths are:
   `git/credentials`, `rclone/rclone.conf`, `share/keyrings`,
   `share/kwalletd`, `composer/auth.json`, `pip/pip.conf`,
   `containers/auth.json` and `etc/npmrc`.
+
+Names match in any capitalization, on every OS (`.ENV` is `.env`). The file
+tools also never write or delete anything under a `.git` component; reading
+it is allowed.
 
 ### `tools.bash.sandbox`
 
@@ -287,11 +323,13 @@ token), so ouija runs it with `GIT_CONFIG_GLOBAL=/dev/null` and passes on only
 your `user.name` and `user.email`. The project itself (its `.env` and `.git`
 included) stays readable and writable; see
 [what the sandbox does not cover](../explanation/security.md#os-sandbox).
-Because `.git` stays writable, ouija checks it after every confined command:
-it puts back the hooks in `.git/hooks` as they were, and `.git/config` when
-the command added an entry that runs a command (`core.fsmonitor`,
-`core.hooksPath`, a `!` alias, a filter, …). Ordinary changes stay. The
-command's result names what was put back.
+Because `.git` stays writable on Linux, ouija checks it after every confined
+command: it puts back the hooks as they were, and a git config when the
+command added an entry that runs a command (`core.fsmonitor`,
+`core.hooksPath`, a `!` alias, a filter, …), in the project's repository and
+in the ones nested in it. Ordinary changes stay. The command's result names
+what was put back; [the security model](../explanation/security.md#os-sandbox)
+lists every file it covers.
 When a confined command fails, its result says it ran in the sandbox, so a
 denial is not mistaken for a bug. The model may then retry the same command
 with `"unsandboxed": true`: that runs it outside the sandbox only after you
@@ -352,14 +390,17 @@ The full check order is:
 
 1. **Doom-loop check** — the same tool with identical input three times in a row is refused
 2. **NUL byte** in the command — refused (`bash: the command contains a NUL byte`)
-3. **Denylist** (hardcoded + semantic analysis) — hard rule, before any prompt
-4. **Protected-path reference** in the command — also before any prompt
-5. **`"unsandboxed": true`** — the permission level and the allowlist still
+3. **Hidden character** in the command — a control character other than
+   newline and tab, a bidi control or a zero-width character, which the
+   approval prompt could not show, is refused
+4. **Denylist** (hardcoded + semantic analysis) — hard rule, before any prompt
+5. **Protected-path reference** in the command — also before any prompt
+6. **`"unsandboxed": true`** — the permission level and the allowlist still
    apply; refused when `allowUnsandboxed` is `false` or there is no approval
    UI; otherwise always a prompt
-6. **Permission gate** (deny/ask/allow); at `ask`, an allowlist match skips the prompt
-7. **Allowlist enforcement** (only at `allow` level, where it is the guard rail)
-8. **Execution**
+7. **Permission gate** (deny/ask/allow); at `ask`, an allowlist match skips the prompt
+8. **Allowlist enforcement** (only at `allow` level, where it is the guard rail)
+9. **Execution**
 
 #### Denylist
 

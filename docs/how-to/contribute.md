@@ -188,10 +188,16 @@ the CLI commands, lives in `internal/` and cannot be imported from outside.
 
 ## Security-sensitive code
 
-Permission gating, the sandbox (`engine/sandbox.go`), the bash OS sandbox
-(`engine/bash_sandbox*.go`) and the git restore after it
-(`engine/git_restore.go`), the bash denylist (`engine/tools_bash.go`), project
-trust (`internal/app/trust.go`) and config handling all **fail closed**: when in
+Permission gating (`engine/toolrunner.go`, `engine/permission.go`), the
+filesystem sandbox and the link checks (`engine/sandbox.go`,
+`engine/protect_links.go`, `engine/protect_*.go`), the file tools
+(`engine/tools_files.go`, `engine/tools_write.go`), the bash OS sandbox
+(`engine/bash_sandbox*.go`, its seccomp filter included) and the git restore
+after it (`engine/git_restore.go`, `engine/git_guard.go`), the bash denylist
+(`engine/tools_bash.go`), project trust (`internal/app/trust.go`), config
+handling, the provider client's redirect and size limits
+(`engine/providers/client.go`), the MCP server (`internal/mcp/`) and the
+terminal filter (`internal/termsafe`) all **fail closed**: when in
 doubt, they deny. A change that makes any of them more permissive must come
 with tests that prove the previous behaviour was wrong. Without such tests,
 treat it as a security change and open an issue before writing code.
@@ -229,8 +235,9 @@ A release happens in four steps:
    `main` merges only after CI's checks pass. The release workflow approves
    the runs; if one still waits, its page has an **Approve and run** button.
 3. Merging that PR creates the tag `vX.Y.Z` and the GitHub Release.
-4. The same workflow runs the gate again on the tag and cross-compiles with
-   `make dist`. It then smoke-tests the archives (their checksums, and the
+4. The same workflow runs the gate (gofmt, vet, tests) again on the tag, in a
+   job of its own with a read-only token, and only once it passes
+   cross-compiles with `make dist`. It then smoke-tests the archives (their checksums, and the
    binary's `version` against the tag), attests their provenance and attaches
    them to the release.
 

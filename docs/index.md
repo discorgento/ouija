@@ -28,7 +28,7 @@ Every page follows
 
 | Doc | What it covers |
 |---|---|
-| [Install](how-to/install.md) | Installing ouija from source, requirements, `PATH` |
+| [Install](how-to/install.md) | The install script, release archives and their provenance, building from source, `PATH` |
 | [Configure](how-to/configure.md) | `ouija setup`, `ouija init`, config layers, API keys |
 | [Run a totem](how-to/run-totems.md) | `task`, `review`, `doc`, `sticker`, `learn`, per-run stats |
 | [Use the chat TUI](how-to/chat.md) | Approvals, permissions, queueing, sessions |

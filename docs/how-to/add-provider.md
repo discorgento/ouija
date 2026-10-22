@@ -115,12 +115,23 @@ and parses SSE (server-sent events):
 // PostJSON POSTs a body and returns (responseBytes, statusCode, error).
 func (c *Client) PostJSON(ctx context.Context, url string, headers map[string]string, body []byte) ([]byte, int, error)
 
+// GetJSON GETs url and returns (responseBytes, statusCode, error).
+func (c *Client) GetJSON(ctx context.Context, url string, headers map[string]string) ([]byte, int, error)
+
 // PostSSE POSTs a body and streams SSE events to onEvent.
 func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]string, body []byte, onEvent func(eventType string, data []byte) error) error
 ```
 
 The retry and backoff helpers, which honour `Retry-After`, live in
 `providers/http.go`.
+
+Go through this client rather than an `http.Client` of your own: it is where
+ouija's limits on what a provider may do live. It follows a redirect only to
+the same scheme and host, so your key header never reaches another server, and
+it caps a body at 32 MiB, an SSE line at 8 MiB and an SSE event at 32 MiB. A
+streaming adapter should also count what it accumulates against the 64 MiB
+reply cap (`replySize`), and a model listing that pages should stop after a
+fixed number of pages, as `ListModels` does (50).
 
 ### 5. API key plumbing
 

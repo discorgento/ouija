@@ -517,17 +517,12 @@ var writePlanFn engine.ToolFn = func(ctx context.Context, root string, input map
     if content == "" {
         return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: "write_plan: content is required"}}
     }
-    // SafeResolve, not SafeJoin: a planted docs/ symlink must not redirect
-    // this unattended write outside the project.
-    dst, err := engine.SafeResolve(ctx, root, "docs/task-plan.md")
+    // SafeWriteFile, not SafeJoin + os.WriteFile: a planted docs/ symlink,
+    // even one swapped in after the check, must not redirect this unattended
+    // write outside the project or onto a protected file.
+    dst, err := engine.SafeWriteFile(ctx, root, "docs/task-plan.md", []byte(content), 0o644)
     if err != nil {
         return engine.ToolResult{Error: &engine.ToolError{Code: "INVALID_INPUT", Message: err.Error()}}
-    }
-    if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-        return engine.ToolResult{Error: &engine.ToolError{Code: "INTERNAL", Message: err.Error()}}
-    }
-    if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
-        return engine.ToolResult{Error: &engine.ToolError{Code: "INTERNAL", Message: err.Error()}}
     }
     return engine.ToolResult{Data: "plan saved to " + dst}
 }
@@ -546,7 +541,7 @@ eng.Run(ctx, engine.RunRequest{
 **Key behaviors:**
 - Extra tools are **scoped to one call**: each `Run` starts without them.
 - `submit_result` always runs last. The extra tools run first, so the model can call a tool with side effects and signal completion in the same turn.
-- Resolve every path you read **or write** with `engine.SafeResolve(ctx, root, ...)`. It keeps the path inside the project root and rejects protected paths (`.env`, `.ssh/*`, `/etc/*`) and symlinks that point outside the root. It rejects dangling symlinks too, so a planted `docs -> ~/.ssh` cannot redirect a write. The path need not exist yet. `engine.SafeJoin` checks only the path text, which is not enough for a write into a repository you did not write.
+- Open every path you read **or write** with `engine.SafeOpenFile(ctx, root, ...)` or write it with `engine.SafeWriteFile(ctx, root, ...)`. They keep the path inside the project root and reject protected paths (`.env`, `.ssh/*`, `/etc/*`), git metadata for a write, and symlinks that point outside the root, dangling ones included, so a planted `docs -> ~/.ssh` cannot redirect a write. They open through an `os.Root` and check the opened file again, so a link swapped in after the check fails too. The path need not exist yet. `engine.SafeResolve` returns the checked path for a program that must write it itself (Chrome's PDF), and `engine.SafeJoin` checks only the path text, which is not enough for a write into a repository you did not write.
 - The `root` parameter is the engine's sandbox root. Use it instead of `os.Getwd()` or hardcoded paths.
 - The host gates every custom tool: before your `Fn` runs, the `ToolRunner` applies the permission level and, for `Ask`, shows the approval prompt. When no `PermissionConfig` is set, a write-tier custom tool is denied by default.
 - After `Run`, check `res.Tools` to see which tools the model called. The `task` totem uses `slices.Contains(res.Tools, "write_plan")` to decide whether to run its Go fallback.
