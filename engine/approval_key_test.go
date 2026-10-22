@@ -30,21 +30,54 @@ func TestApprovalKeyCoversTheArguments(t *testing.T) {
 	}
 }
 
-// The gate checks the path the tool will really touch: the file tools put an
-// absolute path under the project, so the gate must too, or approving
-// notes.txt pre-approved "<root>/notes.txt" (another file entirely).
+// The gate checks the path the tool will really touch: an absolute path
+// into the project names the same file as the relative one, so both map to
+// one checked path, the one the tools write.
 func TestGatePathMatchesTheTools(t *testing.T) {
 	root := t.TempDir()
 	r := NewToolRunner(ToolRunnerConfig{Tools: NewTools(root), Doom: &DoomDetector{}})
 	rel := r.checkPathFor("notes.txt")
 	abs := r.checkPathFor(filepath.Join(root, "notes.txt"))
-	if rel == abs {
-		t.Fatalf("notes.txt and %s map to the same checked path %s, but the tools write different files", filepath.Join(root, "notes.txt"), rel)
+	if rel != abs {
+		t.Fatalf("notes.txt and its absolute path are one file, but checked as %s and %s", rel, abs)
 	}
 	if want, _ := SafeJoin(root, filepath.Join(root, "notes.txt")); abs != want {
 		t.Fatalf("checked %s, the tools write %s", abs, want)
 	}
 	_ = context.Background()
+}
+
+// A model often names files by their absolute path. Inside the project that
+// is the file itself (it was joined onto the root: the read found nothing
+// and the write landed in a new <root>/home/... tree); outside it is
+// refused, with a hint to use a relative path.
+func TestAbsolutePathsNameTheFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if res := readFileTool(ctx, root, map[string]any{"path": filepath.Join(root, "main.go")}); res.Error != nil || !strings.Contains(res.Data, "package main") {
+		t.Fatalf("reading the project's file by its absolute path: %s", res.String())
+	}
+	abs := filepath.Join(root, "sub", "new.txt")
+	if res := writeFileTool(ctx, root, map[string]any{"path": abs, "content": "x"}); res.Error != nil {
+		t.Fatalf("writing by absolute path: %s", res.String())
+	}
+	if b, err := os.ReadFile(abs); err != nil || string(b) != "x" {
+		t.Fatalf("the write did not land at %s: %v", abs, err)
+	}
+	outside := filepath.Join(t.TempDir(), "x.txt")
+	res := writeFileTool(ctx, root, map[string]any{"path": outside, "content": "x"})
+	if res.Error == nil || !strings.Contains(res.Error.Message, "outside the project") {
+		t.Fatalf("a write outside the project: %s", res.String())
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatal("a write outside the project landed")
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 2 {
+		t.Fatalf("the project holds %d entries; an absolute path made a stray tree", len(entries))
+	}
 }
 
 // A call approved "for the session" and repeated identically is still a loop:
