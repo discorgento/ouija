@@ -30,8 +30,12 @@ internal/
   ├─ commands/    → CLI commands (setup, init, config, trust, learn, generate, doctor)
   ├─ ouijaconfig/ → XDG-compliant config management
   ├─ knowledge/   → Project knowledge storage
-  ├─ models/      → Provider/model catalog (in memory, no file I/O)
+  ├─ models/      → Provider/model catalog, plus the live model lists cached in the user cache dir
   ├─ art/         → Shared figlet banner/logo (CLI + TUI)
+  ├─ theme/       → Color themes (OUIJA_THEME, /theme) and the animation switch
+  ├─ progress/    → Live progress board for a totem run on a terminal
+  ├─ termsafe/    → Strips (or, for `ouija trust`, reveals) control and invisible characters before text reaches the terminal
+  ├─ atomicfile/  → Crash-safe file writes (temp file + rename)
   ├─ doccheck/    → Tests that the docs' links, anchors and index stay valid, and that every config key, command and OUIJA_* variable is documented
   ├─ version/     → Build version (injectable via -ldflags -X)
   └─ tools/genimports → Build helper: auto-generates totem import list
@@ -91,30 +95,41 @@ which applies its checks in a fixed order:
 1. **UI progress callback** — `ToolCallback` fires before anything else.
 2. **Doom-loop detection** — the same tool + input three turns in a row is
    blocked.
-3. **Static bash gates** — for `bash` only, and *before any prompt*:
+3. **Path characters** — a `path` argument with a control character (newline
+   and tab included), a line or paragraph separator, or an invisible or bidi
+   character (`checkPathRunes`) is refused for every tool.
+4. **Static bash gates** — for `bash` only, and *before any prompt*:
+   - a command that contains a NUL byte is refused, and so is one with a
+     character the approval prompt would hide (a control character other
+     than newline and tab, a bidi control, a zero-width character);
    - the hardcoded **denylist** (`IsDenied`) rejects destructive commands
      (`rm -rf /`, fork bombs, raw-device writes, …), with a semantic pass that
      catches flag-order, `sudo`/`sh -c`, and device variants;
-   - a command that contains a NUL byte is refused;
    - `commandRefsProtectedPath` rejects any command that names a protected path.
    These are hard rules: approving the call in the TUI cannot override them.
-4. **Unsandboxed run** — a `bash` call with `"unsandboxed": true`, while the
+5. **Unsandboxed run** — a `bash` call with `"unsandboxed": true`, while the
    sandbox is on, still meets the permission level (`Deny` refuses it, `Allow`
-   checks the allowlist). It is refused when `allowUnsandboxed` is `false` or
-   there is no approval UI. Otherwise the user is asked every time, in a
-   prompt marked as running outside the sandbox, whatever the level or the
-   allowlist says. An approved call runs and skips the steps below.
-5. **Permission check** — `PermissionConfig.Check(tool, path)` returns a `Level`
+   checks the allowlist, no `PermissionConfig` refuses it). It is refused when
+   `allowUnsandboxed` is `false` or there is no approval UI. Otherwise the user
+   is asked every time, in a prompt marked as running outside the sandbox,
+   whatever the level or the allowlist says. An approved call runs and skips
+   the steps below.
+6. **Permission check** — `PermissionConfig.Check(tool, path)` returns a `Level`
    (`Deny` / `Ask` / `Allow`). Protected paths always return `Deny`
    (fail-closed). On `Ask`, a `bash` command already on the allowlist skips the
    prompt; otherwise the approval prompt runs (no approval UI configured ⇒
-   denied).
-6. **Bash allowlist** — under `Allow`, a *non-empty* allowlist limits which
+   denied). The prompt names the file the call physically lands on (`_path`)
+   and the name it was reached by when a symlink differs (`_via`), and the
+   approval key is that physical path. If the path leads somewhere else once
+   the user answers (a link swapped while the prompt waited), the call is
+   refused.
+7. **Bash allowlist** — under `Allow`, a *non-empty* allowlist limits which
    commands an unattended run may execute. An *empty* allowlist means "nothing
    pre-approved", not "everything allowed": `Restricts()` is false, so only the
    static gates above restrict commands.
-7. **Execute** — the built-in tool or the extra `CustomTool.Fn`.
-8. **Trace** — the call is recorded as a child span.
+8. **Execute** — the built-in tool or the extra `CustomTool.Fn`. A file
+   change is snapshotted first for `/undo`.
+9. **Trace** — the call is recorded as a child span.
 
 `NewDefaultPermissionConfig` is the interactive (chat TUI) default: `Default` is
 `Ask`, with `read_file`, `list_dir`, `grep`, and `glob` set to `Allow` and
@@ -137,10 +152,21 @@ the resolved absolute path, and bash commands. A protected path always yields
   `.dockercfg`/`.dockerconfigjson`, `.git-credentials`, `.pgpass`, `.pypirc`,
   `.my.cnf`, `.vault-token`, `id_rsa`/`id_dsa`/`id_ecdsa`/`id_ed25519`,
   `*.tfstate`, `*.tfstate.backup`, `.ouija.json`, `ouija.json`;
+- secrets a project keeps in its own tree: `wp-config.php`, `auth.json`,
+  `credentials.json`, `service-account.json`, `*-sa.json`,
+  `secrets.yml`/`secrets.yaml`, `credentials.yml.enc`, `terraform.tfvars`,
+  `*.auto.tfvars`, `.htpasswd`, `.yarnrc`, `.dev.vars`,
+  `local.settings.json`, `kubeconfig`, and at a known place
+  `app/etc/env.php`, `config/database.yml`, `.bundle/config`;
+- keys and keystores by extension: `*.pem`, `*.key`, `*.p12`, `*.pfx`,
+  `*.jks`, `*.keystore`;
 - directories at any path level: `.ssh`, `.gnupg`, `.aws`, `.docker`, `.kube`,
-  `.azure`, `.ouija`, `.password-store`, `.config/gcloud`, `.config/kube`,
-  `.config/gh`, `.git/config`, `.git/hooks`, and ouija's global config
-  (`.config/ouija`, or wherever `os.UserConfigDir()` puts it);
+  `.azure`, `.ouija`, `.password-store`, `.mozilla`, `.config/gcloud`,
+  `.config/kube`, `.config/gh`, and ouija's global config (`.config/ouija`, or
+  wherever `os.UserConfigDir()` puts it, plus that dir's `gcloud`);
+- git config and hooks inside any `.git` directory (`isGitConfigOrHook`):
+  `config`, `config.worktree` and `hooks/*`, including those under
+  `.git/modules/*` and `.git/worktrees/*`;
 - registry and model-hub token files inside tool dirs: `.cargo/credentials`,
   `.cargo/credentials.toml`, `.m2/settings.xml`, `.m2/settings-security.xml`,
   `.gradle/gradle.properties`, `.docker/config.json`,
@@ -149,11 +175,15 @@ the resolved absolute path, and bash commands. A protected path always yields
   `uv/credentials`, `git/credentials`, `rclone/rclone.conf`, `share/keyrings`,
   `share/kwalletd`, `composer/auth.json`, `pip/pip.conf`,
   `containers/auth.json`, `etc/npmrc`;
-- browser profiles and other CLIs' tokens: `.mozilla`, `.config/google-chrome`,
+- browser profiles and other CLIs' tokens: `.config/google-chrome`,
   `.config/chromium`, `.config/hub`, `.config/glab-cli`, `.yarnrc.yml`,
   `.s3cfg`, `.terraformrc`;
 - system directories: `/etc/**`, `/var/lib/**`, `/proc/**`, `/sys/**`, and on
   macOS `/private/etc/**` and `/private/var/lib/**`.
+
+Names are compared case-folded on every OS (`.ENV` is `.env`). Apart from
+this list, the file tools never write or delete git metadata (`isGitMetadata`:
+any path with a `.git` component), though they may read it.
 
 ## Provider architecture
 

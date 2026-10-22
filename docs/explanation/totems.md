@@ -54,10 +54,10 @@ of this:
 | Capability | Where it lives | Why it matters |
 |---|---|---|
 | Cost ceiling (`maxUSD`, `maxTokens`, `maxSteps`) | `Tracker` | A runaway loop cannot drain your key |
-| Filesystem sandbox (`SafeJoin`, symlink detection) | `Sandbox` | The model cannot write outside the project root |
+| Filesystem sandbox (`SafeJoin`, symlink detection, `os.Root` opens) | `Sandbox` | The model cannot read or write outside the project root, or reach a protected file |
 | Permission tiers + approval | `ToolRunner` | Write and draft tools need permission; nothing is assumed |
 | Bash allowlist + doom-loop detection | `ToolRunner` | Repeated identical calls get cut off |
-| OS sandbox for bash (Landlock, Seatbelt) | `bash_sandbox*.go` | A command cannot reach your credentials or the network, even through a path built at run time |
+| OS sandbox for bash (Landlock + seccomp, Seatbelt) | `bash_sandbox*.go` | A command cannot reach your credentials or the network, even through a path built at run time |
 | Retries + circuit breaker | `providers/` | A 429 or 5xx is retried with backoff; after 3 failures in a row the provider fails fast for 30s |
 | Structured trace | `Tracer` | Every span can be exported to Perfetto for debugging |
 | MCP export | `mcp/` | Any registered totem becomes a `ouija_<name>` tool |

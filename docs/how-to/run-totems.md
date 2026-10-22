@@ -64,7 +64,9 @@ confirmed findings, plus the dropped ones with the skeptic's reason. Without
 `review` reports bugs, unhandled errors, races, leaks, security holes and
 broken contracts. It leaves out style and naming on purpose. The repository's
 own git config cannot make it run a command, because its git calls turn off
-external diffs, `textconv` filters and `core.fsmonitor`.
+external diffs, `textconv` filters, `core.fsmonitor` and every clean/smudge
+filter driver a config defines, and skip the work trees of submodules
+(`--ignore-submodules=dirty`), where another config would apply.
 
 ## `ouija doc` — code-verified client documents
 
@@ -74,8 +76,10 @@ cd my-project && ouija doc "configuration manual"
 
 `doc` writes `<slug>.html`, `<slug>.pdf` and `<slug>.md` into `docs/` under
 the project root, which is the current directory by default. It produces the
-PDF only when Chrome/Chromium is on `PATH`; otherwise it writes the HTML and
-tells you how to print it.
+PDF only when it finds Chrome, Chromium or Edge, on `PATH` or where macOS and
+Windows install them; otherwise it writes the HTML and tells you how to print
+it. The render runs offline: only the template's Google Fonts are fetched (see
+[egress controls](../explanation/security.md#cost-and-egress-controls)).
 
 ## `ouija sticker` — project sticker
 

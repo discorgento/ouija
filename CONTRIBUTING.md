@@ -32,8 +32,9 @@ make test-race          # before touching concurrency (chat, engine)
 ## Before you open a PR
 
 - Read the right page first: [where to make changes](docs/how-to/contribute.md#where-to-make-changes).
-- **Security-sensitive code** (permissions, sandbox, bash denylist, config
-  handling) **fails closed**: when in doubt, it denies. A change that makes any
+- **Security-sensitive code** (permissions, the file and bash sandboxes, the
+  git restore, the bash denylist, project trust, config handling, the provider
+  client, the MCP server) **fails closed**: when in doubt, it denies. A change that makes any
   of it more permissive must include tests proving the previous behaviour was
   wrong. If you cannot prove that, open an issue before writing code. See
   [SECURITY.md](SECURITY.md).
@@ -42,8 +43,10 @@ make test-race          # before touching concurrency (chat, engine)
   automated release: a `feat` or `fix` commit bumps the version and adds a
   changelog entry.
 - Docs changes must keep every relative link and anchor working;
-  `go test ./...` checks them (`internal/doccheck`). A separate CI job, which
-  needs the network, checks absolute links.
+  `go test ./...` checks them (`internal/doccheck`), and fails too when a
+  config key, a command or an `OUIJA_*` variable is missing from
+  `docs/reference/`. A separate CI job, which needs the network, checks
+  absolute links.
 - **Never edit a version by hand**: the git tag is the version, created by the
   [release pipeline](.github/workflows/release.yml) — see
   [Releases](docs/how-to/contribute.md#releases).

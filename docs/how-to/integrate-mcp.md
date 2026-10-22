@@ -19,9 +19,14 @@ ouija's totems to the host as MCP **tools** and the project's files as MCP
 - **Resources** use the URI scheme `ouija://project/{path}` and give sandboxed
   access to files within the project root: only regular files, up to 10 MiB
   each, with a binary file sent as a base64 `blob`. Protected paths
-  (credentials, system files) are refused, as with the file tools. When the server starts in
-  `/` or in your home folder, which some hosts do, resources are off: start
-  it in a project folder (most hosts take a `cwd` for the server).
+  (credentials, system files) are refused, as with the file tools.
+- **Project root**: when the server starts in `/`, in your home folder or in
+  a folder above it, which some hosts do, both resources and tools are off: a
+  totem would otherwise read, search and write across all your files. The
+  home folder is taken from `HOME` and from the account database alike; if
+  neither names one, any root less than three levels deep is refused. Every
+  tool call then fails with a `CONFIG:` error that says so. Start the server
+  in a project folder; most hosts take a `cwd` for the server.
 - **Transport** is newline-delimited JSON-RPC 2.0 over stdio. The `initialize`
   handshake advertises MCP protocol version `2025-06-18` with the `tools` and
   `resources` capabilities. A message over 4 MiB gets a parse error. At most 8

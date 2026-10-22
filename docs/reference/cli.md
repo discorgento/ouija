@@ -50,16 +50,24 @@ so run `ouija setup` first.
 Writes `.ouija/config.json` in the current directory and trusts it (see
 `ouija trust`).
 
-### `ouija trust [--revoke] [<path>]`
+### `ouija trust [--revoke] [--yes] [<path>]`
 
 Trusts the project config that discovery finds from the current directory (or
-from `<path>`). It first prints the security-sensitive keys the file sets
-(`permission`, the `tools` bash allowlist and sandbox, `apiKey`, a
-non-default `systemPrompt` or `rules`, a `projectRoot` other than `.`, a
-`budget` above the defaults, a `provider` or `model` other than yours). Until you trust the file,
-ouija ignores those keys with a warning, and any change to the file needs
-`ouija trust` again. `--revoke` forgets the trust. Files written by
-`ouija init` and by the chat are trusted automatically. See
+from `<path>`). It first prints, in full, the security-sensitive keys the file
+sets (the
+[trust-only keys](config-schema.md#project-config-ouijaconfigjson)), then
+asks `Trust this config? [y/N]`. Invisible and control characters in what
+it prints (a hidden instruction in a `systemPrompt`, for example) show as
+`\u{XXXX}`, with a warning. Until you trust the file, ouija ignores or
+limits those keys with a warning, and any change to the file needs
+`ouija trust` again.
+
+| Flag | Effect |
+|---|---|
+| `--yes`, `-y` | Trust without asking, for scripts. Without a terminal, `ouija trust` refuses unless it is given |
+| `--revoke` | Forget the trust recorded for the file |
+
+Files written by `ouija init` and by the chat are trusted automatically. See
 [Project trust](../explanation/security.md#project-trust).
 
 ### `ouija config`
@@ -86,25 +94,35 @@ ouija generate totem --external [dir]
 
 With a fact, saves it to `docs/knowledge.md`; with no argument, prints the
 current knowledge. ouija injects the facts into the chat's system prompt and
-into the `task` totem's scout (the agent that first surveys the code).
+into the `task` totem's scout (the agent that first surveys the code). A fact
+that starts with `-` goes after `--`, so it is not read as a flag:
+`ouija learn -- "-v means verbose"`.
 
 ### `ouija doctor`
 
-Checks the local setup: binary location (and a warning when the `ouija` on
-`PATH` is a different binary, since harnesses run that one), global and
-project config files, resolved provider/model, API key presence, a live check
-that the key works and the model exists at the provider, the bash sandbox
-status (on, off or not available here, and how to turn it on where the
-machine supports it), registered totems, and harness registration status.
+Checks the local setup and prints one line per check:
+
+| Line | What it checks |
+|---|---|
+| `version`, `binary` | This binary's version and location |
+| `on PATH` | The `ouija` on `PATH`; a warning when it is missing or is a different binary, since harnesses run that one |
+| `global config`, `defaults` | The global config file, and whether it sets a default provider |
+| `project config` | The project config discovery found, if any |
+| `provider`, `config` | The resolved provider, whether its API key is set, and whether the merged config is valid |
+| `provider API` | A live check that the key works and the model exists at the provider |
+| `bash sandbox` | On, off, or not enforceable here (a warning for the default sandbox, which then runs bash unconfined; a problem when the config asked for it), and how to turn it on where the machine supports it |
+| `bash jobs` | Linux, sandbox on: whether each command gets a PID namespace of its own, so nothing it starts outlives it; a warning where user namespaces are forbidden |
+| `totems` | The registered totems |
+| one line per harness | Whether `ouija mcp` is registered with OpenCode, Claude Code and Cursor |
 
 ```sh
 ouija doctor
 ```
 
-The output is a checklist with ✓ (ok), ! (warning) and ✗ (problem). The exit
-code is 0 when there are no problems, and 1 when it finds at least one (e.g. a
-missing API key for a provider that needs one, an invalid config, no totems
-registered).
+The output is a checklist with ✓ (ok), · (info), ! (warning) and ✗
+(problem). The exit code is 0 when there are no problems, and 1 when it finds
+at least one (e.g. a missing API key for a provider that needs one, an invalid
+config, no totems registered).
 
 ### `ouija chat [--continue] [--config <file>] [--trace-file <file>]`
 
@@ -245,6 +263,7 @@ starting the server.
 | Budget | The engine budget applies to each call |
 | Limits | A message over 4 MiB gets a parse error; at most 8 tool calls and resource reads run at once (more get `-32000`); an id still in use by a running request gets `-32600` |
 | Resources | Regular files up to 10 MiB; binary files come as a base64 `blob`. Off when the server starts in `/`, the home folder or a folder above it |
+| Broad root | Started in `/`, the home folder or a folder above it, the server refuses every tool call with a `CONFIG:` error naming the root: start it in a project folder. The home folder comes from both `$HOME` and the account database; when neither names one, any root fewer than three levels deep counts as broad |
 
 `ouija mcp install` touches only the harnesses it detects (OpenCode, Claude
 Code, Cursor), writes a `.bak` before it edits any config file, and never

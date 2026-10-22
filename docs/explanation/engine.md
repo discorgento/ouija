@@ -25,7 +25,7 @@ Engine (coordinator)
   │     ├── PermissionConfig + ApprovalManager
   │     ├── BashAllowlist
   │     ├── Sandbox (SafeJoin, symlink detection)
-  │     └── Bash sandbox (Landlock / Seatbelt, git restore)
+  │     └── Bash sandbox (Landlock + seccomp / Seatbelt, git restore)
   ├── Tracker (budget)
   └── Tracer (in-memory span tree → Perfetto JSON export)
 ```
@@ -85,20 +85,22 @@ order:
 
 1. **Doom-loop detection**: the same tool with identical input three times in
    a row is refused.
-2. **Static bash gates**: a command with a NUL byte is refused, then the
-   denylist (with semantic analysis for flag-order variants such as
+2. **Path characters**: a `path` with a control, invisible or bidi character
+   is refused, since the prompt could not show it as it is.
+3. **Static bash gates**: a command with a NUL byte, or with a character the
+   approval prompt would hide, is refused, then the denylist (with semantic analysis for flag-order variants such as
    `rm -fr /`, wrappers such as `sudo rm -fr /`, and raw device writes) and
    references to protected paths (`cat .env`, `~/.ssh/…`). These run *before*
    any prompt, because no "yes" can override a hard rule.
-3. **Unsandboxed run**: a bash call with `"unsandboxed": true` still meets the
+4. **Unsandboxed run**: a bash call with `"unsandboxed": true` still meets the
    permission level, then always prompts, whatever the level or the allowlist
    says. It is refused when `allowUnsandboxed` is `false` or no one can
    approve.
-4. **Permission level**: `Deny` refuses, `Ask` prompts (unless the bash command
+5. **Permission level**: `Deny` refuses, `Ask` prompts (unless the bash command
    is on the allowlist), `Allow` runs unattended.
-5. **Bash allowlist**: pre-approves known commands so they skip the prompt and,
+6. **Bash allowlist**: pre-approves known commands so they skip the prompt and,
    under `Allow`, acts as the guard rail for unattended runs.
-6. **Execution**: a built-in tool or a scoped `CustomTool`.
+7. **Execution**: a built-in tool or a scoped `CustomTool`.
 
 `Engine` and `ToolRunner` share the permission and approval wiring through one
 `gateState` **pointer**, so a setter can never leave the runner with a stale
@@ -106,8 +108,9 @@ config.
 
 Session approvals (the **Session** option in the prompt) are keyed by
 **target**, not by tool name: `write_file\x00/abs/path`,
-`bash\x00<exact command>`. Approving one path or command therefore never
-silently approves another for the rest of the run. A plain "yes" runs the call
+`bash\x00<exact command>`. A file's key is the physical path, with symlinks
+followed, so a link that later leads elsewhere asks again. Approving one path
+or command therefore never silently approves another for the rest of the run. A plain "yes" runs the call
 once; only **Session** adds a bash command to the allowlist and writes it back
 to the config file.
 
@@ -143,9 +146,15 @@ reassembles stream events for callers that do not stream. A configurable
 Every file tool stays inside the project root, both lexically and physically.
 `SafeJoin` blocks `../`, and `resolveSymlinkEscape` rejects symlinks that point
 outside. It walks the path one component at a time, so it detects a symlink
-even when the target file does not exist yet, which closes the TOCTOU
-(time-of-check to time-of-use) window. The `delete_file` tool also resolves
-symlinks before it calls `os.RemoveAll`.
+even when the target file does not exist yet. The open itself goes through an
+`os.Root` on the project, and ouija checks the opened file again, which closes
+the TOCTOU (time-of-check to time-of-use) window: a link swapped in after the
+check cannot lead out of the project or onto a protected file. Opens never
+block (a FIFO is refused), a file with several hard links is judged by the
+rules in [Security](security.md#layer-2-protected-paths-always-denied), and
+the file tools never write or delete under `.git`. `delete_file` removes
+through the same `os.Root` and refuses a directory that holds a protected
+file.
 
 The `bash` tool is confined by the OS as well, on by default: Landlock on
 Linux, Seatbelt on macOS. A command can then write only inside the project and
@@ -156,13 +165,13 @@ private temp and cache dirs, whatever path it builds at run time; see
 
 | Tool | Parameters |
 |---|---|
-| `read_file` | `path` (required), `offset` (first line, 1-based), `limit` (lines) |
-| `grep` | `pattern` (required, a regex), `path` (a subdir) |
-| `glob` | `pattern` (required, `**` matches any number of dirs) |
+| `read_file` | `path` (required), `offset` (first line, 1-based), `limit` (lines). Keeps 20 KB of one line |
+| `grep` | `pattern` (required, a regex), `path` (a subdir). Searches the first MB of a line |
+| `glob` | `pattern` (required, `**` matches any number of dirs, at most 8 of them) |
 | `list_dir` | `path` (a dir) |
 | `write_file` | `path`, `content` (both required) |
-| `edit_file` | `path`, `oldString` (exact text), `newString` (all required) |
-| `delete_file` | `path` (required; a file or an empty dir) |
+| `edit_file` | `path`, `oldString` (exact text), `newString` (all required); a file up to 16 MB |
+| `delete_file` | `path` (required; a file or a directory, never the project root) |
 | `bash` | `command` (required), `timeout` (seconds; default 30, max 120), `unsandboxed` (run outside the sandbox, after the user approves) |
 | `submit_result` | the run's schema; offered only when `RunRequest.Schema` is set |
 
@@ -278,6 +287,12 @@ timeout (default 120s). The **provider registry** (`providers.Build(name,
 key)`), a stateless map of constructors, creates provider instances.
 `app.DiscoverConfig` reads the active provider's API key from the config files
 (global first, then the project override) and passes it to the constructor.
+
+The shared client follows a redirect only to the same scheme and host, so a
+key never reaches another server, and bounds every response (32 MiB a body,
+8 MiB an SSE line, 32 MiB an event, 64 MiB of text and tool input a reply;
+50 pages of a model listing). See
+[Security → Cost and egress controls](security.md#cost-and-egress-controls).
 
 [Adding a provider](../how-to/add-provider.md) walks through adding one in four
 steps.

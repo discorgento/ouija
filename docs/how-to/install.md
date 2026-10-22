@@ -62,14 +62,14 @@ Run one command; it needs no root access:
 curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh
 ```
 
-The script picks the archive for your OS and CPU from the latest release,
-checks it against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in
+The script picks the archive for your OS and CPU from the latest stable
+release (pre-releases only with `--prerelease`), checks it against `SHA256SUMS` and puts `ouija` and `ouija-mcp` in
 `~/.local/bin`. In a terminal it then asks two questions: whether to add that
 folder to your `PATH` (in `~/.zshrc`, `~/.bashrc` or fish's config) when it is
 not there yet, and whether to run `ouija setup` now. In CI, or with
 `--no-prompt`, it asks nothing and prints what to do instead. To pass options
-(`--version 0.2.0`, `--dir <dir>`, `--no-prompt`, `--require-provenance`), put
-them after `sh -s --`. `--dir` must be an absolute path (`$HOME/...`, not `~`)
+(`--version 0.2.0`, `--prerelease`, `--dir <dir>`, `--no-prompt`,
+`--require-provenance`), put them after `sh -s --`. `--dir` must be an absolute path (`$HOME/...`, not `~`)
 without `"`, `$`, a backtick or `\`.
 
 ### Build provenance
@@ -77,16 +77,27 @@ without `"`, `$`, a backtick or `\`.
 The checksum proves the archive matches `SHA256SUMS`, but both come from the
 same release. Every archive also carries a **build provenance attestation**,
 signed (through Sigstore) by this repository's release workflow on GitHub
-Actions: it proves the archive was built from this repository's source by that
-workflow, so an archive swapped on the release page fails it. When the
+Actions: it proves the archive was built from this repository's source by
+`.github/workflows/release.yml` running on `main` (releases are cut only by
+pushes to `main`), so an archive swapped on the release page, one built by any
+other workflow, or one built by a copy of the release workflow on another
+branch fails it. When the
 [GitHub CLI](https://cli.github.com) is installed and logged in, both
-installers verify it and refuse to install on a failure. Without `gh` they say
-the provenance was not checked; `--require-provenance` (`-RequireProvenance` on
-Windows) makes them refuse instead. To check an archive by hand:
+installers verify it and refuse to install on a failure. Without `gh` they
+install on the checksum alone, print a warning that the provenance was
+**not** verified, and repeat it in the final `installed in …` line;
+`--require-provenance` (`-RequireProvenance` on Windows) makes them refuse
+instead. To check an archive by hand:
 
 ```sh
-gh attestation verify ouija_0.5.1_linux_amd64.tar.gz --repo discorgento/ouija
+gh attestation verify ouija_0.5.1_linux_amd64.tar.gz --repo discorgento/ouija \
+  --signer-workflow discorgento/ouija/.github/workflows/release.yml \
+  --source-ref refs/heads/main
 ```
+
+GitHub signs attestations only for public repositories. A release cut while
+the repository was private carries none: its workflow run shows a warning,
+and an installer that can check provenance refuses it.
 
 To install by hand, check and extract the archive:
 
@@ -105,14 +116,17 @@ Run this in PowerShell; it needs no administrator rights:
 irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex
 ```
 
-The script downloads the latest release's zip, checks it against
-`SHA256SUMS`, puts `ouija.exe` and `ouija-mcp.exe` in
-`%LOCALAPPDATA%\Programs\ouija` and adds that folder to your user's `PATH`.
-In a console it offers to run `ouija setup` right away. Then open a **new**
-terminal (Windows Terminal or PowerShell) and run `ouija` in a project folder.
-If you save the script as a file, it accepts `-Version 0.2.0`,
-`-InstallDir <dir>` (an absolute path, such as `C:\tools\ouija`), `-NoPath`,
-`-NoPrompt` and `-RequireProvenance`.
+The script downloads the latest stable release's zip, checks it against
+`SHA256SUMS` (and the build provenance, as above) and puts `ouija.exe` and
+`ouija-mcp.exe` in `%LOCALAPPDATA%\Programs\ouija`. In a console it asks
+whether to add that folder to your user's `PATH` (the default answer is no)
+and offers to run `ouija setup` right away. Then open a **new** terminal
+(Windows Terminal or PowerShell) and run `ouija` in a project folder.
+If you save the script as a file, it accepts `-Version 0.2.0`, `-Prerelease`
+(let the latest be a pre-release), `-InstallDir <dir>` (an absolute path, such
+as `C:\tools\ouija`), `-AddToPath` (add the folder without asking), `-NoPath`
+(never touch the `PATH`), `-NoPrompt` (ask nothing: the `PATH` changes only
+with `-AddToPath`) and `-RequireProvenance`.
 
 To install by hand, download the zip and extract it (Explorer opens it). Then
 add the folder that holds `ouija.exe` to your `PATH` under *Settings → System

@@ -104,7 +104,11 @@ The prompt states in words what the call wants to do ("ouija wants to edit
 `engine/budget.go`"). Its frame takes the color of the risk: green for reads,
 amber for writes, red for shell commands and anything outside the project.
 Below it you see the full command, wrapped but never cut, or the diff the call
-would apply, plus the other arguments. Pick one of up to five options with the
+would apply, plus the other arguments. A file tool's prompt names the file the
+call really lands on, with `..` resolved and symlinks followed: through a link
+it shows both names (`notes.txt → Makefile (symlink)`). If that link changes
+while the prompt waits, the approved call is refused and the model must call
+again. Pick one of up to five options with the
 arrow keys:
 
 - **Yes** (`y`) — approve this call once.
@@ -124,8 +128,9 @@ arrow keys:
 Some tools use their own confirm key: `delete_file` asks for `d` (Delete)
 instead of `y`. No approval overrides the hard rules: ouija refuses a
 denylisted command or a protected path (`.env`, `~/.ssh/*`, `/etc/*`) *before*
-it shows the prompt. [Security](../explanation/security.md) explains why and
-lists the paths.
+it shows the prompt, and so it does a command or a path holding a control or
+invisible character the prompt could not show.
+[Security](../explanation/security.md) explains why and lists the paths.
 
 After you reject a tool during a generation, ouija rejects every later call to
 that tool until the generation ends. To stop the prompts for a tool you trust,
@@ -137,7 +142,9 @@ On Linux and macOS, bash runs in the OS sandbox by default: a command writes
 only inside the project and reaches no network (see
 [Configure → Bash sandbox](configure.md#bash-sandbox)). When the sandbox blocks
 one, its result says it ran in the sandbox, so the model does not mistake the
-denial for a bug.
+denial for a bug. Where the machine cannot enforce the default sandbox
+(Windows, an older kernel), the chat says so in a banner when it starts, and
+bash runs unconfined, asking before every command; `ouija doctor` shows why.
 
 The model may then retry the same command with `"unsandboxed": true`. You get
 a prompt marked **runs OUTSIDE the bash sandbox: full access to your files and
@@ -174,6 +181,13 @@ caches it for a day in `~/.cache/ouija/models/`; offline, it falls back to a
 built-in list. Typing the command followed by a space opens the inline
 suggestion list instead. When the context has grown too large, `/clear` wipes
 the history.
+
+## Debug logging
+
+`/debug` sends the engine's debug logs to `chat-debug.log` in ouija's folder
+of the user cache directory (`~/.cache/ouija/` on Linux), and prints the path.
+The log holds prompts and file contents, so the file is `0600` in a folder
+only you can enter. Run `/debug` again to stop.
 
 ## Exiting
 

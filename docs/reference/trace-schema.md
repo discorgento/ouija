@@ -13,6 +13,10 @@ step of a run (a model call, a tool call, an agent). It works with any totem
 and with `ouija chat`. Every run also prints the span tree to stderr; the file
 is an extra export.
 
+The file is written with mode `0600` (an existing file is narrowed to it):
+spans name the paths and commands of the run. A device such as `/dev/stdout`
+is left as it is.
+
 ## Event format
 
 The file is one JSON array, and each element is a complete (`ph: "X"`) event.
@@ -29,7 +33,9 @@ The file is one JSON array, and each element is a complete (`ph: "X"`) event.
 | `args` | `map[string]string` | No | Attributes (omitted when empty) |
 
 Attribute values are always strings. A `chat`/`phase2` span carries
-`input_tokens` and `output_tokens`. A `tool.*` span carries `tool` and, when
+`input_tokens` and `output_tokens`, plus `label` when the call has one (a
+totem pass) and `submit_result: "true"` when the model answered through
+`submit_result`. A `tool.*` span carries `tool` and, when
 the call has them, `path`, `pattern` (`grep`, `glob`) and `command` (`bash`:
 its first line, cut to 120 bytes). A `bash` span that succeeds also adds
 `output`: the tail of what the command printed (its last 12 lines, at most

@@ -95,18 +95,27 @@ the optional sections (`permission`, `tools`, `modelSuggestions`,
 
 `init` also marks the file it wrote as trusted. A project config you did not
 write, such as one a teammate committed or one in a repository you cloned,
-applies its `permission`, `tools`, `apiKey`, `systemPrompt`, `rules` and
-`projectRoot` keys, a `budget` above the defaults, and a `provider` or `model`
-other than the ones you chose in `ouija setup`, only after you review and
-trust it:
+applies its `permission`, `tools`, `apiKey`, `systemPrompt`, `rules`,
+`modelSuggestions` and `projectRoot` keys, a `budget` above the defaults, a
+`provider` or `model` other than the ones you chose in `ouija setup`, and
+raised totem `passes`, `streamTimeout` or `contextWindow`, only after you
+review and trust it. The
+[trust-only keys](../reference/config-schema.md#project-config-ouijaconfigjson)
+list them all.
 
 ```sh
-ouija trust          # prints what the config grants, then trusts it
+ouija trust          # prints what the config grants, then asks [y/N]
+ouija trust --yes    # trusts without asking, for scripts
 ouija trust --revoke
 ```
 
-Any change to the file revokes the trust; `ouija doctor` reports when that
-happens.
+`ouija trust` shows every key in full, and any hidden or control character in
+it as a visible `\u{XXXX}` escape. Any change to the file revokes the trust;
+`ouija doctor` lists the keys an untrusted file has ignored.
+
+Discovery stops at your home directory when you work inside it, and on Linux
+and macOS it skips a config file another user owns. A config that sets the
+same key twice is refused.
 
 ## Config validation
 
@@ -122,10 +131,13 @@ when that totem reads it.
 
 ## Bash sandbox
 
-The OS confines every bash command, by default, on Linux (Landlock ABI v9+)
-and on macOS (Seatbelt). A confined command writes only inside the project
-and private temp and cache dirs, reads no credentials in your home, and opens
-no TCP connection. `ouija doctor` shows whether the sandbox is on.
+The OS confines every bash command, by default, on Linux (Landlock ABI v9+,
+on x86-64 or arm64) and on macOS (Seatbelt). A confined command writes only
+inside the project and private temp and cache dirs, reads no credentials in
+your home, and opens no TCP connection. On Linux it also runs in user and PID
+namespaces of its own where the kernel allows them, so nothing it starts
+outlives it. `ouija doctor` shows whether the sandbox is on (`bash sandbox`)
+and, on Linux, whether background jobs are contained (`bash jobs`).
 
 When a build needs more, open it under `tools.bash.sandbox` in the project
 config:
@@ -161,10 +173,11 @@ every key.
 `OUIJA_LOG_LEVEL` sets how much ouija logs: `debug`, `info` (default),
 `warn` or `error`.
 
-The providers and the TUI read a few others: `EDITOR` (for the chat's Edit
-approval option), `OPENROUTER_BASE_URL`, `OPENROUTER_REFERER`,
-`OPENROUTER_TITLE` and `OLLAMA_HOST`. ouija never reads API keys from
-environment variables; they live in config files with `0600` permissions.
+The providers and the TUI read a few others, such as `EDITOR` (for the
+chat's Edit approval option), `OUIJA_THEME`, `OPENROUTER_BASE_URL` and
+`OLLAMA_HOST`; [Environment variables](../reference/environment.md) lists
+them all. ouija never reads API keys from environment variables; they live in
+config files with `0600` permissions.
 
 ---
 

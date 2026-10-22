@@ -282,8 +282,9 @@ The build injects it at link time, so the CLI, the MCP `serverInfo` and the TUI
 header all read it from one source. Never edit a version by hand; pass one
 explicitly only for testing (`make build VERSION=vX.Y.Z`).
 
-CI runs the same checks on every push and pull request (gofmt, vet,
-`go test -race ./...`, build). [Contribute](docs/how-to/contribute.md) covers the
+CI runs the same checks and more on every push and pull request (gofmt,
+`go.mod` tidiness, stale generated code, vet for three OSes, staticcheck,
+actionlint, `go test -race ./...`, build, govulncheck). [Contribute](docs/how-to/contribute.md) covers the
 full workflow and the code conventions.
 
 Releases are automated. A push to `main` opens a *release PR* that bumps the
@@ -323,7 +324,9 @@ Details: [MCP integration](docs/how-to/integrate-mcp.md).
 ## Security
 
 ouija layers several defenses: a filesystem sandbox, an OS sandbox for bash
-(on by default on Linux with Landlock ABI v9+ and on macOS), protected paths,
+(on by default on Linux with Landlock ABI v9+ and a seccomp socket filter, and
+on macOS with Seatbelt), project configs that apply their sensitive keys only
+after `ouija trust`, protected paths,
 permission levels, a bash denylist and allowlist, detection of an agent stuck
 repeating the same call (a "doom loop"), budget ceilings, and credentials
 stripped from the environment of every command it runs. All of them **fail closed**: when a check is inconclusive, the
