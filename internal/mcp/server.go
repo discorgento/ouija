@@ -642,18 +642,15 @@ func broadRootOf(root string, homes []string) bool {
 		}
 		return p
 	}
+	written := filepath.Clean(root)
 	root = real(root)
 	if filepath.Dir(root) == root {
 		return true
 	}
 	if len(homes) == 0 {
-		depth := 0
-		for _, part := range strings.Split(root[len(filepath.VolumeName(root)):], string(filepath.Separator)) {
-			if part != "" {
-				depth++
-			}
-		}
-		return depth < 3
+		// Both as written and resolved: on macOS /home is a link to
+		// /System/Volumes/Data/home, deep only once resolved.
+		return pathDepth(written) < 3 || pathDepth(root) < 3
 	}
 	for _, home := range homes {
 		rel, err := filepath.Rel(root, real(home))
@@ -662,6 +659,17 @@ func broadRootOf(root string, homes []string) bool {
 		}
 	}
 	return false
+}
+
+// pathDepth counts p's components below the volume: /home/me is 2.
+func pathDepth(p string) int {
+	depth := 0
+	for _, part := range strings.Split(p[len(filepath.VolumeName(p)):], string(filepath.Separator)) {
+		if part != "" {
+			depth++
+		}
+	}
+	return depth
 }
 
 // broadRootToolError is the tool result of a call refused because the project
