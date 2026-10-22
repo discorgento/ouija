@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.7.0](https://github.com/discorgento/ouija/compare/v0.6.0...v0.7.0) (2026-10-22)
+
+
+### Features
+
+* **engine:** turn the bash sandbox on by default and harden the tool gate ([e0f07d5](https://github.com/discorgento/ouija/commit/e0f07d5fb9e0ee8d010ed5a69f971d566b9e3378))
+
+
+### Bug Fixes
+
+* **cli:** list the current trust-only keys in the help ([21cad2d](https://github.com/discorgento/ouija/commit/21cad2d2d653728c300cd4c6bb3180a28a576639))
+* **cli:** show --continue in the chat usage ([d6d64a9](https://github.com/discorgento/ouija/commit/d6d64a96caf1accb92f1a5b4d9f066d47fed7556))
+* **config:** tighten project trust and the global config ([9cd20d7](https://github.com/discorgento/ouija/commit/9cd20d710921dddf4e265cdf3a422f8ac9a200a5))
+* **engine:** drop symlinked home grants to credentials; refuse unsandboxed bash without a permission config ([7d71952](https://github.com/discorgento/ouija/commit/7d71952d04ba64e8d17484aeb382947fa54ee1bb))
+* **engine:** fix the sandbox and protected paths on macOS and Windows ([02abebb](https://github.com/discorgento/ouija/commit/02abebba68c8ee72d62766e0c4496f8944d65d28))
+* **engine:** protect more credential files without blocking ordinary project paths ([a087e6f](https://github.com/discorgento/ouija/commit/a087e6f814d9d1b01c841d9d550392c11c9a1e0e))
+* **install:** require an absolute install dir without shell metacharacters ([c6f40b0](https://github.com/discorgento/ouija/commit/c6f40b090b78e98cf09661ba15397e1874b233fb))
+* **mcp:** bound messages and calls, refuse duplicate ids, harden resources/read ([f584a2d](https://github.com/discorgento/ouija/commit/f584a2d48cf51ea0180a3429ee492ae406419e68))
+* **setup:** refresh the fallback list of free OpenRouter models ([8e73bb4](https://github.com/discorgento/ouija/commit/8e73bb49bd9bfd5a94c155de07ce5ff235f7c216))
+
+
+### Documentation
+
+* bring every page in line with the code ([29b7a94](https://github.com/discorgento/ouija/commit/29b7a94cb1d8b9ca202b54365f49d4d0675786fc))
+* describe the default sandbox, trust keys and MCP limits ([2b29438](https://github.com/discorgento/ouija/commit/2b29438eee83e039de86fcddbff7b4438cbc1fd0))
+
 ## [0.6.0](https://github.com/discorgento/ouija/compare/v0.5.1...v0.6.0) (2026-10-21)
 
 
