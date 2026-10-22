@@ -288,3 +288,20 @@ func TestBashHiddenCharactersAreRefusedBeforeAnyPrompt(t *testing.T) {
 		}
 	}
 }
+
+// A tool call that fails (here a read of a missing file) is marked failed
+// on its trace span, not shown as a success.
+func TestFailedToolCallMarksItsSpan(t *testing.T) {
+	eng := newTestEngine(&mockProvider{}, t.TempDir())
+	tr := NewTracer(true)
+	chat := tr.Start("chat")
+	ctx := WithSpan(context.Background(), chat)
+	if res := eng.runner.Run(ctx, "t", ToolCall{Name: "read_file", Input: map[string]any{"path": "missing.go"}}, nil, nil); res.Error == nil {
+		t.Fatalf("reading a missing file succeeded: %s", res.String())
+	}
+	chat.End()
+	sum := tr.LastTurn()
+	if len(sum.Tools) != 1 || sum.Tools[0].Error != "not found" {
+		t.Errorf("tools = %+v; want the read marked \"not found\"", sum.Tools)
+	}
+}
