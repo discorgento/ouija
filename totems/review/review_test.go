@@ -170,6 +170,45 @@ func TestRepoConfigRunsNothing(t *testing.T) {
 	}
 }
 
+// A filter driver the repository's attributes name (.gitattributes or
+// .git/info/attributes) runs a command when git diff reads the work tree:
+// every configured driver is emptied, a required one included, so nothing
+// runs and the diff still shows the change.
+func TestRepoFilterDriversRunNothing(t *testing.T) {
+	root := repo(t)
+	marker := filepath.Join(t.TempDir(), "ran")
+	cmd := "touch " + filepath.ToSlash(marker) + "; cat"
+	run(t, root, "config", "filter.x.clean", cmd)
+	run(t, root, "config", "filter.x.smudge", cmd)
+	run(t, root, "config", "filter.x.required", "true")
+	run(t, root, "config", "filter.a.b=c.clean", cmd)
+	run(t, root, "config", "filter.p.process", "sh -c 'touch "+filepath.ToSlash(marker)+"'")
+	run(t, root, "config", "diff.go.command", "sh -c 'touch "+filepath.ToSlash(marker)+"'")
+	if err := os.WriteFile(filepath.Join(root, ".gitattributes"), []byte("* filter=x diff=go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "attributes"), []byte("calc.go filter=a.b=c\n*.txt filter=p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(t, root, "-c", "filter.p.process=", "-c", "filter.x.clean=", "-c", "filter.x.required=false", "add", "notes.txt")
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := branchDiff(context.Background(), root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a filter driver from the repository's config ran a command")
+	}
+	if !strings.Contains(diff, "func Avg") || !strings.Contains(diff, "+y") {
+		t.Fatalf("the diff lost the changes:\n%s", diff)
+	}
+}
+
 // The terminal summary: worst first, the dropped ones with the skeptic's word.
 func TestRenderGolden(t *testing.T) {
 	r := &reviewResult{Base: "main", Focus: "division",

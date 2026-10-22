@@ -183,14 +183,10 @@ func (t *Totem) Run(ctx context.Context, eng *engine.Engine, args registry.Args)
 		}
 		*out.dst = p
 	}
-	if err := os.MkdirAll(filepath.Dir(res.HTML), 0o755); err != nil {
-		return nil, fmt.Errorf("cannot create %s: %w", filepath.Dir(res.HTML), err)
-	}
-
-	if err := os.WriteFile(res.HTML, []byte(withCSP(htmlRes.Text)), 0o644); err != nil {
+	if _, err := engine.SafeWriteFile(ctx, cfg.ProjectRoot, filepath.Join("docs", slug+".html"), []byte(withCSP(sanitizeHTML(htmlRes.Text))), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write html: %w", err)
 	}
-	if err := os.WriteFile(res.MD, []byte(technicalMD(&sheet)), 0o644); err != nil {
+	if _, err := engine.SafeWriteFile(ctx, cfg.ProjectRoot, filepath.Join("docs", slug+".md"), []byte(technicalMD(&sheet)), 0o644); err != nil {
 		return nil, fmt.Errorf("cannot write md: %w", err)
 	}
 	res.PDF, res.PDFNote = renderPDF(ctx, res.HTML, pdfPath)
@@ -239,8 +235,208 @@ func ownsSlug(root, s string) bool {
 // styles, Google Fonts and data: images. No scripts, frames, remote images or
 // requests — content injected through the repo (prompt injection) can't turn
 // the PDF render, or a later look at the HTML, into an exfiltration channel.
+// A CSP cannot stop navigation (<meta http-equiv="refresh">) or resource
+// hints (<link rel="preconnect">, "dns-prefetch"…): sanitizeHTML removes
+// those, and renderPDF cuts Chrome off the network. frame-ancestors is left
+// out: browsers ignore it in a <meta> policy.
 const docCSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src https://fonts.gstatic.com data:; img-src data:; base-uri 'none'; form-action 'none'"
+
+// noDNSPrefetch turns off Chrome's speculative DNS lookups of the page's
+// links, which a CSP does not cover either.
+const noDNSPrefetch = `<meta http-equiv="x-dns-prefetch-control" content="off">`
+
+// safeLinkRels are the <link rel> values kept in model-written HTML: the ones
+// that fetch nothing, or fetch under the CSP (a stylesheet). Every other
+// value — preconnect, dns-prefetch, prefetch, prerender, preload,
+// modulepreload, next, and the icons (a favicon may be fetched outside the
+// page's CSP; the template uses none) — makes the link go.
+var safeLinkRels = map[string]bool{
+	"stylesheet": true, "alternate": true,
+	"author": true, "canonical": true, "help": true, "license": true,
+}
+
+// docCharset declares the encoding withCSP writes first: the browser's
+// encoding prescan takes the first declaration it meets, so the model's own
+// (<meta charset="iso-2022-jp">, where an ESC sequence inside "<me\x1b(Bta"
+// decodes to nothing and rebuilds a tag the byte scan never saw) is ignored —
+// and sanitizeHTML removes it anyway.
+const docCharset = `<meta charset="utf-8">`
+
+// sanitizeHTML removes from model-written HTML the tags that reach the
+// network or navigate in spite of the CSP: every <meta http-equiv> (a
+// refresh to an attacker URL with the data in the query, or a policy of the
+// model's own), every <meta charset> (the document is UTF-8: withCSP says so
+// first), and every <link> with a rel outside safeLinkRels. Before that the
+// text is made valid UTF-8 and loses its control characters but tab, LF, FF
+// and CR, so no byte the scan reads past (an ESC that starts an encoding
+// shift) can hide a tag from it.
+//
+// The scan is context-free on purpose: it finds each "<meta"/"<link" the way
+// the browser's tokenizer would read a tag starting there, including inside
+// comments, <style> or <svg> (where a <meta> breaks out into the document),
+// and reads the attributes as the tokenizer does — any case, any quoting,
+// entities decoded in values. Removing a tag the browser would have read as
+// text costs nothing. It repeats until nothing changes, so a removal cannot
+// splice the halves of a tag together ("<me<meta …>ta …>").
+func sanitizeHTML(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if (r < 0x20 && !isHTMLSpace(byte(r))) || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, "\uFFFD"))
+	for {
+		out := stripUnsafeTags(s)
+		if out == s {
+			return out
+		}
+		s = out
+	}
+}
+
+func stripUnsafeTags(s string) string {
+	type span struct{ from, to int }
+	var cut []span
+	for i := 0; i < len(s); i++ {
+		if s[i] != '<' {
+			continue
+		}
+		name := tagNameAt(s, i)
+		if name == "" {
+			continue
+		}
+		end, attrs := scanAttrs(s, i+1+len(name))
+		if !unsafeTag(name, attrs) {
+			continue
+		}
+		// Tags are tried at every "<", so a span may start inside the last
+		// one (a decoy quoted value swallowing a real tag): merge them.
+		if n := len(cut); n > 0 && i <= cut[n-1].to {
+			cut[n-1].to = max(cut[n-1].to, end)
+			continue
+		}
+		cut = append(cut, span{i, end})
+	}
+	if len(cut) == 0 {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, c := range cut {
+		b.WriteString(s[last:c.from])
+		last = c.to
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// tagNameAt returns "meta" or "link" when s[i:] opens such a tag (the name
+// ends at whitespace, "/", ">" or the end of input), else "".
+func tagNameAt(s string, i int) string {
+	for _, name := range []string{"meta", "link"} {
+		j := i + 1 + len(name)
+		if j > len(s) || asciiLower(s[i+1:j]) != name {
+			continue
+		}
+		if j == len(s) || isHTMLSpace(s[j]) || s[j] == '/' || s[j] == '>' {
+			return name
+		}
+	}
+	return ""
+}
+
+type htmlAttr struct{ name, value string }
+
+// scanAttrs reads a start tag's attributes from s[i:] by the HTML tokenizer's
+// rules and returns the index just past the tag's ">" (or len(s): a tag cut
+// off by the end of input is dropped whole) and the attributes, names in
+// lower case and values with their character references decoded.
+func scanAttrs(s string, i int) (int, []htmlAttr) {
+	var attrs []htmlAttr
+	for {
+		// Before an attribute name: whitespace and "/" separate attributes.
+		for i < len(s) && (isHTMLSpace(s[i]) || s[i] == '/') {
+			i++
+		}
+		if i >= len(s) {
+			return len(s), attrs
+		}
+		if s[i] == '>' {
+			return i + 1, attrs
+		}
+		// The name: a leading "=" belongs to it, then up to the next
+		// whitespace, "/", ">" or "=".
+		start := i
+		i++
+		for i < len(s) && !isHTMLSpace(s[i]) && s[i] != '/' && s[i] != '>' && s[i] != '=' {
+			i++
+		}
+		attr := htmlAttr{name: asciiLower(s[start:i])}
+		for i < len(s) && isHTMLSpace(s[i]) {
+			i++
+		}
+		if i < len(s) && s[i] == '=' {
+			i++
+			for i < len(s) && isHTMLSpace(s[i]) {
+				i++
+			}
+			switch {
+			case i >= len(s):
+			case s[i] == '"' || s[i] == '\'':
+				q := s[i]
+				end := strings.IndexByte(s[i+1:], q)
+				if end < 0 {
+					return len(s), append(attrs, attr)
+				}
+				attr.value = html.UnescapeString(s[i+1 : i+1+end])
+				i += end + 2
+			case s[i] == '>':
+			default:
+				start := i
+				for i < len(s) && !isHTMLSpace(s[i]) && s[i] != '>' {
+					i++
+				}
+				attr.value = html.UnescapeString(s[start:i])
+			}
+		}
+		attrs = append(attrs, attr)
+	}
+}
+
+// unsafeTag reports whether a scanned <meta>/<link> must go.
+func unsafeTag(name string, attrs []htmlAttr) bool {
+	for _, a := range attrs {
+		switch {
+		case name == "meta" && (a.name == "http-equiv" || a.name == "charset"):
+			return true
+		case name == "link" && a.name == "rel":
+			for _, rel := range strings.FieldsFunc(asciiLower(a.value), func(r rune) bool { return r < 0x80 && isHTMLSpace(byte(r)) }) {
+				if !safeLinkRels[rel] {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// isHTMLSpace is HTML's ASCII whitespace (tab, LF, FF, CR, space).
+func isHTMLSpace(c byte) bool {
+	return c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' '
+}
+
+// asciiLower lowercases ASCII letters only, as HTML does for tag and
+// attribute names: strings.ToLower would also fold "K" (Kelvin) to "k".
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
 
 var doctype = regexp.MustCompile(`(?is)^\s*(<!--.*?-->\s*)*<!doctype[^>]*>`)
 
@@ -250,14 +446,36 @@ var doctype = regexp.MustCompile(`(?is)^\s*(<!--.*?-->\s*)*<!doctype[^>]*>`)
 // the policy is the first thing in <head> however the rest looks — inserting
 // after the first "<head>" the text contains let a decoy in a comment
 // (<!-- <head> -->) carry the CSP away while a real <script> ran. A second CSP
-// in the document can only narrow it further: browsers enforce both.
+// in the document can only narrow it further: browsers enforce both. The
+// charset declaration goes before even the CSP, so it is the first one the
+// encoding prescan meets.
 func withCSP(html string) string {
 	meta := `<meta http-equiv="Content-Security-Policy" content="` + docCSP + `">`
 	rest := html
 	if loc := doctype.FindStringIndex(html); loc != nil {
 		rest = html[loc[1]:]
 	}
-	return "<!DOCTYPE html>\n" + meta + "\n" + rest
+	return "<!DOCTYPE html>\n" + docCharset + "\n" + meta + "\n" + noDNSPrefetch + "\n" + rest
+}
+
+// fontHosts serve the template's web fonts (Inter, JetBrains Mono). They are
+// the one network destination the PDF render keeps: the document is meant to
+// look the same as when the user opens the HTML, and the CSP limits what goes
+// there to stylesheet and font requests.
+var fontHosts = []string{"fonts.googleapis.com", "fonts.gstatic.com"}
+
+// offlineFlags cut the PDF render off every host but fontHosts, in case
+// something in the model's HTML slips past sanitizeHTML and the CSP: names
+// do not resolve (DNS lookups are a channel too), and every connection goes
+// to a proxy that refuses it, which also stops a URL with an IP address in
+// place of a name. Chrome's own background traffic is off as well.
+var offlineFlags = []string{
+	"--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE " + strings.Join(fontHosts, " , EXCLUDE "),
+	"--proxy-server=http://127.0.0.1:9",
+	"--proxy-bypass-list=" + strings.Join(fontHosts, ";"),
+	"--dns-prefetch-disable",
+	"--disable-background-networking",
+	"--no-first-run",
 }
 
 // pdfTimeout bounds the headless print: a Chrome that hangs (it happens, e.g.
@@ -270,7 +488,7 @@ func renderPDF(ctx context.Context, htmlPath, pdf string) (string, string) {
 		return "", "Chrome/Chromium not found — open the HTML and print to PDF: " + htmlPath
 	}
 	abs, _ := filepath.Abs(htmlPath)
-	flags := []string{"--headless", "--disable-gpu", "--no-pdf-header-footer"}
+	flags := append([]string{"--headless", "--disable-gpu", "--no-pdf-header-footer"}, offlineFlags...)
 	// Isolate from the user's real Chrome profile with a throwaway user-data-dir.
 	if profile, err := os.MkdirTemp("", "ouija-chrome-"); err == nil {
 		defer os.RemoveAll(profile)
