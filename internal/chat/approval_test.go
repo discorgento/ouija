@@ -3,6 +3,8 @@ package chat
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The engine scopes session approvals by target ("tool\x00path"), so every
@@ -66,5 +68,27 @@ func TestRenderApprovalBoxShowsScopedToolName(t *testing.T) {
 	}
 	if strings.Contains(box, "\x00") {
 		t.Errorf("approval box must not leak the session-key separator:\n%s", box)
+	}
+}
+
+// The prompt names the file the engine resolved, whole: the model's raw
+// path, cut to the width, read as docs/notes… while the write landed on the
+// Makefile; a symlink shows both of its names.
+func TestApprovalNamesTheResolvedFileUncut(t *testing.T) {
+	long := "docs/" + strings.Repeat("n", 180) + ".md"
+	req := &approvalRequestMsg{
+		tool:  "write_file\x00/p/Makefile",
+		input: map[string]any{"path": long + "/../../Makefile", "content": "x", "_path": "Makefile"},
+	}
+	out := ansi.Strip(RenderApprovalBox(req, 1, 0, 60))
+	if !strings.Contains(out, "write Makefile") || strings.Contains(out, "nnnn") {
+		t.Errorf("the prompt does not name the Makefile:\n%s", out)
+	}
+	deep := "src/" + strings.Repeat("deep/", 30) + "main.go"
+	req.input = map[string]any{"path": "notes.txt", "content": "x", "_path": deep, "_via": "notes.txt"}
+	out = ansi.Strip(RenderApprovalBox(req, 1, 0, 60))
+	joined := strings.NewReplacer("\n", "", " ", "").Replace(out)
+	if !strings.Contains(joined, "writenotes.txt→"+deep+"(symlink)") {
+		t.Errorf("the prompt cut or hid the symlink's target:\n%s", out)
 	}
 }

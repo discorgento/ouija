@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/internal/termsafe"
 )
 
 // ─── /model suggestions ───────────────────────────────────────────────────
@@ -31,7 +32,10 @@ func suggestedModelsFor(cfg *engine.Config, provider string, storeIDs []string) 
 	out := make([]string, 0, len(storeIDs)+4)
 	add := func(ids []string) {
 		for _, id := range ids {
-			if id == "" || seen[id] {
+			// A model ID holds no control or invisible character: one that
+			// does came from a file, not a provider, and would act on the
+			// terminal or show as a different ID than it is.
+			if id == "" || seen[id] || termsafe.Hidden(id) {
 				continue
 			}
 			seen[id] = true
@@ -204,7 +208,11 @@ func (p *Picker) Render(width int) string {
 		if p.Current != "" && p.valueAt(i) == p.Current {
 			current = toolOK.Render("  ● current")
 		}
-		fmt.Fprintf(&buf, " %s %s%s\n", sel, sty.Render(p.Items[i]), current)
+		// Items can come from a project config or a provider's model list:
+		// an escape sequence in one would act on the terminal, and a newline
+		// would break the card.
+		item := strings.ReplaceAll(termsafe.Clean(p.Items[i]), "\n", " ")
+		fmt.Fprintf(&buf, " %s %s%s\n", sel, sty.Render(item), current)
 	}
 	if total > end {
 		fmt.Fprintf(&buf, "    %s\n", ftDim.Render(fmt.Sprintf("… and %d more", total-end)))

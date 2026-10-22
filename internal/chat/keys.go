@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -307,7 +308,7 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 	}
 
 	// Read original content and apply the edit to get proposed content.
-	b, err := os.ReadFile(full)
+	b, err := readSafe(ctx, m.eng.Config().ProjectRoot, p)
 	if err != nil {
 		// Can't read file — fall through to show error in banner.
 		return m.addBanner("⚠ could not read file: " + err.Error())
@@ -334,6 +335,9 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 	// Store pending edit state.
 	m.pendingEdit = &pendingEditFile{
 		path:    full,
+		rel:     p,
+		root:    m.eng.Config().ProjectRoot,
+		ctx:     ctx,
 		tmpFile: tmpPath,
 		respCh:  req.respCh,
 	}
@@ -363,4 +367,15 @@ func (m *model) handleApprovalEdit() (tea.Model, tea.Cmd) {
 	return m, tea.ExecProcess(exec.Command(editor, append(editorArgs[1:], tmpPath)...), func(err error) tea.Msg {
 		return editorDoneMsg{err: err}
 	})
+}
+
+// readSafe reads p under root through the sandbox, opened and checked in one
+// step (engine.SafeOpenFile), not by the path SafeResolve returned.
+func readSafe(ctx context.Context, root, p string) ([]byte, error) {
+	f, err := engine.SafeOpenFile(ctx, root, p, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
 }

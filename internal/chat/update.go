@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/discorgento/ouija/engine"
 	"github.com/discorgento/ouija/internal/termsafe"
 	"github.com/discorgento/ouija/internal/theme"
 )
@@ -280,8 +281,10 @@ func (m *model) handleEditorDone(msg editorDoneMsg) (tea.Model, tea.Cmd) {
 	editedContent := string(b)
 
 	// Write the edited content to the real file (recorded first, for /undo).
+	// Through the sandbox again, not by name: the editor may stay open for
+	// minutes, and a link swapped in meanwhile must not take the write.
 	m.eng.SnapshotFile(pe.path)
-	if err := os.WriteFile(pe.path, []byte(editedContent), 0o644); err != nil {
+	if _, err := engine.SafeWriteFile(pe.ctx, pe.root, pe.rel, []byte(editedContent), 0o644); err != nil {
 		// Not applied: the model must not be told "already applied".
 		pe.respCh <- approvalResponseMsg{allowed: false, cancelled: true}
 		os.Remove(pe.tmpFile)

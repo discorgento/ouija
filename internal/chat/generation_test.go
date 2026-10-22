@@ -268,11 +268,12 @@ func TestApprovalEditStaysInSandbox(t *testing.T) {
 // is reported as not applied.
 func TestEditorDone(t *testing.T) {
 	m, _ := newSwitchModel(t)
-	dir := t.TempDir()
-	target, tmp := filepath.Join(dir, "a.txt"), filepath.Join(dir, "tmp")
+	dir, tmpDir := t.TempDir(), t.TempDir()
+	target, tmp := filepath.Join(dir, "a.txt"), filepath.Join(tmpDir, "tmp")
 	os.WriteFile(tmp, []byte("edited"), 0o600)
 	resp := make(chan approvalResponseMsg, 1)
-	m.pendingEdit = &pendingEditFile{path: target, tmpFile: tmp, respCh: resp}
+	ctx := context.Background()
+	m.pendingEdit = &pendingEditFile{path: target, rel: "a.txt", root: dir, ctx: ctx, tmpFile: tmp, respCh: resp}
 	m.handleEditorDone(editorDoneMsg{})
 	if r := <-resp; !r.allowed || !r.skipExecution {
 		t.Fatalf("answer = %+v", r)
@@ -282,10 +283,36 @@ func TestEditorDone(t *testing.T) {
 	}
 
 	os.WriteFile(tmp, []byte("x"), 0o600)
-	m.pendingEdit = &pendingEditFile{path: filepath.Join(dir, "missing", "a.txt"), tmpFile: tmp, respCh: resp}
+	m.pendingEdit = &pendingEditFile{path: filepath.Join(dir, "a.txt", "b.txt"), rel: "a.txt/b.txt", root: dir, ctx: ctx, tmpFile: tmp, respCh: resp}
 	m.handleEditorDone(editorDoneMsg{})
 	if r := <-resp; r.allowed || r.skipExecution {
 		t.Fatalf("failed write answered %+v; want not applied", r)
+	}
+}
+
+// The editor may stay open for minutes: a symlink swapped in for the file
+// meanwhile must not carry the write out of the project.
+func TestEditorDoneRefusesALinkSwappedIn(t *testing.T) {
+	m, _ := newSwitchModel(t)
+	dir, outside, tmpDir := t.TempDir(), t.TempDir(), t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	os.WriteFile(secret, []byte("keep"), 0o600)
+	os.WriteFile(filepath.Join(dir, "a.txt"), []byte("orig"), 0o644)
+	tmp := filepath.Join(tmpDir, "tmp")
+	os.WriteFile(tmp, []byte("edited"), 0o600)
+	resp := make(chan approvalResponseMsg, 1)
+	m.pendingEdit = &pendingEditFile{path: filepath.Join(dir, "a.txt"), rel: "a.txt", root: dir, ctx: context.Background(), tmpFile: tmp, respCh: resp}
+
+	os.Remove(filepath.Join(dir, "a.txt"))
+	if err := os.Symlink(secret, filepath.Join(dir, "a.txt")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	m.handleEditorDone(editorDoneMsg{})
+	if r := <-resp; r.allowed {
+		t.Fatalf("write through a swapped link answered %+v; want refused", r)
+	}
+	if b, _ := os.ReadFile(secret); string(b) != "keep" {
+		t.Fatalf("file outside the project = %q; want it untouched", b)
 	}
 }
 
@@ -294,7 +321,7 @@ func TestDebugToggle(t *testing.T) {
 	m, _ := newSwitchModel(t)
 	t.Setenv("TMPDIR", t.TempDir())
 	m.handleSlash("/debug")
-	if m.debugLog == nil || !strings.Contains(m.lines[len(m.lines)-1].text, "ouija-chat-debug.log") {
+	if m.debugLog == nil || !strings.Contains(m.lines[len(m.lines)-1].text, "chat-debug.log") {
 		t.Fatalf("on: file=%v msg=%q", m.debugLog, m.lines[len(m.lines)-1].text)
 	}
 	m.handleSlash("/debug")
