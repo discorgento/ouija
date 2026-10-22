@@ -28,6 +28,24 @@ func SafeJoin(root, rel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if filepath.IsAbs(rel) {
+		// An absolute path names that file, inside the project or not: it
+		// used to be joined onto the root, so reading the project's own
+		// /home/me/proj/main.go found nothing and writing it created
+		// home/me/proj/main.go inside the project. The root as given counts
+		// too, besides its canonical form (macOS /tmp is /private/tmp).
+		abs := filepath.Clean(rel)
+		for _, base := range []string{rootAbs, filepath.Clean(root)} {
+			if filepath.IsAbs(base) && within(base, abs) {
+				r, err := filepath.Rel(base, abs)
+				if err != nil {
+					break
+				}
+				return filepath.Join(rootAbs, r), nil
+			}
+		}
+		return "", fmt.Errorf("path escapes the project root: %s is outside the project; use a path relative to it", rel)
+	}
 	full, err := filepath.Abs(filepath.Join(rootAbs, rel))
 	if err != nil {
 		return "", err
@@ -57,6 +75,9 @@ func resolve(ctx context.Context, root, p string) (string, error) {
 		// Lexical escape — check for pre-approved escape in context
 		if escaped, _ := ctx.Value(escapeKey{}).(string); escaped != "" {
 			return approvedEscape(escaped, p)
+		}
+		if filepath.IsAbs(p) {
+			return "", fmt.Errorf("path escapes the sandbox: %s is outside the project; use a path relative to the project root", p)
 		}
 		return "", fmt.Errorf("path escapes the sandbox: %s", p)
 	}
