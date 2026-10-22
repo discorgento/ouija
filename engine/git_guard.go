@@ -15,35 +15,60 @@ import (
 // user, and conversation compression keeps them.
 const GitGuardMarker = "⚠ git guard:"
 
-// gitGuardSnapshot fingerprints what git runs without being asked: the hooks
-// and the repository config (core.fsmonitor, core.pager, aliases…). A command
-// — even one confined by the sandbox, which must leave .git writable — can
-// plant code there that runs, unconfined, the next time anyone runs git in
-// the project. nil when root is not a git work tree.
+// gitGuardSnapshot fingerprints what git runs without being asked: the hooks,
+// the configs (core.fsmonitor, core.pager, aliases…) — the repository's,
+// config.worktree, each submodule's and linked worktree's —, the files that
+// send git to another directory (commondir, the .git pointer) and
+// info/attributes: what restoreGitState watches. A command — even one
+// confined by the sandbox, which must leave .git writable — can plant code
+// there that runs, unconfined, the next time anyone runs git in the project.
+// nil when root is not a git work tree.
 func gitGuardSnapshot(root string) map[string]string {
+	nested, _ := nestedRepos(root)
+	return gitGuardSnapshotOf(root, nested)
+}
+
+// gitGuardSnapshotOf fingerprints root's repository and the nested ones.
+func gitGuardSnapshotOf(root string, nested []string) map[string]string {
+	var snap map[string]string
+	for _, wt := range append([]string{root}, nested...) {
+		for p, sum := range gitRepoSnapshot(wt) {
+			if snap == nil {
+				snap = map[string]string{}
+			}
+			snap[p] = sum
+		}
+	}
+	return snap
+}
+
+// gitRepoSnapshot fingerprints one repository; nil when root is not a work
+// tree.
+func gitRepoSnapshot(root string) map[string]string {
 	gitDir := gitDirOf(root)
 	if gitDir == "" {
 		return nil
 	}
 	snap := map[string]string{}
 	add := func(path string) {
-		fi, err := os.Lstat(path)
-		if err != nil || fi.IsDir() {
+		f, ok := readGitFile(path)
+		switch {
+		case !ok:
+			return
+		case f.dir:
+			snap[path] = "dir"
 			return
 		}
-		b, err := os.ReadFile(path)
-		if err != nil && fi.Mode()&os.ModeSymlink == 0 {
-			return
-		}
-		target, _ := os.Readlink(path) // a hook may be a symlink to a script
-		sum := sha256.Sum256(append(b, target...))
-		snap[path] = fmt.Sprintf("%x %v", sum[:8], fi.Mode())
+		sum := sha256.Sum256(append(f.data, f.link...)) // a hook may be a symlink to a script
+		snap[path] = fmt.Sprintf("%x %v", sum[:8], f.mode)
 	}
-	add(filepath.Join(gitDir, "config"))
-	if entries, err := os.ReadDir(filepath.Join(gitDir, "hooks")); err == nil {
-		for _, e := range entries {
-			add(filepath.Join(gitDir, "hooks", e.Name()))
-		}
+	add(filepath.Join(root, ".git"))
+	commonDir := commonDirOf(gitDir)
+	for p := range gitWatched(gitDir, commonDir) {
+		add(p)
+	}
+	for p := range hookPathsOf(root, gitDir, commonDir) {
+		add(p)
 	}
 	return snap
 }

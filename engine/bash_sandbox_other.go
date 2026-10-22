@@ -18,3 +18,6 @@ func confinedShell(context.Context, sandboxPolicy, string) (*exec.Cmd, error) {
 }
 
 var sandboxReadDirs, sandboxReadFiles, sandboxWriteFiles []string
+
+// pidNamespaceAvailable: there are no PID namespaces here.
+func pidNamespaceAvailable() bool { return false }

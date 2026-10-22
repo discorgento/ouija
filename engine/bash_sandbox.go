@@ -395,5 +395,63 @@ var checkSandbox = sandboxAvailable
 // (Linux with a recent enough Landlock), and why not when it cannot.
 func SandboxAvailable() error { return sandboxAvailable() }
 
+// SandboxEndsDetachedJobs reports whether a confined command runs in a PID
+// namespace of its own (Linux, where user namespaces are allowed), so even
+// a process it detached (setsid) ends with it.
+func SandboxEndsDetachedJobs() bool { return pidNamespaceAvailable() }
+
 // errSandboxUnsupported is returned where the OS cannot confine a command.
 var errSandboxUnsupported = errors.New("the bash sandbox needs Linux (Landlock) or macOS (Seatbelt)")
+
+// SandboxFallbackWarning is what to tell the user when the default sandbox
+// is on but this machine cannot enforce it (no Landlock, a Landlock ABI too
+// old, no sandbox-exec): bash then runs unconfined. "" when bash is confined,
+// or when the config turned the sandbox off or asked for it (then bash
+// refuses instead).
+func SandboxFallbackWarning(sb *SandboxConfig) string {
+	if sb == nil || !sb.Enabled || !sb.Optional {
+		return ""
+	}
+	err := checkSandbox()
+	if err == nil {
+		return ""
+	}
+	why := strings.TrimPrefix(err.Error(), errSandboxUnsupported.Error()+": ")
+	return "bash sandbox unavailable (" + why + "): commands run unconfined, after your approval — `ouija doctor` says more"
+}
+
+// SandboxWarning is SandboxFallbackWarning for the engine's sandbox.
+func (e *Engine) SandboxWarning() string { return SandboxFallbackWarning(e.tools.sandbox) }
+
+// sandboxFallbackNotice shows the fallback warning once per process, on the
+// first command that runs unconfined because of it. On stderr by default (a
+// one-shot run, the MCP server); the chat, which says it in the transcript
+// when it starts, replaces it.
+var sandboxFallbackNotice = struct {
+	sync.Mutex
+	once bool
+	show func(string)
+}{show: func(msg string) { fmt.Fprintln(os.Stderr, "ouija: ⚠ "+msg) }}
+
+// SetSandboxFallbackNotice replaces how the fallback warning is shown; nil
+// silences it.
+func SetSandboxFallbackNotice(show func(string)) {
+	sandboxFallbackNotice.Lock()
+	defer sandboxFallbackNotice.Unlock()
+	sandboxFallbackNotice.show = show
+}
+
+// noticeSandboxFallback shows the fallback warning for sb, once.
+func noticeSandboxFallback(sb *SandboxConfig) {
+	sandboxFallbackNotice.Lock()
+	defer sandboxFallbackNotice.Unlock()
+	if sandboxFallbackNotice.once {
+		return
+	}
+	if msg := SandboxFallbackWarning(sb); msg != "" {
+		sandboxFallbackNotice.once = true
+		if sandboxFallbackNotice.show != nil {
+			sandboxFallbackNotice.show(msg)
+		}
+	}
+}

@@ -5,7 +5,11 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
+	"sync"
+	"syscall"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
 	llsyscall "github.com/landlock-lsm/go-landlock/landlock/syscall"
@@ -26,6 +30,12 @@ func sandboxAvailable() error {
 	}
 	if v < minSandboxABI {
 		return fmt.Errorf("%w: Landlock ABI %d is too old, need %d (a recent kernel: older ones cannot confine Unix sockets)", errSandboxUnsupported, v, minSandboxABI)
+	}
+	// Landlock filters TCP and UDP only: without the seccomp filter, which
+	// knows x86-64 and arm64, ICMP, SCTP and MPTCP would carry data out of a
+	// closed sandbox.
+	if _, ok := seccompArches[runtime.GOARCH]; !ok {
+		return fmt.Errorf("%w: the sandbox's socket filter does not support %s", errSandboxUnsupported, runtime.GOARCH)
 	}
 	return nil
 }
@@ -63,7 +73,20 @@ func applySandbox(p sandboxPolicy) error {
 			rules = append(rules, landlock.BindUDP(0), landlock.ConnectSendUDP(53))
 		}
 	}
-	return cfg.BestEffort().Restrict(rules...)
+	if err := cfg.BestEffort().Restrict(rules...); err != nil {
+		return err
+	}
+	// Landlock filters only TCP and UDP: seccomp refuses every other socket,
+	// and UDP too where no port is open — and, whatever the network, reading
+	// another process's memory.
+	net := socketsPorts
+	switch {
+	case p.NetAll:
+		net = socketsAll
+	case len(p.ConnectTCP)+len(p.BindTCP) == 0:
+		net = socketsClosed
+	}
+	return confineSockets(net)
 }
 
 // sandboxReadDirs are the system directories a shell and common tools need.
@@ -86,7 +109,42 @@ var sandboxWriteFiles = []string{
 	"/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom", "/dev/tty",
 }
 
-// confinedShell runs the command under Landlock, through a re-exec.
+// confinedShell runs the command under Landlock, through a re-exec, in a
+// PID namespace of its own where the kernel allows one.
 func confinedShell(ctx context.Context, policy sandboxPolicy, command string) (*exec.Cmd, error) {
-	return reexecShell(ctx, policy, command)
+	cmd, err := reexecShell(ctx, policy, command)
+	if err == nil && pidNamespaceAvailable() {
+		ownPIDNamespace(cmd)
+	}
+	return cmd, err
 }
+
+// ownPIDNamespace starts cmd in new user and PID namespaces: the shell is
+// PID 1 there, and when it exits the kernel kills every process left in the
+// namespace before the wait returns — a job that called setsid or forked
+// twice, out of the process group's reach, included. The user namespace
+// maps the user to itself only, so files keep their owner and the shell,
+// started as that user, holds no capabilities.
+func ownPIDNamespace(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	uid, gid := os.Getuid(), os.Getgid()
+	cmd.SysProcAttr.Cloneflags |= syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID
+	cmd.SysProcAttr.UidMappings = []syscall.SysProcIDMap{{ContainerID: uid, HostID: uid, Size: 1}}
+	cmd.SysProcAttr.GidMappings = []syscall.SysProcIDMap{{ContainerID: gid, HostID: gid, Size: 1}}
+}
+
+// pidNamespaceAvailable reports whether this user may create the namespaces
+// ownPIDNamespace asks for: some distributions (Ubuntu's AppArmor policy),
+// containers and kernel.unprivileged_userns_clone=0 forbid it, and then the
+// process group is the only bound on the command's processes.
+var pidNamespaceAvailable = sync.OnceValue(func() bool {
+	shell, err := posixShell()
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command(shell, "-c", ":")
+	ownPIDNamespace(cmd)
+	return cmd.Run() == nil
+})

@@ -33,12 +33,14 @@ const (
 // Timeout is 30s by default; the model can request longer via the timeout field.
 // Returns the combined output, trimmed to maxToolBytes.
 func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
-	before, state := gitGuardSnapshot(root), captureGitState(root)
+	nested, _ := nestedRepos(root)
+	before, state := gitGuardSnapshotOf(root, nested), captureGitStates(root, nested)
 	res, confined := execBash(ctx, root, in)
+	nested, complete := nestedRepos(root)
 	if confined {
 		// Confined means the user approved nothing outside the project:
 		// what the command left for git to run on its own is put back.
-		if undone := restoreGitState(root, state); len(undone) > 0 {
+		if undone := restoreGitStates(root, state, nested); len(undone) > 0 {
 			note := GitGuardMarker + " the sandboxed command changed what git runs on its own; ouija put back " +
 				strings.Join(undone, ", ")
 			if res.Error != nil {
@@ -48,7 +50,15 @@ func bashTool(ctx context.Context, root string, in map[string]any) ToolResult {
 			}
 		}
 	}
-	if notice := gitGuardNotice(root, before, gitGuardSnapshot(root)); notice != "" {
+	if !complete {
+		note := fmt.Sprintf("%s the project has more than %d directories: git repositories nested deep in it were not checked for hooks or config this command planted", GitGuardMarker, nestedRepoMaxDirs)
+		if res.Error != nil {
+			res.Error.Message += "\n" + note
+		} else {
+			res.Data = strings.TrimSpace(res.Data + "\n\n" + note)
+		}
+	}
+	if notice := gitGuardNotice(root, before, gitGuardSnapshotOf(root, nested)); notice != "" {
 		if res.Error != nil {
 			res.Error.Message += "\n" + notice
 		} else {
@@ -116,6 +126,7 @@ func execBash(ctx context.Context, root string, in map[string]any) (res ToolResu
 		case sb.Optional && errors.Is(err, errSandboxUnsupported):
 			// The default sandbox, on an OS that cannot enforce it: run as
 			// without one. A sandbox a config asked for never gets here.
+			noticeSandboxFallback(sb)
 			sb = nil
 		default:
 			// Fail closed: never run unconfined what should be confined.
@@ -131,9 +142,12 @@ func execBash(ctx context.Context, root string, in map[string]any) (res ToolResu
 		cmd.Env = sanitizeEnv()
 	}
 	cmd.Dir = root
-	// WaitDelay bounds how long the process may survive after ctx cancellation.
-	// On Unix the Cancel function (set by CommandContext) sends SIGKILL, which
-	// is instantaneous, so this is a safety net for edge cases.
+	// Its own process group: when the command ends, or is cancelled, every
+	// process it started is killed — before the git state is put back.
+	ownProcessGroup(cmd)
+	// WaitDelay bounds how long the process may survive after ctx cancellation,
+	// and how long a background job may hold the output open after the shell
+	// exited (then it is killed with the group).
 	cmd.WaitDelay = 3 * time.Second
 
 	var stdout, stderr bytes.Buffer
@@ -141,6 +155,15 @@ func execBash(ctx context.Context, root string, in map[string]any) (res ToolResu
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+	killProcessGroup(cmd)
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil {
+		// The shell exited; a background job it left held the output open
+		// until it was killed. The shell's status is the command's.
+		err = nil
+		if !cmd.ProcessState.Success() {
+			err = &exec.ExitError{ProcessState: cmd.ProcessState}
+		}
+	}
 
 	// Capture output even on non-zero exit.
 	out := strings.TrimSpace(stdout.String())

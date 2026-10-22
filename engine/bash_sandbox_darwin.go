@@ -208,3 +208,6 @@ func seatbeltProfile(p sandboxPolicy) (string, []string) {
 	b.WriteString(seatbeltDeny)
 	return b.String(), params
 }
+
+// pidNamespaceAvailable: there are no PID namespaces here.
+func pidNamespaceAvailable() bool { return false }
