@@ -161,10 +161,10 @@ cover: ## Generate a coverage report (coverage.html)
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "ok → coverage.html"
 
-screens: ## Regenerate the README screenshots (assets/screens/*.png; needs Chrome/Chromium)
+screens: ## Regenerate the README visuals (assets/screens/*.png and assets/*.gif; needs Chrome/Chromium)
 	@d=$$(mktemp -d); trap 'rm -rf "$$d"' EXIT; \
-	$(GO) test ./internal/chat -run '^TestScreenshots$$' -count=1 -screens="$$d" && \
-	$(GO) run ./internal/tools/screenshots -in "$$d" -out assets/screens
+	$(GO) test ./internal/chat -run '^Test(Screenshots|Demo|InstallChat)$$' -count=1 -screens="$$d" && \
+	$(GO) run ./internal/tools/screenshots -in "$$d" -out assets/screens -gif-out assets -gif demo
 
 clean: ## Remove binaries and release artifacts
 	rm -f $(BIN) $(BIN_MCP) coverage.out coverage.html

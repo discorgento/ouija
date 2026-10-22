@@ -1,11 +1,12 @@
 // Command screenshots turns the chat scenes written by
 // `go test ./internal/chat -run Screenshots -screens=<dir>` (ANSI, one .ans
-// file per scene) into the README's PNGs: each scene is drawn as HTML in a
-// window frame like assets/install.gif's, and headless Chrome captures it.
+// file per scene) into the README's visuals: each still is drawn as HTML in
+// a window frame like assets/install.gif's, and headless Chrome captures it;
+// each animation's frames (a directory of them) become a GIF.
 //
 // Usage:
 //
-//	go run ./internal/tools/screenshots -in <dir> -out assets/screens
+//	go run ./internal/tools/screenshots -in <dir> -out assets/screens -gif-out assets
 //
 // `make screens` runs both steps. Every PNG has the same size: the terminal
 // is cols×rows cells, the window -width CSS pixels at -scale device pixels
@@ -32,8 +33,11 @@ import (
 func main() {
 	in := flag.String("in", "", "directory with the scenes' .ans files")
 	out := flag.String("out", "assets/screens", "directory for the PNGs")
-	cols := flag.Int("cols", 142, "terminal width in cells (the scenes' width)")
-	rows := flag.Int("rows", 37, "terminal height in cells (the scenes' height)")
+	gifOut := flag.String("gif-out", "assets", "directory for the GIFs")
+	gifs := flag.String("gif", "", "the animations to render (comma separated; every one by default)")
+	gifScale := flag.Int("gif-scale", 1, "device pixels per CSS pixel in the GIFs")
+	cols := flag.Int("cols", 100, "terminal width in cells (the scenes' width)")
+	rows := flag.Int("rows", 30, "terminal height in cells (the scenes' height)")
 	width := flag.Int("width", 800, "window width in CSS pixels")
 	scale := flag.Int("scale", 2, "device pixels per CSS pixel")
 	title := flag.String("title", "ouija chat", "the title bar's label")
@@ -67,6 +71,51 @@ func main() {
 		}
 		fmt.Printf("ok → %s (%dx%d)\n", filepath.Join(*out, name+".png"), *width**scale, l.height**scale)
 	}
+
+	// The animations: a directory of frames each.
+	animations, err := filepath.Glob(filepath.Join(*in, "*"))
+	if err != nil {
+		fail(err)
+	}
+	if err := os.MkdirAll(*gifOut, 0o755); err != nil {
+		fail(err)
+	}
+	for _, dir := range animations {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		name := filepath.Base(dir)
+		if !wanted(*gifs, name) {
+			continue
+		}
+		frames, err := readFrames(dir)
+		if err != nil {
+			fail(fmt.Errorf("%s: %w", name, err))
+		}
+		gifPath, err := filepath.Abs(filepath.Join(*gifOut, name+".gif"))
+		if err != nil {
+			fail(err)
+		}
+		if err := writeGIF(chrome, l, *title, frames, gifPath, *gifScale); err != nil {
+			fail(fmt.Errorf("%s: %w", name, err))
+		}
+		fmt.Printf("ok → %s (%d frames)\n", filepath.Join(*gifOut, name+".gif"), len(frames))
+	}
+}
+
+// wanted tells whether the animation is one the -gif list names (every one
+// when the list is empty).
+func wanted(list, name string) bool {
+	if list == "" {
+		return true
+	}
+	for _, n := range strings.Split(list, ",") {
+		if strings.TrimSpace(n) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func fail(err error) {
