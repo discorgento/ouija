@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -160,6 +161,46 @@ func TestResourceReadRefusesABroadRoot(t *testing.T) {
 	resultOf(t, readURI(t, testServer(proj), resourceProjectURI))
 }
 
+// Started from / or the home folder, tool calls are refused too: the totem's
+// sandbox would be all the user's files, readable, searchable and writable.
+// The error tells the user how to fix it, and no totem runs.
+func TestToolCallRefusesABroadRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	linkToHome := filepath.Join(t.TempDir(), "homelink")
+	if err := os.Symlink(home, linkToHome); err != nil {
+		linkToHome = home
+	}
+	for _, root := range []string{string(filepath.Separator), home, filepath.Dir(home), linkToHome} {
+		s := testServer(root)
+		ran := false
+		s.run = func(context.Context, string, registry.Args) (any, error) { ran = true; return "done", nil }
+		res := resultOf(t, callOn(t, s, taskCall(1)))
+		if res["isError"] != true {
+			t.Errorf("root %s: tool call not refused: %v", root, res)
+		}
+		text := res["content"].([]any)[0].(map[string]any)["text"].(string)
+		if !strings.HasPrefix(text, "CONFIG: ") || !strings.Contains(text, "project directory") {
+			t.Errorf("root %s: refusal does not say how to fix it: %q", root, text)
+		}
+		if ran {
+			t.Errorf("root %s: the totem ran", root)
+		}
+	}
+	// A project inside the home folder runs the totem.
+	proj := filepath.Join(home, "proj")
+	if err := os.Mkdir(proj, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s := testServer(proj)
+	ran := false
+	s.run = func(context.Context, string, registry.Args) (any, error) { ran = true; return "done", nil }
+	if res := resultOf(t, callOn(t, s, taskCall(1))); res["isError"] != false || !ran {
+		t.Fatalf("project root: %v, ran=%v", res, ran)
+	}
+}
+
 // A resources/read the client cancelled gets no answer, like a tool call.
 func TestResourceReadCancelledIsNotAnswered(t *testing.T) {
 	s := testServer(t.TempDir())
@@ -209,5 +250,34 @@ func TestCallKeyByValue(t *testing.T) {
 	}
 	if callKey([]byte(`"1"`)) == callKey([]byte("1")) {
 		t.Error(`the string "1" and the number 1 share a key`)
+	}
+}
+
+// An empty or redirected HOME does not hide the real home folder: the
+// account database names it too. With no home folder known at all, a root
+// near the top of the filesystem is refused.
+func TestBroadRootWithoutHOME(t *testing.T) {
+	u, err := user.Current()
+	if err != nil || u.HomeDir == "" {
+		t.Skip("no home folder in the account database")
+	}
+	for _, home := range []string{"", t.TempDir()} {
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		if !broadRoot(u.HomeDir) {
+			t.Errorf("HOME=%q: the real home folder %s is not refused", home, u.HomeDir)
+		}
+		if !broadRoot(filepath.Dir(u.HomeDir)) {
+			t.Errorf("HOME=%q: the folder above home is not refused", home)
+		}
+	}
+	sep := string(filepath.Separator)
+	for _, root := range []string{sep + "home", filepath.Join(sep+"home", "me")} {
+		if !broadRootOf(root, nil) {
+			t.Errorf("no home known: %s not refused", root)
+		}
+	}
+	if deep := filepath.Join(t.TempDir(), "a", "proj"); broadRootOf(deep, nil) {
+		t.Errorf("no home known: %s refused", deep)
 	}
 }
