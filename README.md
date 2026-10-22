@@ -22,6 +22,34 @@ Protocol, lets editors such as Claude Code or Cursor call outside tools).
   <img src="assets/demo.gif" alt="ouija doctor checking the setup, then the chat: a failing test, the fix shown as a diff and approved, the test passing, and /review verifying its findings" width="800">
 </p>
 
+## Quick start
+
+One command installs ouija, no Go needed:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh   # Linux, macOS
+irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex       # Windows
+```
+
+<p align="center">
+  <img src="assets/install.gif" alt="A real install: the curl command, the PATH and setup questions, the three setup steps with the model list searched for free models, then ouija opening the chat in a project" width="800">
+</p>
+
+It offers to add ouija to your `PATH` and opens the setup: pick a provider,
+paste its key (checked right away) and pick a model. Pick Ollama to run
+locally and for free. Then, inside any project:
+
+```sh
+cd /path/to/your/project
+ouija                      # the chat: explore and edit code, approve diffs
+ouija task "describe X"    # one-shot: verified plan (scout → N passes → reconcile)
+```
+
+If something does not work, run `ouija doctor`. To build from source instead,
+see [Install](#install).
+
+## Why ouija
+
 > **Why not a prompt file?** Written as prose, "Do A, then verify B, then
 > reconcile" is a request the model may skip. Written in Go, each step is the
 > next line of code, and you can test it.
@@ -48,36 +76,10 @@ flowchart LR
 The engine knows nothing about tasks or documents; each totem defines its own
 flow on top of it. See [Architecture](docs/explanation/architecture.md).
 
-## Quick start
-
-One command installs ouija, no Go needed:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh   # Linux, macOS
-irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex       # Windows
-```
-
-It offers to add ouija to your `PATH` and opens the setup: pick a provider,
-paste its key (checked right away) and pick a model. Pick Ollama to run
-locally and for free. Then, inside any project:
-
-```sh
-cd /path/to/your/project
-ouija                      # the chat: explore and edit code, approve diffs
-ouija task "describe X"    # one-shot: verified plan (scout → N passes → reconcile)
-```
-
-<p align="center">
-  <img src="assets/install.gif" alt="A real install: the curl command, the PATH and setup questions, the three setup steps with the model list searched for free models, then ouija opening the chat in a project" width="720">
-</p>
-
-If something does not work, run `ouija doctor`. To build from source instead,
-see [Install](#install).
-
 ## The chat
 
 <p align="center">
-  <img src="assets/screens/chat-welcome.png" alt="ouija chat: the welcome screen — the logo and four places to start" width="720">
+  <img src="assets/screens/chat-welcome.png" alt="ouija chat: the welcome screen — the logo and four places to start" width="800">
 </p>
 
 Each reply shows what it did. One line lists the tools the turn used (a failed
@@ -87,7 +89,7 @@ cost. Every file change appears as a diff, side by side on a wide terminal.
 `ouija chat -c` resumes the last conversation.
 
 <p align="center">
-  <img src="assets/screens/chat-conversation.png" alt="A reply with its tools, a failed test's output and the diff it applied" width="720">
+  <img src="assets/screens/chat-conversation.png" alt="A reply with its tools, a failed test's output and the diff it applied" width="800">
 </p>
 
 You can run the totems inside the chat. `/task "add a cache"` shows each step
@@ -95,11 +97,11 @@ of the `task` totem live: the scout that surveys the code, every independent
 pass, and the reconcile step that merges them. It ends with the plan.
 
 <p align="center">
-  <img src="assets/screens/chat-task.png" alt="/task in the chat: the scout and the passes drawn live" width="720">
+  <img src="assets/screens/chat-task.png" alt="/task in the chat: the scout and the passes drawn live" width="800">
 </p>
 
 <p align="center">
-  <img src="assets/screens/chat-diff.png" alt="A diff side by side, syntax-highlighted" width="860">
+  <img src="assets/screens/chat-diff.png" alt="A diff side by side, syntax-highlighted" width="800">
 </p>
 
 Keys, commands and themes: [Chat TUI](docs/how-to/chat.md) ·
