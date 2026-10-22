@@ -179,7 +179,7 @@ func TestPathWithControlCharRefusedBeforePrompt(t *testing.T) {
 		Doom:  &DoomDetector{},
 	})
 	for _, tool := range []string{"write_file", "read_file", "delete_file"} {
-		for _, p := range []string{"docs/notes.md\n\n  will create docs/notes.md/../../Makefile", "a\tb", "a‮b", "a\x1b[2Jb"} {
+		for _, p := range []string{"docs/notes.md\n\n  will create docs/notes.md/../../Makefile", "a\tb", "a\u202eb", "a\x1b[2Jb"} {
 			res := r.Run(context.Background(), "t", ToolCall{Name: tool, Input: map[string]any{"path": p, "content": "x"}}, nil, nil)
 			if res.Error == nil || res.Error.Code != ErrCodeInvalidInput {
 				t.Fatalf("%s %q: %+v, want refused", tool, p, res)
