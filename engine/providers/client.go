@@ -31,10 +31,68 @@ func NewClient(timeout time.Duration) *Client {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = timeout
 	return &Client{
-		HTTP:    &http.Client{Transport: tr},
+		HTTP:    &http.Client{Transport: tr, CheckRedirect: sameHostRedirect},
 		Circuit: NewCircuitBreaker(),
 	}
 }
+
+// sameHostRedirect follows a redirect only to the same scheme and host. Go
+// drops Authorization and Cookie on a redirect to another host, but not the
+// other headers: the API key in x-api-key (and any extra header a provider
+// sends) would reach whatever host the redirect names. A refused redirect
+// comes back as the 3xx response itself, which callers report as an HTTP
+// error (it is not retried).
+func sameHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if first := via[0].URL; req.URL.Host != first.Host || req.URL.Scheme != first.Scheme {
+		return http.ErrUseLastResponse
+	}
+	return nil
+}
+
+// Response size limits. A provider's reply is tokens, far below these; they
+// only stop a broken or hostile endpoint from filling the memory.
+const (
+	maxBodyBytes    = 32 << 20 // a whole JSON or error response
+	maxSSELineBytes = 8 << 20  // one SSE line
+	maxSSEEvent     = 32 << 20 // one event's data, across its lines
+)
+
+// readBody reads at most maxBodyBytes of r, failing past it instead of
+// returning a truncated body that would parse as something else.
+func readBody(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBodyBytes+1))
+	if err != nil {
+		return data, err
+	}
+	if len(data) > maxBodyBytes {
+		return nil, fmt.Errorf("response larger than %d MiB", maxBodyBytes>>20)
+	}
+	return data, nil
+}
+
+// maxReplyBytes caps the text and tool input one streamed response adds up
+// to. Each event is capped above, but a stream of small events never ends on
+// its own: a hostile endpoint would grow the reply until memory runs out.
+const maxReplyBytes = 64 << 20
+
+// replySize counts what a stream has added to a response.
+type replySize int
+
+// add counts n more bytes of text or tool input, failing past maxReplyBytes.
+func (r *replySize) add(n int) error {
+	*r += replySize(n)
+	if *r > maxReplyBytes {
+		return engine.ErrProvider(fmt.Sprintf("response larger than %d MiB of text and tool input: the provider is broken or hostile", maxReplyBytes>>20))
+	}
+	return nil
+}
+
+// errSSETooLarge ends a stream whose line or event passed the limits.
+var errSSETooLarge = fmt.Errorf("SSE: an event passed the size limit (%d MiB a line, %d MiB an event)",
+	maxSSELineBytes>>20, maxSSEEvent>>20)
 
 // emptyTurn stands in for an assistant turn that produced no text and no tool
 // calls: both APIs reject such a message, which would fail every later call of
@@ -107,7 +165,7 @@ func (c *Client) PostJSON(ctx context.Context, url string, headers map[string]st
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := readBody(resp.Body)
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
 	}
@@ -121,7 +179,7 @@ func (c *Client) GetJSON(ctx context.Context, url string, headers map[string]str
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := readBody(resp.Body)
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read response body: %w", err)
 	}
@@ -139,7 +197,7 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		raw, readErr := io.ReadAll(resp.Body)
+		raw, readErr := readBody(resp.Body)
 		if readErr != nil {
 			return engine.ErrProvider(fmt.Sprintf("SSE: HTTP %d (body read error)", resp.StatusCode), readErr)
 		}
@@ -153,9 +211,12 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 	var dataBuf bytes.Buffer
 
 	for {
-		line, err := br.ReadString('\n')
+		line, err := readLine(br)
 		if len(line) > 0 {
 			engine.NotifyActivity(ctx) // the stream is alive, even if this is a keep-alive
+		}
+		if errors.Is(err, errSSETooLarge) {
+			return engine.ErrProvider(err.Error())
 		}
 		if err != nil {
 			if err == io.EOF {
@@ -186,6 +247,9 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 
 		case strings.HasPrefix(line, "data:"):
 			data := strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")
+			if dataBuf.Len()+len(data) >= maxSSEEvent {
+				return engine.ErrProvider(errSSETooLarge.Error())
+			}
 			if dataBuf.Len() > 0 {
 				dataBuf.WriteByte('\n')
 			}
@@ -194,5 +258,22 @@ func (c *Client) PostSSE(ctx context.Context, url string, headers map[string]str
 		default:
 			// Ignore SSE comments (":") and unrecognized lines (e.g. "id:", "retry:").
 		}
+	}
+}
+
+// readLine is br.ReadString('\n') bounded by maxSSELineBytes: a server that
+// never sends a newline would otherwise grow the line without limit.
+func readLine(br *bufio.Reader) (string, error) {
+	var b strings.Builder
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if b.Len()+len(chunk) > maxSSELineBytes {
+			return b.String(), errSSETooLarge
+		}
+		b.Write(chunk)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return b.String(), err
 	}
 }

@@ -3,6 +3,8 @@ package engine
 import (
 	"bytes"
 	"context"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -349,6 +351,30 @@ func TestWritePerfettoFile(t *testing.T) {
 	path := t.TempDir() + "/trace.json"
 	if err := tr.WritePerfettoFile(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A trace holds prompts and file contents: overwriting an older trace that
+// was world-readable makes it owner-only.
+func TestWritePerfettoFileTightensMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix modes")
+	}
+	tr := NewTracer(true)
+	tr.Start("chat").End()
+	path := t.TempDir() + "/trace.json"
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.WritePerfettoFile(path); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("trace mode = %v, want 0600", st.Mode().Perm())
 	}
 }
 

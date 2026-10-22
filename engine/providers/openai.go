@@ -185,6 +185,7 @@ func chatOpenAICompat(ctx context.Context, client *Client, name, baseURL, apiKey
 		toolByIndex := make(map[int]*oaiTool)
 		var usage engine.Usage
 		var stopReason string
+		var size replySize
 
 		err := client.PostSSE(ctx, baseURL+"/chat/completions", headers, raw,
 			func(eventType string, data []byte) error {
@@ -237,6 +238,9 @@ func chatOpenAICompat(ctx context.Context, client *Client, name, baseURL, apiKey
 				choice := chunk.Choices[0]
 
 				if choice.Delta.Content != nil {
+					if err := size.add(len(*choice.Delta.Content)); err != nil {
+						return err
+					}
 					if !yield(engine.StreamEvent{Type: engine.EventText, Text: *choice.Delta.Content}, nil) {
 						return errStopped
 					}
@@ -256,6 +260,9 @@ func chatOpenAICompat(ctx context.Context, client *Client, name, baseURL, apiKey
 					}
 					if tb.Name == "" {
 						tb.Name = tc.Function.Name
+					}
+					if err := size.add(len(tc.Function.Arguments)); err != nil {
+						return err
 					}
 					tb.Args.WriteString(tc.Function.Arguments)
 				}

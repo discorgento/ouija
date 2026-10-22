@@ -96,6 +96,7 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 		toolBlocks := make(map[int]*antTool)
 		var usage engine.Usage
 		var stopReason, refusal string
+		var size replySize
 
 		err := a.client.PostSSE(ctx, "https://api.anthropic.com/v1/messages", headers, raw,
 			func(eventType string, data []byte) error {
@@ -165,6 +166,9 @@ func (a *Anthropic) Chat(ctx context.Context, req engine.ChatRequest) iter.Seq2[
 					}
 					if json.Unmarshal(data, &cbd) != nil {
 						return nil
+					}
+					if err := size.add(len(cbd.Delta.Text) + len(cbd.Delta.PartialJSON)); err != nil {
+						return err
 					}
 					switch cbd.Delta.Type {
 					case "text_delta":
