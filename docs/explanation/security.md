@@ -310,8 +310,9 @@ for downloads, or `network.bind` for a dev server). The filter is by port, not
 by host, so an open port is open to every server. Since Landlock ABI v10 UDP
 is filtered as well: a closed sandbox sends no DNS query either (no data out
 through DNS), and opening any TCP port opens DNS (UDP 53) with it, no other
-UDP port. On a kernel with ABI v9, UDP is not filtered, so a DNS query can
-still carry data out.
+UDP port. On a kernel with ABI v9 Landlock does not filter UDP: with no port
+open the seccomp filter below refuses UDP sockets anyway, but once a port is
+open any UDP traffic goes out, DNS queries that can carry data included.
 
 Landlock filters TCP and UDP and no other protocol. MPTCP, which the kernel
 enables by default, reaches any server past Landlock's TCP rules, and so
