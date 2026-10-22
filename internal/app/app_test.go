@@ -697,6 +697,7 @@ func TestDiscoveryStopsAtHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on Windows
 	writeProjectConfig(t, filepath.Join(top, ".ouija.json"), `{"model":"planted"}`)
 	t.Chdir(proj)
 	if _, got, _, err := findConfigFile(""); err != nil || got != "" {
@@ -706,5 +707,29 @@ func TestDiscoveryStopsAtHome(t *testing.T) {
 	writeProjectConfig(t, filepath.Join(home, ".ouija.json"), `{"model":"mine"}`)
 	if _, got, _, err := findConfigFile(""); err != nil || got != filepath.Join(home, ".ouija.json") {
 		t.Fatalf("findConfigFile = %q, %v; want the home config", got, err)
+	}
+}
+
+// Home reached under another name — HOME through a symlink, as macOS's
+// /Users under /System/Volumes/Data, or a Windows short name — still stops
+// the walk: directories are compared as files, not as names.
+func TestDiscoveryStopsAtHomeUnderAnotherName(t *testing.T) {
+	isolateGlobalConfig(t)
+	top := t.TempDir()
+	real := filepath.Join(top, "real-home")
+	proj := filepath.Join(real, "proj")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(top, "home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	t.Setenv("HOME", link)
+	t.Setenv("USERPROFILE", link)
+	writeProjectConfig(t, filepath.Join(top, ".ouija.json"), `{"model":"planted"}`)
+	t.Chdir(proj)
+	if _, got, _, err := findConfigFile(""); err != nil || got != "" {
+		t.Fatalf("findConfigFile = %q, %v; want nothing found above home", got, err)
 	}
 }
