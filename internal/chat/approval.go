@@ -146,10 +146,22 @@ func displayToolName(tool string) string {
 
 // ─── Approval box rendering ────────────────────────────────────────────
 
-// approvalTitle says in words what the tool call asks to do.
+// approvalPath is the file a call touches, as the engine resolved it
+// (_path: cleaned, symlinks followed), else the path as the model gave it.
+func approvalPath(req *approvalRequestMsg) string {
+	if p, ok := req.input["_path"].(string); ok && p != "" {
+		return termsafe.Clean(p)
+	}
+	p, _ := req.input["path"].(string)
+	return termsafe.Clean(p)
+}
+
+// approvalTitle says in words what the tool call asks to do. A file is named
+// where the change lands, and through a symlink by both names: the model's
+// `docs/<long name>/../../Makefile` and a notes.txt linked to the Makefile
+// both read as harmless files and wrote the Makefile.
 func approvalTitle(req *approvalRequestMsg) string {
-	path, _ := req.input["path"].(string)
-	path = termsafe.Clean(path)
+	path := approvalPath(req)
 	if strings.HasPrefix(req.tool, "escape:") {
 		return "ouija wants to reach outside the project: " + displayToolName(req.tool)
 	}
@@ -158,7 +170,10 @@ func approvalTitle(req *approvalRequestMsg) string {
 	case baseTool(req.tool) == "bash":
 		return "ouija wants to run a command"
 	case verb != "" && path != "":
-		return "ouija wants to " + verb + " " + fileLink(path, path)
+		if via, _ := req.input["_via"].(string); via != "" {
+			return "ouija wants to " + verb + " " + termsafe.Clean(via) + " → " + path + " (symlink)"
+		}
+		return "ouija wants to " + verb + " " + path
 	}
 	return "ouija wants to use " + displayToolName(req.tool)
 }
@@ -175,14 +190,22 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width in
 	line := func(s string) { b.WriteString("  " + s + "\n") }
 
 	// ── What it asks, with the tool and call number on the right ───────
-	title := lipgloss.NewStyle().Bold(true).Foreground(toolColor).Render(approvalToolIcon(req.tool) + " " + approvalTitle(req))
+	// Wrapped, never cut: the file named is the file approved.
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(toolColor)
 	tag := lipgloss.NewStyle().Foreground(theme.Muted).Render(fmt.Sprintf("%s · #%d", displayToolName(req.tool), toolCallN))
-	if gap := inner - lipgloss.Width(title) - lipgloss.Width(tag); gap >= 2 {
-		title += strings.Repeat(" ", gap) + tag
-	} else {
-		title = ansi.Truncate(title, inner, "…")
+	titleLines := strings.Split(ansi.Wrap(approvalToolIcon(req.tool)+" "+approvalTitle(req), inner, ""), "\n")
+	for i, tl := range titleLines {
+		tl = titleStyle.Render(tl)
+		if p := approvalPath(req); len(titleLines) == 1 && p != "" && slices.Contains([]string{"write_file", "edit_file", "delete_file"}, baseTool(req.tool)) {
+			tl = fileLink(p, tl) // the file it lands on
+		}
+		if i == len(titleLines)-1 {
+			if gap := inner - lipgloss.Width(tl) - lipgloss.Width(tag); gap >= 2 {
+				tl += strings.Repeat(" ", gap) + tag
+			}
+		}
+		line(tl)
 	}
-	line(title)
 	b.WriteByte('\n')
 
 	// ── What would run or change ────────────────────────────────────
@@ -221,7 +244,7 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width in
 	if s, ok := req.input["_preview"].(string); ok && s != "" {
 		s = termsafe.Clean(s)
 		if strings.HasPrefix(s, "  @@") {
-			p, _ := req.input["path"].(string)
+			p := approvalPath(req)
 			for _, dl := range strings.Split(renderDiffBlock(p, s, inner), "\n") {
 				line(dl)
 			}
@@ -236,7 +259,9 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width in
 					if strings.Contains(pl, "⚠") {
 						style = style.Foreground(theme.Amber)
 					}
-					line(style.Render(ansi.Truncate(pl, inner, "…")))
+					for _, wl := range strings.Split(ansi.Wrap(pl, inner, ""), "\n") {
+						line(style.Render(wl)) // wrapped: it names the file
+					}
 				}
 			}
 		}
@@ -247,7 +272,7 @@ func RenderApprovalBox(req *approvalRequestMsg, toolCallN, selectedIdx, width in
 
 	// A file to be written: its content, as it will be.
 	if c, ok := req.input["content"].(string); ok && baseTool(req.tool) == "write_file" {
-		p, _ := req.input["path"].(string)
+		p := approvalPath(req)
 		for _, fl := range strings.Split(renderFilePreview(p, termsafe.Clean(c), inner), "\n") {
 			line(fl)
 		}

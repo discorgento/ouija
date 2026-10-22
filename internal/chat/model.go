@@ -213,6 +213,13 @@ type pendingEditFile struct {
 	path    string // real file path
 	tmpFile string // temp file path (opened in editor)
 	respCh  chan<- approvalResponseMsg
+
+	// The write goes through the sandbox again once the editor closes:
+	// rel under root, with the request's context (it carries an approved
+	// escape, if any).
+	rel  string
+	root string
+	ctx  context.Context
 }
 
 // newModel creates the chat model.

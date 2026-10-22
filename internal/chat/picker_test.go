@@ -98,3 +98,20 @@ func TestPickerWrapKeepsSelectionVisible(t *testing.T) {
 		t.Fatal("enter did not confirm")
 	}
 }
+
+// Picker items come from project configs and provider model lists: an escape
+// sequence in one must not reach the terminal, and an ID hiding one is not
+// offered at all.
+func TestPickerCleansItems(t *testing.T) {
+	p := &Picker{}
+	p.Show([]string{"gpt\x1b]52;c;ZXZpbA==\x07-4o\nx"}, nil, "Models")
+	if out := p.Render(80); strings.Contains(out, "]52;c;ZXZpbA==\x07") || strings.Contains(out, "\x1b]") {
+		t.Errorf("Render passed an escape sequence through: %q", out)
+	}
+	got := suggestedModelsFor(&engine.Config{ModelSuggestions: map[string][]string{
+		"openai": {"gpt‮4o", "gpt-4o"},
+	}}, "openai", nil)
+	if !slices.Equal(got, []string{"gpt-4o"}) {
+		t.Errorf("suggestedModelsFor = %q, want the ID with a bidi control dropped", got)
+	}
+}

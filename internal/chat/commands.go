@@ -517,8 +517,7 @@ func (m *model) toggleDebugLog() {
 		m.say("assistant", "debug logging: off")
 		return
 	}
-	path := filepath.Join(os.TempDir(), "ouija-chat-debug.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // prompts and file contents: owner only
+	f, path, err := openDebugLog()
 	if err != nil {
 		m.say("assistant", "debug logging: "+err.Error())
 		return
@@ -526,6 +525,38 @@ func (m *model) toggleDebugLog() {
 	m.debugLog = f
 	m.eng.SetLogger(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	m.say("assistant", "debug logging: on → "+path)
+}
+
+// openDebugLog opens the debug log for appending: chat-debug.log in the
+// user's cache directory, next to the sessions, in a directory only the user
+// can enter. The log holds prompts and file contents, so the file is the
+// user's alone too. A fixed name in the shared temp dir let another user
+// plant it first, or a symlink there, and read or redirect what was logged.
+func openDebugLog() (*os.File, string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return nil, "", err
+	}
+	dir := filepath.Join(cache, "ouija")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil { // MkdirAll keeps an existing mode
+		return nil, "", err
+	}
+	path := filepath.Join(dir, "chat-debug.log")
+	if fi, err := os.Lstat(path); err == nil && !fi.Mode().IsRegular() {
+		return nil, "", fmt.Errorf("%s is not a regular file (a link?): remove it to log there", path)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := f.Chmod(0o600); err != nil { // an older file may have kept a wider mode
+		f.Close()
+		return nil, "", err
+	}
+	return f, path, nil
 }
 
 // ─── /help ────────────────────────────────────────────────────────────
