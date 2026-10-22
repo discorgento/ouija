@@ -78,7 +78,8 @@ A few commands work on the conversation as a whole:
 - `/learn <fact>` teaches ouija a fact about the project. ouija saves it in
   `docs/knowledge.md` and uses it in every later chat and `/task`.
 - `/theme` picks the colors (ouija, catppuccin, dracula, mono). The chat
-  restarts at once with the new colors and the conversation restored.
+  restarts at once with the new colors and the conversation restored, except
+  on Windows, where the new colors apply at the next start.
 
 Every totem runs here as a slash command: `/task <description>`, `/doc`,
 `/sticker` and any totem you write. The chat draws the totem's passes live,
@@ -108,8 +109,9 @@ would apply, plus the other arguments. A file tool's prompt names the file the
 call really lands on, with `..` resolved and symlinks followed: through a link
 it shows both names (`notes.txt → Makefile (symlink)`). If that link changes
 while the prompt waits, the approved call is refused and the model must call
-again. Pick one of up to five options with the
-arrow keys:
+again. Pick one of the options with the arrow keys (**Edit** appears only
+for `edit_file`, and `delete_file` offers only **Delete**, **No** and
+**Cancel**):
 
 - **Yes** (`y`) — approve this call once.
 - **No** (`n`) — reject it. ouija tells the model to try a different approach.
@@ -121,12 +123,12 @@ arrow keys:
   adds no pattern, and neither does an approval to run outside the sandbox.
   ouija refuses to rewrite an untrusted config that sets trust-only keys; the
   approval then lasts for this session only.
-- **Edit** (`e`) — open the proposed change in `$EDITOR` (or `vi`, `notepad`
-  on Windows, if unset) and adjust it before approving.
+- **Edit** (`e`, `edit_file` only) — open the proposed change in `$EDITOR`
+  (or `vi`, `notepad` on Windows, if unset) and adjust it before approving.
 - **Cancel** (`esc`) — cancel the generation.
 
-Some tools use their own confirm key: `delete_file` asks for `d` (Delete)
-instead of `y`. No approval overrides the hard rules: ouija refuses a
+`delete_file` asks for `d` (**Delete**) instead of `y`, and offers no
+**Session** and no **Edit**. No approval overrides the hard rules: ouija refuses a
 denylisted command or a protected path (`.env`, `~/.ssh/*`, `/etc/*`) *before*
 it shows the prompt, and so it does a command or a path holding a control or
 invisible character the prompt could not show.

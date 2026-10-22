@@ -101,8 +101,9 @@ ouija learn "This project uses React with TypeScript"
 ouija learn                     # show current knowledge
 ```
 
-`learn` saves each fact to `docs/knowledge.md`, relative to the current
-directory. ouija adds the saved facts to the `task` scout's prompt and to the
+`learn` saves each fact to `docs/knowledge.md` at the project root: the
+directory of the project config ouija discovers, or the current directory when
+there is none. ouija adds the saved facts to the `task` scout's prompt and to the
 chat's system prompt.
 
 ## Live progress
@@ -118,8 +119,8 @@ the board and prints only the logs and the stats below.
   ouija task  ·  1m12s  ·  48.2k tok  ·  $0.21
   ✓ scout             8.1s
   ✓ p1:correctness   21.4s
-  ⣾ p1:risks         18.0s
-  ✗ p2:risks          3.1s  budget exceeded
+  ⣾ p1:security      18.0s
+  ✗ p2:security       3.1s  budget exceeded
 ```
 
 ## Per-run stats

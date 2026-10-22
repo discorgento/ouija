@@ -34,8 +34,8 @@ file its path names and that the file is not protected, so a link swapped to
 `.env` inside the project fails too. A write truncates only after that check.
 Only regular files and directories are opened, and the open never waits, so a
 FIFO made in the project (`mkfifo`) cannot hang a tool.
-A path with a control character (newline, tab, escape) or an invisible or
-bidi one is refused before any prompt: no file needs one, and a newline once
+A path with a control character (newline, tab, escape), an invisible one
+(zero-width, tag, other format) or a bidi one is refused before any prompt: no file needs one, and a newline once
 pushed the real target out of the prompt's view. `read_file` and `grep` read a
 line in bounded memory: `read_file` keeps 20 KB of a line and marks the cut,
 `grep` searches a line's first MB, so a single-line file of gigabytes cannot
@@ -65,7 +65,9 @@ sandbox). A `provider` or `model` other than the ones you chose in
 key, and what each token costs, so an untrusted file keeps yours. So does a
 `budget` above the defaults: an untrusted file may lower the token and step
 budget but never raise it. The same holds for what only costs money or time:
-a totem's `passes`, `streamTimeout` and `contextWindow` may only go down, and
+a totem's `passes` is capped at 3 (the totems' default), the top-level
+`streamTimeout` at 600 seconds and `contextWindow` at the model's catalog
+size (1,000,000 for a model the catalog does not know), and
 the token price may not go below zero (a negative price kept the spend at
 zero, so `budget.maxUSD` never tripped). A totem's `dimensions` go into the
 analysis prompts like `rules`, so an untrusted file's are dropped.
@@ -200,8 +202,9 @@ A `PermissionConfig` gates every tool call with one of three levels:
 In the chat TUI, `NewDefaultPermissionConfig` sets the defaults: read-only
 tools (`read_file`, `grep`, `glob`, `list_dir`) run without approval, and the
 tools that write or execute (`write_file`, `edit_file`, `delete_file`, `bash`)
-ask. Change a level at runtime with `/permit <tool> <allow|ask|deny>`, or set
-it in the project config. Once you reject a tool during a generation (the
+ask. Change a level at runtime with `/permit [tool] allow|ask|deny` (without a
+tool it sets the default level; bare `/permit` shows the levels), or set it in
+the project config. Once you reject a tool during a generation (the
 model's whole response to one message), ouija rejects every later call to that
 tool automatically and tells the model to try a different approach.
 
@@ -341,8 +344,9 @@ TCP and UDP over IPv4 and IPv6, Unix sockets and the local netlink and
 The filter knows x86-64 and arm64. There 32-bit programs cannot call
 `socketcall` at all (its arguments are out of a filter's reach). On any other
 architecture the sandbox counts as unavailable, as on a kernel without
-Landlock. `network.all` lifts the socket rules with the rest; the rules
-against reading other processes stay.
+Landlock. `network.all` lifts the socket rules with the rest, the 32-bit
+`socketcall` refusal included; `io_uring_setup` still fails with `ENOSYS`, and
+the rules against reading other processes stay.
 See [`tools.bash.sandbox`](../reference/config-schema.md#toolsbashsandbox).
 
 Every command, confined or not, runs in a process group of its own (Unix).
@@ -424,9 +428,12 @@ fresh agent run or a user approval resets the counter.
 ## The order of checks
 
 One function, `ToolRunner.Run`, decides every tool call. It runs the
-doom-loop check first, then refuses a bash command with a NUL byte or with a
-character the approval prompt would hide (a control character, a bidi
-override, a zero-width character), then runs the other static bash gates (denylist, protected paths) *before* any prompt.
+doom-loop check first, then refuses a `path` argument with a character the
+prompt cannot show (a control, invisible or bidi character), then refuses a
+bash command with a NUL byte or with a character the approval prompt would
+hide (a control character; an invisible one: zero-width, tag, other format; a
+bidi character), then runs the other static bash gates (denylist, protected
+paths) *before* any prompt.
 Next comes the prompt for a run outside the sandbox (`"unsandboxed": true`),
 then the permission level, then the allowlist, then execution.
 [Architecture → Tool gating](architecture.md#tool-gating-permissions) lists the
@@ -442,11 +449,12 @@ When a tool requires approval (`ask` level), the TUI shows:
   followed, shown with both names through a link
   (`notes.txt → Makefile (symlink)`). It wraps, never cut.
 - all input arguments
-- five options, chosen with the arrow keys: **Yes** (`y`), **No** (`n`),
-  **Session** (`s`, approves for the rest of the session), **Edit** (`e`, opens
-  the proposed content in `$EDITOR`), **Cancel** (`esc`). For `delete_file` the
-  destructive button reads **Delete** (`d`) instead of **Yes**, so a stray `y`
-  cannot delete a file.
+- the options, chosen with the arrow keys: **Yes** (`y`), **No** (`n`),
+  **Session** (`s`, approves for the rest of the session), **Cancel** (`esc`).
+  `edit_file` adds a fifth, **Edit** (`e`, opens the proposed change in
+  `$EDITOR`). `delete_file` offers only **Delete** (`d`), **No** and
+  **Cancel**: the destructive button reads **Delete** instead of **Yes**, so a
+  stray `y` cannot delete a file, and there is no **Session**.
 
 Approvals apply to the tool's **target**, not only to its name: choosing
 **Session** on `write_file` for `src/a.php` does not pre-approve `src/b.php`,
@@ -521,7 +529,8 @@ Google, never an attacker's server. Content injected through the repository ther
 use the render, or a later look at the HTML, to send data out. The totems
 (ouija's agent workflows) write to fixed outputs (`docs/task-plan.md`,
 `docs/<slug>.*`, `docs/sticker/`). Those outputs and `docs/knowledge.md` go
-through `engine.SafeResolve()`, so a symlink planted in the repository cannot redirect
+through `engine.SafeWriteFile()` and `engine.SafeOpenFile()` (the `doc` PDF's
+path through `engine.SafeResolve()`), so a symlink planted in the repository cannot redirect
 them outside the project or onto a protected file.
 
 ## Tool categories
@@ -529,10 +538,11 @@ them outside the project or onto a protected file.
 | Risk | Tools |
 |---|---|
 | Read-only | `read_file`, `grep`, `glob`, `list_dir`, `submit_result` |
-| Write | `write_file`, `edit_file`, `delete_file` |
-| Exec | `bash` |
+| Write | `write_file`, `edit_file`, `delete_file`, `bash` |
 
-The permission system applies to all three categories.
+`bash` executes rather than writes, but the code classes it with the write
+tools (`RiskWrite` in `engine/permission.go`), as it does any tool it does not
+know. The permission system applies to both categories.
 
 ## Accepted risks
 

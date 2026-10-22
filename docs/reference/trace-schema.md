@@ -37,9 +37,10 @@ Attribute values are always strings. A `chat`/`phase2` span carries
 totem pass) and `submit_result: "true"` when the model answered through
 `submit_result`. A `tool.*` span carries `tool` and, when
 the call has them, `path`, `pattern` (`grep`, `glob`) and `command` (`bash`:
-its first line, cut to 120 bytes). A `bash` span that succeeds also adds
+its first line, cut to 120 bytes). A `bash` span whose command ran also adds
 `output`: the tail of what the command printed (its last 12 lines, at most
-2,000 bytes). A failed span adds `error`.
+2,000 bytes; omitted when it printed nothing). A non-zero exit also sets
+`error` to `exit status N`. Any other failed span adds `error`.
 
 The category follows from the name: `chat` and `phase2` get `chat`, a name with
 the `tool.` prefix gets `tool`, and anything else gets `agent`.

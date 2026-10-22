@@ -183,7 +183,7 @@ file.
 | `Shift+Enter` / `Alt+Enter` | Insert a newline |
 | `Tab` | Accept the highlighted slash-command/autocomplete entry |
 | `PgUp` / `PgDn` / `Home` / `End` | Scroll the transcript |
-| `←` / `→` then `Enter` | In the approval prompt: pick Yes / No / Session / Edit / Cancel |
+| `←` / `→` then `Enter` | In the approval prompt: pick Yes / No / Session / Cancel, plus Edit for `edit_file`; `delete_file` offers Delete / No / Cancel |
 | `Ctrl+C` / `Ctrl+D` | Exit |
 
 #### Tool categories
@@ -191,8 +191,7 @@ file.
 | Risk | Tools |
 |---|---|
 | Read-only | `read_file`, `grep`, `glob`, `list_dir`, `submit_result` |
-| Write | `write_file`, `edit_file`, `delete_file` |
-| Exec | `bash` |
+| Write | `write_file`, `edit_file`, `delete_file`, `bash` |
 
 Default permission: **allow** for the read-only tools (`read_file`, `grep`,
 `glob`, `list_dir`) and **ask** for the write/exec tools (`write_file`,
@@ -237,7 +236,9 @@ The built-in totems:
 
 - Config path: `[ouija] config: /path/to/.ouija/config.json`
 - Error: `[ouija] error: <message>`
-- Stats: `\n[ouija] <provider> · <model> · <tokens> tokens · <steps> steps` — the ` · $<cost>` suffix appears only when cost pricing is set
+- Hint, after an error that has one: `[ouija] hint: <hint>`
+- Spend of a failed run: `[ouija] <N> tokens, <M> steps`
+- Stats of a successful run: `\n[ouija] <provider> · <model> · <tokens> tokens · <steps> steps` — the ` · $<cost>` suffix appears only when cost pricing is set
 
 ## ouija mcp
 
@@ -247,6 +248,7 @@ on this machine.
 
 ```sh
 ouija mcp            # serve MCP over stdio (what a harness launches)
+ouija mcp serve      # the same as bare `ouija mcp`
 ouija mcp install    # register ouija with OpenCode / Claude Code / Cursor
 ouija mcp status     # show where ouija is connected
 ```

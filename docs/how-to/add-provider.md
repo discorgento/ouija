@@ -45,9 +45,9 @@ touch engine/providers/mistral.go
 package providers
 
 import (
-    "context"
-    "fmt"
-    "iter"
+    "context" // used by Chat, step 3
+    "iter"    // used by Chat, step 3
+
     "github.com/discorgento/ouija/engine"
 )
 

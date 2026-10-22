@@ -551,24 +551,49 @@ eng.Run(ctx, engine.RunRequest{
 `engine/enginetest` runs a totem against a scripted model, with no network
 and no API key. Its `Provider` answers each model call with whatever your
 `Respond` function returns for that request. `Submit` builds a reply that
-hands in a run's structured result.
+hands in a run's structured result. The test below drives a two-step totem
+in your package: a scout run (its system prompt starts with "You scout")
+that submits a summary, then a run that writes the report as plain text.
 
 ```go
+package mytotem
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/discorgento/ouija/engine"
+	"github.com/discorgento/ouija/engine/enginetest"
+	"github.com/discorgento/ouija/registry"
+)
+
 func TestRun(t *testing.T) {
+	root := t.TempDir()
 	p := &enginetest.Provider{Respond: func(req engine.ChatRequest) enginetest.Reply {
 		if strings.HasPrefix(req.System, "You scout") {
 			return enginetest.Submit(map[string]any{"summary": "a calc package"})
 		}
 		return enginetest.Reply{Text: "# Report"}
 	}}
-	eng := enginetest.NewEngine(p, t.TempDir())
+	eng := enginetest.NewEngine(p, root)
+
 	out, err := registry.Invoke(context.Background(), eng, &Totem{}, registry.Args{Task: "x"})
-	// assert on out, on the files written under the root, on p.Requests()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out == nil {
+		t.Fatal("no result")
+	}
+	if n := len(p.Requests()); n != 2 {
+		t.Errorf("%d model calls, want the scout and the report", n)
+	}
 }
 ```
 
-Return a `Reply{Err: ...}` to fail that call and test how the totem handles
-an error. The provider is safe for concurrent use, so parallel passes work.
+Assert on the result `Invoke` returns, on the files written under `root`, and
+on `p.Requests()`, the requests the model received in order. Return a
+`Reply{Err: ...}` to fail that call and test how the totem handles an error. The provider is safe for concurrent use, so parallel passes work.
 
 ---
 
