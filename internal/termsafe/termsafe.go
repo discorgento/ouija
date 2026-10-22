@@ -73,7 +73,7 @@ func filter(s string, drop func(*strings.Builder, rune)) string {
 }
 
 const (
-	zwj  = '‍'
+	zwj  = '\u200d'
 	vs15 = '︎' // text presentation
 	vs16 = '️' // emoji presentation
 )

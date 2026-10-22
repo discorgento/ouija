@@ -109,7 +109,7 @@ func TestPickerCleansItems(t *testing.T) {
 		t.Errorf("Render passed an escape sequence through: %q", out)
 	}
 	got := suggestedModelsFor(&engine.Config{ModelSuggestions: map[string][]string{
-		"openai": {"gpt‮4o", "gpt-4o"},
+		"openai": {"gpt\u202e4o", "gpt-4o"},
 	}}, "openai", nil)
 	if !slices.Equal(got, []string{"gpt-4o"}) {
 		t.Errorf("suggestedModelsFor = %q, want the ID with a bidi control dropped", got)
