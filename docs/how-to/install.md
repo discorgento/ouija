@@ -35,7 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/inst
 irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex       # Windows
 ```
 
-![A real install: the curl command, the PATH and setup questions, the three setup steps, then ouija opening the chat](../../assets/install.gif)
+<p align="center">
+  <img src="../../assets/install.gif" alt="A real install: the curl command, the PATH and setup questions, the three setup steps, then ouija opening the chat" width="800">
+</p>
 
 The rest of this page explains what those scripts do, and how to install by
 hand or from source.
