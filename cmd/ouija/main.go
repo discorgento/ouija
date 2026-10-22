@@ -346,7 +346,7 @@ var commandUsage = map[string]string{
 	"trust":    "usage: ouija trust [--revoke] [path]\n  Review and trust the project config (its permission, tools and sandbox, apiKey, systemPrompt, rules, projectRoot, a raised budget and a provider or model other than yours then apply).",
 	"learn":    "usage: ouija learn [fact…]\n  Without a fact: show what was learned. A fact starting with - goes after --: ouija learn -- \"-v means verbose\"",
 	"generate": "usage: ouija generate totem [--external [dir]]\n  Scaffold a totem: in this ouija checkout, or as a standalone module with --external.",
-	"chat":     "usage: ouija chat [--config <file>] [--trace-file <file>]\n  Interactive chat with the project.",
+	"chat":     "usage: ouija chat [--continue|-c] [--config <file>] [--trace-file <file>]\n  Interactive chat with the project; --continue resumes this project's latest conversation.",
 	"mcp":      "usage: ouija mcp [serve|install|status]\n  serve (default): the MCP server on stdio · install: register it with the harnesses found · status: show them.",
 }
 
