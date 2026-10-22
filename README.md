@@ -3,24 +3,42 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/discorgento/ouija/actions/workflows/ci.yml"><img src="https://github.com/discorgento/ouija/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <strong>Write your coding agents in Go. Run them safely with any model, even free local ones.</strong>
+</p>
+
+<p align="center">
   <a href="https://github.com/discorgento/ouija/releases"><img src="https://img.shields.io/github/v/release/discorgento/ouija?include_prereleases&sort=semver" alt="Release"></a>
+  <a href="https://github.com/discorgento/ouija/actions/workflows/ci.yml"><img src="https://github.com/discorgento/ouija/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/github/go-mod/go-version/discorgento/ouija" alt="Go version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
 
-# ouija
-
-ouija is a harness for AI agents that you write in Go: it runs a model in a loop
-and executes the tool calls the model asks for. Each agent, called a **totem**,
-is real code you own, with types, tests and golden files instead of a prompt
-file. Underneath, a shared engine handles model providers, the filesystem
-sandbox, the cost budget, tracing and MCP export (MCP, the Model Context
-Protocol, lets editors such as Claude Code or Cursor call outside tools).
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#the-chat">The chat</a> ·
+  <a href="#write-your-own-agent">Write your own agent</a> ·
+  <a href="#safe-by-default">Security</a> ·
+  <a href="docs/index.md">Docs</a>
+</p>
 
 <p align="center">
-  <img src="assets/demo.gif" alt="ouija doctor checking the setup, then the chat: a failing test, the fix shown as a diff and approved, the test passing, and /review verifying its findings" width="800">
+  <img src="assets/demo.gif" alt="The ouija chat: a question about a failing test, the tools it runs, the fix shown as a diff and approved, and the test passing" width="800">
 </p>
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh
+```
+
+- **Agents as code**: each step is a line of Go the model cannot skip, with
+  types, tests and golden files; the model only makes the judgment calls.
+- **Sandboxed by default**: commands run with no network and no reads outside
+  the project (Landlock and seccomp on Linux, Seatbelt on macOS), and every
+  edit waits for your approval.
+- **Any model**: Anthropic, OpenAI, OpenRouter (free models too), OpenCode, or
+  Ollama on your own machine.
+- **A chat that shows its work**: every tool, diff, token and cent on screen.
+- **Plugs into your editor**: the agents become tools in Claude Code, Cursor
+  and OpenCode through MCP.
 
 ## Quick start
 
@@ -36,8 +54,8 @@ irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1
 </p>
 
 It offers to add ouija to your `PATH` and opens the setup: pick a provider,
-paste its key (checked right away) and pick a model. Pick Ollama to run
-locally and for free. Then, inside any project:
+paste its key (checked right away) and pick a model, or pick Ollama or
+`openrouter/free` to start for free. Then, inside any project:
 
 ```sh
 cd /path/to/your/project
@@ -45,21 +63,13 @@ ouija                      # the chat: explore and edit code, approve diffs
 ouija task "describe X"    # one-shot: verified plan (scout → N passes → reconcile)
 ```
 
-If something does not work, run `ouija doctor`. To build from source instead,
-see [Install](#install).
+If something does not work, run `ouija doctor`.
 
 ## Why ouija
 
-> **Why not a prompt file?** Written as prose, "Do A, then verify B, then
-> reconcile" is a request the model may skip. Written in Go, each step is the
-> next line of code, and you can test it.
-> [The full argument →](docs/explanation/totems.md)
-
-ouija ships with four totems: `task`, `review`, `doc` and `sticker`. The engine
-is also a Go library, so **your own agent is a Go type in your repo** (the code
-reviewer below is about 50 lines), and it inherits the budget, sandbox, tracing and MCP export. `go build`
-turns it into a standalone binary.
-[Write your own agent →](#write-your-own-agent)
+Written as prose, "Do A, then verify B, then reconcile" is a request the model
+may skip. Written in Go, each step is the next line of code, and you can test
+it. [The full argument →](docs/explanation/totems.md)
 
 The name fits: a ouija board needs several hands to spell an answer, and the
 `task` totem sends several independent passes over the code, then reconciles
@@ -73,8 +83,14 @@ flowchart LR
     ENG --> TOTEMS["totems<br/>task · review · doc · sticker · yours"]
 ```
 
-The engine knows nothing about tasks or documents; each totem defines its own
-flow on top of it. See [Architecture](docs/explanation/architecture.md).
+A shared engine runs the model, the tools, the sandbox, the budget and the
+trace; each totem defines only its own flow on top of it.
+[Architecture →](docs/explanation/architecture.md)
+
+**When not to use it:** if you want a finished coding agent and never plan to
+write one, a general-purpose agent fits better; ouija's chat is there, but its
+strength is the agents you write. On Windows, and on Linux kernels without
+Landlock ABI v9, commands run without the OS sandbox and ask before each one.
 
 ## The chat
 
@@ -84,9 +100,8 @@ flow on top of it. See [Architecture](docs/explanation/architecture.md).
 
 Each reply shows what it did. One line lists the tools the turn used (a failed
 command also shows its last lines of output), followed by the time, tokens and
-cost. Every file change appears as a diff, side by side on a wide terminal.
-`@file` attaches a file, `/undo` reverts a change, `Ctrl+F` searches, and
-`ouija chat -c` resumes the last conversation.
+cost. Every file change appears as a diff, and nothing is written until you
+approve it.
 
 <p align="center">
   <img src="assets/screens/chat-conversation.png" alt="A reply with its tools, a failed test's output and the diff it applied" width="800">
@@ -100,30 +115,27 @@ pass, and the reconcile step that merges them. It ends with the plan.
   <img src="assets/screens/chat-task.png" alt="/task in the chat: the scout and the passes drawn live" width="800">
 </p>
 
-<p align="center">
-  <img src="assets/screens/chat-diff.png" alt="A diff side by side, syntax-highlighted" width="800">
-</p>
+On a wide terminal, a change shows side by side, syntax-highlighted. `@file`
+attaches a file, `/undo` reverts a change, `Ctrl+F` searches, and
+`ouija chat -c` resumes the last conversation.
 
-Keys, commands and themes: [Chat TUI](docs/how-to/chat.md) ·
-[CLI reference](docs/reference/cli.md).
+Keys, commands and themes: [Chat TUI](docs/how-to/chat.md).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
+| `ouija` / `ouija chat` | The terminal chat: tools, streaming, approvals |
 | `ouija task "..."` | Verified implementation plan: scout → N passes → reconcile → checklist |
 | `ouija review` | Review the branch's changes: find problems → a skeptic verifies each → what holds |
 | `ouija doc "..."` | Code-verified client document — HTML + PDF + technical MD |
 | `ouija sticker` | Laptop sticker SVG from real project metrics |
-| `ouija chat` | Interactive terminal chat (Bubble Tea TUI): tools, streaming, approvals |
 | `ouija setup` / `ouija init` | Global defaults / per-project config |
 | `ouija trust` | Apply a project config you did not write (permissions, allowlist, apiKey, provider/model, budget, rules, …) |
 | `ouija learn "fact"` | Save project knowledge, used by the chat and the `task` totem |
 | `ouija mcp [install\|status]` | Serve MCP over stdio, or register ouija with your editor's harness |
 | `ouija generate totem` | Scaffold a new totem |
-| `ouija doctor` | Diagnose config, provider key, and harness wiring |
-| `ouija config` | Same wizard as `ouija setup` |
-| `ouija version` | Print the version |
+| `ouija doctor` | Diagnose config, provider key, sandbox and harness wiring |
 
 Flags, slash commands, shortcuts and exit codes:
 [CLI reference](docs/reference/cli.md).
@@ -131,7 +143,8 @@ Flags, slash commands, shortcuts and exit codes:
 ## Write your own agent
 
 A totem is a Go type in **your** repository. `engine`, `registry`, `schema` and
-`bootstrap` are public Go packages, so you neither fork ouija nor rebuild it.
+`bootstrap` are public Go packages, so you neither fork ouija nor rebuild it,
+and your agent inherits the budget, sandbox, tracing and MCP export.
 
 The design splits the work in two. **Go decides the path**: which steps run, in
 what order, with which data, and what happens to each answer. **The model only
@@ -239,16 +252,45 @@ my-totem mcp                          # your totems as my-totem_<name> tools in
 Walkthrough: [Add a totem](docs/how-to/add-totem.md) · Design rationale:
 [Totems](docs/explanation/totems.md).
 
-## Install
+## Safe by default
 
-A release, no Go needed:
+Every layer **fails closed**: when a check is inconclusive, the answer is
+*deny*.
+
+- **OS sandbox for every command**: Landlock and a seccomp filter on Linux,
+  Seatbelt on macOS. Writes only inside the project, no network unless the
+  project opens a port, no reading other processes, and background jobs end
+  with the command.
+- **Secrets stay out**: `.env`, keys, credentials and other protected files are
+  refused to every file tool and to commands that name them, and credentials
+  are stripped from every command's environment.
+- **You approve every change**: edits, deletes and commands wait for you, and
+  the prompt shows the exact file or command.
+- **Untrusted repositories cannot reconfigure ouija**: a project's config
+  applies its sensitive keys only after `ouija trust`.
+- **Budget ceilings and loop detection** stop a run that goes nowhere.
+
+[Security model](docs/explanation/security.md) ·
+[Report a vulnerability](SECURITY.md)
+
+## Use it from your editor
+
+Any coding agent that can run shell commands can run `ouija task "..."`. For
+harnesses that speak MCP (Claude Code, Cursor, OpenCode), register ouija once:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.sh | sh       # Linux, macOS
-irm https://raw.githubusercontent.com/discorgento/ouija/main/scripts/install.ps1 | iex           # Windows (PowerShell)
+ouija mcp install   # detect harnesses and register ouija
+ouija mcp status    # show where ouija is connected
 ```
 
-From a checkout:
+The totems then appear as tools named `ouija_task`, `ouija_doc`, …, and project
+files are readable, inside the sandbox, as `ouija://project/{path}` resources.
+[MCP integration →](docs/how-to/integrate-mcp.md)
+
+## Install
+
+The [Quick start](#quick-start) installer needs nothing else. To build from a
+checkout instead, with **Go 1.26+**:
 
 ```sh
 make install        # both binaries → $GOBIN
@@ -257,42 +299,8 @@ make install        # both binaries → $GOBIN
 Without `make`, run `go install ./cmd/ouija` (and `./cmd/ouija-mcp`). Both
 binaries land in `$(go env GOBIN)`, or in `$(go env GOPATH)/bin` when `GOBIN` is
 unset, and that directory must be on your `PATH`. [Install](docs/how-to/install.md)
-covers the details, including `PATH` for each shell and the `@latest` caveat.
-
-### Requirements
-
-- **Go 1.26+** (uses `iter.Seq2`, `log/slog`, `slices`, `errors.Join`, `clear`,
-  `range-over-int`). Runtime dependencies live in `go.mod` — the Charm stack
-  (Bubble Tea v2, Bubbles, Lip Gloss, Glamour, Huh, `charmbracelet/x/ansi`,
-  `x/term`, `colorprofile`), `alecthomas/chroma`, `atotto/clipboard`,
-  `mvdan.cc/sh/v3`, `landlock-lsm/go-landlock`, `golang.org/x/sync`;
-  everything else is the standard library.
-- At least one provider configured via `ouija setup`.
-
-## Development
-
-```sh
-make build          # ./ouija + ./ouija-mcp (gitignored)
-make run ARGS='…'   # build + execute
-make check          # gofmt + go vet + go test — run before committing
-make help           # every target
-make dist           # cross-compile 5 targets → dist/ouija_<version>_<os>_<arch> archives
-```
-
-The version comes from the **git tag**, which the release pipeline creates.
-The build injects it at link time, so the CLI, the MCP `serverInfo` and the TUI
-header all read it from one source. Never edit a version by hand; pass one
-explicitly only for testing (`make build VERSION=vX.Y.Z`).
-
-CI runs the same checks and more on every push and pull request (gofmt,
-`go.mod` tidiness, stale generated code, vet for three OSes, staticcheck,
-actionlint, `go test -race ./...`, build, govulncheck). [Contribute](docs/how-to/contribute.md) covers the
-full workflow and the code conventions.
-
-Releases are automated. A push to `main` opens a *release PR* that bumps the
-version and updates the changelog. Merging that PR creates the tag `vX.Y.Z` and
-a GitHub Release with the cross-compiled archives attached, so nobody ever sets
-a version by hand. Details: [Releases](docs/how-to/contribute.md#releases).
+covers the details, including `PATH` for each shell and how the installer
+verifies what it downloads.
 
 ## Documentation
 
@@ -309,42 +317,14 @@ Full documentation in [`docs/`](docs/index.md):
 | | [Add a provider](docs/how-to/add-provider.md) | | |
 | | [Contribute](docs/how-to/contribute.md) | | |
 
-## Using ouija from other tools
-
-Any coding agent that can run shell commands can run `ouija task "..."`. For
-harnesses that speak MCP (OpenCode, Claude Code, Cursor), register ouija once:
-
-```sh
-ouija mcp install   # detect harnesses and register ouija
-ouija mcp status    # show where ouija is connected
-```
-
-The totems then appear as tools named `ouija_task`, `ouija_doc`, …, and project
-files are readable, inside the sandbox, as `ouija://project/{path}` resources.
-Details: [MCP integration](docs/how-to/integrate-mcp.md).
-
-## Security
-
-ouija layers several defenses: a filesystem sandbox, an OS sandbox for bash
-(on by default on Linux with Landlock ABI v9+ and a seccomp socket filter, and
-on macOS with Seatbelt), project configs that apply their sensitive keys only
-after `ouija trust`, protected paths,
-permission levels, a bash denylist and allowlist, detection of an agent stuck
-repeating the same call (a "doom loop"), budget ceilings, and credentials
-stripped from the environment of every command it runs. All of them **fail closed**: when a check is inconclusive, the
-answer is *deny*.
-
-- Model and rationale: [Security model](docs/explanation/security.md)
-- Vulnerability reporting: [SECURITY.md](SECURITY.md)
-
 ## Roadmap
 
 - `deploy` totem (preview + apply changes).
-- Adversarial verification step (a skeptic refutes each finding before reconcile).
 - Totem registry — index and install third-party totems
   (`ouija totem add github.com/…`).
+- A domain allowlist for the sandbox's network, instead of ports.
 
-## Known limitations (honest debts)
+## Known limitations
 
 - When the conversation outgrows the context window, old messages are dropped,
   not summarized.
@@ -352,12 +332,21 @@ answer is *deny*.
 - Doom-loop detection catches only calls whose input is exactly identical.
 - MCP resources are read-only.
 
-Details:
-[Engine → Known limitations](docs/explanation/engine.md#known-limitations-honest-debts).
+[Engine → Known limitations](docs/explanation/engine.md#known-limitations-honest-debts)
+
+## Contributing
+
+`make check` runs gofmt, vet and the tests; CI adds staticcheck, actionlint,
+the race detector, three OSes and govulncheck. Releases are automated from
+Conventional Commits. [CONTRIBUTING.md](CONTRIBUTING.md) ·
+[Contribute guide](docs/how-to/contribute.md) · [Changelog](CHANGELOG.md)
+
+### Contributors
+
+<a href="https://github.com/discorgento/ouija/graphs/contributors">
+  <img alt="Contributors" src="https://contrib.rocks/image?repo=discorgento/ouija&max=48&columns=12">
+</a>
 
 ## License
 
 [MIT](LICENSE) — © 2026 [discorgento](https://discorgento.com/).
-
-Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Changelog:
-[CHANGELOG.md](CHANGELOG.md).
