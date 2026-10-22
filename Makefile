@@ -39,7 +39,7 @@ GO_MOD_VERSION      := $(shell $(GO) mod edit -json 2>/dev/null | sed -n 's/^[[:
 .DEFAULT_GOAL := help
 .PHONY: help build build-mcp dist install run chat task setup config learn \
         test test-race vet fmt fmt-check check tidy cover clean \
-        lint vuln tidy-check gen-check cross-vet actionlint
+        lint vuln tidy-check gen-check cross-vet actionlint screens
 
 help: ## List every target
 	@grep -E '^[a-zA-Z][a-zA-Z0-9_-]*:.*?## ' $(MAKEFILE_LIST) \
@@ -160,6 +160,11 @@ cover: ## Generate a coverage report (coverage.html)
 	$(GO) test -coverprofile=coverage.out $(PACKAGES)
 	$(GO) tool cover -html=coverage.out -o coverage.html
 	@echo "ok → coverage.html"
+
+screens: ## Regenerate the README screenshots (assets/screens/*.png; needs Chrome/Chromium)
+	@d=$$(mktemp -d); trap 'rm -rf "$$d"' EXIT; \
+	$(GO) test ./internal/chat -run '^TestScreenshots$$' -count=1 -screens="$$d" && \
+	$(GO) run ./internal/tools/screenshots -in "$$d" -out assets/screens
 
 clean: ## Remove binaries and release artifacts
 	rm -f $(BIN) $(BIN_MCP) coverage.out coverage.html
