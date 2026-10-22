@@ -6,7 +6,8 @@
 #      the CHANGELOG.md section and the fallback in internal/version/version.go.
 #   3. Merging that PR creates the tag vX.Y.Z + the GitHub Release.
 #   4. This same workflow (same run, same token) then re-runs the gate on the
-#      tag, cross-compiles the archives with `make dist`, attests their build
+#      tag in a job with a read-only token, and only once it passes
+#      cross-compiles the archives with `make dist`, attests their build
 #      provenance and attaches them to the release.
 #
 # Artifacts run in the SAME workflow on purpose: releases created with the
@@ -84,9 +85,34 @@ jobs:
           done
           echo "no run held for approval on $head (CI may have started on its own)"
 
-  artifacts:
-    name: gate + cross-compile + attest + attach binaries
+  # The tests run code from the whole tree: they get a read-only token, not
+  # the signing identity and release write access the next job holds.
+  gate:
+    name: gate (gofmt + vet + tests) on the tag
     needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # Nothing from a shared cache in the release path.
+          cache: false
+
+      - name: Gate (gofmt + vet + tests) on the tagged commit
+        run: make check
+
+  artifacts:
+    name: cross-compile + attest + attach binaries
+    needs: [release-please, gate]
     if: needs.release-please.outputs.created == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -108,9 +134,6 @@ jobs:
           # No shared cache in a job holding write tokens: a poisoned cache
           # entry from another workflow must not reach release binaries.
           cache: false
-
-      - name: Gate (gofmt + vet + tests) on the tagged commit
-        run: make check
 
       - name: Build the release archives (5 targets)
         run: make dist VERSION="$TAG"
@@ -137,6 +160,16 @@ jobs:
 
       # Artifact attestations need a public repository (or GitHub Enterprise
       # Cloud): on a private one the step would fail and block the upload below.
+      # It is skipped there, loudly: such a release ships with checksums only,
+      # and the installer refuses it wherever it can check provenance.
+      - name: Warn that the release has no build provenance
+        if: github.event.repository.visibility != 'public'
+        run: |
+          msg="the repository is not public, so $TAG ships WITHOUT a build provenance attestation (checksums only); installers that verify provenance will refuse it"
+          echo "::warning title=No build provenance::$msg"
+          echo "> [!WARNING]" >> "$GITHUB_STEP_SUMMARY"
+          echo "> $msg" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Attest build provenance
         if: github.event.repository.visibility == 'public'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
