@@ -27,7 +27,11 @@ var protectedFileNames = []string{
 	filepath.Join(".huggingface", "token"), filepath.Join(".local", "share", "uv", "credentials"),
 	filepath.Join(".config", "git", "credentials"), filepath.Join(".terraform.d", "credentials.tfrc.json"),
 	".vault-token", filepath.Join(".config", "rclone", "rclone.conf"), ".password-store",
-	filepath.Join(".local", "share", "keyrings"),
+	filepath.Join(".local", "share", "keyrings"), filepath.Join(".local", "share", "kwalletd"),
+	filepath.Join(".config", "composer", "auth.json"), filepath.Join(".composer", "auth.json"),
+	filepath.Join(".config", "pip", "pip.conf"), filepath.Join(".gem", "credentials"),
+	filepath.Join(".config", "containers", "auth.json"), ".s3cfg", ".terraformrc",
+	filepath.Join(".config", "hub"), filepath.Join(".config", "glab-cli"),
 }
 
 // maxProtectedScan bounds the walk of the credential directories (a huge

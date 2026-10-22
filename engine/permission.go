@@ -178,6 +178,7 @@ func isProtectedPath(absPath string) bool {
 	switch base {
 	case ".gitconfig", ".netrc", ".npmrc", ".dockercfg", ".dockerconfigjson",
 		".git-credentials", ".pgpass", ".pypirc", ".my.cnf", ".vault-token",
+		".yarnrc.yml", ".s3cfg", ".terraformrc",
 		// SSH keys kept outside ~/.ssh (a key copied into a project).
 		"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519":
 		return true
@@ -227,7 +228,8 @@ func isProtectedPath(absPath string) bool {
 	// .azure (Azure auth), .ouija (config with optional apiKey).
 	// absPath is slash-separated by now (above), on every OS.
 	sep := "/"
-	if containsComponent(absPath, sep, ".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure", ".ouija", ".password-store") {
+	if containsComponent(absPath, sep, ".ssh", ".gnupg", ".aws", ".docker", ".kube", ".azure", ".ouija", ".password-store",
+		".mozilla") {
 		return true
 	}
 	if containsComponentPair(absPath, sep, ".config", "gcloud") {
@@ -244,17 +246,34 @@ func isProtectedPath(absPath string) bool {
 		return true
 	}
 	// Package registries' and model hubs' tokens, inside tool directories
-	// whose other parts (caches, toolchains) the sandbox may read.
+	// whose other parts (caches, toolchains) the sandbox may read. A pair
+	// that starts with a dot directory is distinctive anywhere; the plain
+	// ones (git/credentials, share/keyrings, …) only in the home directory,
+	// where the tools keep them: in a project they are ordinary paths
+	// (internal/git/credentials/, debian/usr/share/keyrings/).
 	for _, pair := range [][2]string{
 		{".cargo", "credentials"}, {".cargo", "credentials.toml"},
 		{".m2", "settings.xml"}, {".m2", "settings-security.xml"},
-		{".gradle", "gradle.properties"}, {"huggingface", "token"},
-		{"uv", "credentials"}, {".docker", "config.json"}, {"etc", "npmrc"},
-		{"git", "credentials"}, {".terraform.d", "credentials.tfrc.json"}, {"rclone", "rclone.conf"},
-		{"share", "keyrings"},
+		{".gradle", "gradle.properties"}, {".docker", "config.json"},
+		{".terraform.d", "credentials.tfrc.json"}, {".composer", "auth.json"},
+		{".gem", "credentials"}, {".config", "hub"}, {".config", "glab-cli"},
+		{".config", "google-chrome"}, {".config", "chromium"},
 	} {
 		if containsComponentPair(absPath, sep, pair[0], pair[1]) {
 			return true
+		}
+	}
+	if home := homeDir(foldCase); home != "" && strings.HasPrefix(absPath, home+sep) {
+		inHome := absPath[len(home):]
+		for _, pair := range [][2]string{
+			{"huggingface", "token"}, {"uv", "credentials"}, {"etc", "npmrc"},
+			{"git", "credentials"}, {"rclone", "rclone.conf"}, {"share", "keyrings"},
+			{"share", "kwalletd"}, {"composer", "auth.json"}, {"pip", "pip.conf"},
+			{"containers", "auth.json"},
+		} {
+			if containsComponentPair(inHome, sep, pair[0], pair[1]) {
+				return true
+			}
 		}
 	}
 	// ouija's global config: every provider's API key and the trusted-project
@@ -269,14 +288,28 @@ func isProtectedPath(absPath string) bool {
 		for _, name := range []string{"ouija", "gcloud"} {
 			// Normalized like absPath: an 8.3 short name in the config dir
 			// (C:\Users\RUNNER~1\AppData) must meet the expanded path.
-			g := policyName(filepath.ToSlash(longName(filepath.Join(dir, name))), foldCase, runtime.GOOS == "windows")
-			if absPath == g || strings.HasPrefix(absPath, g+sep) {
-				return true
+			// And resolved: with XDG_CONFIG_HOME a symlink, the real path
+			// of ouija's config.json is what a project symlink reaches.
+			for _, p := range []string{filepath.Join(dir, name), physicalPath(filepath.Join(dir, name))} {
+				g := policyName(filepath.ToSlash(longName(p)), foldCase, runtime.GOOS == "windows")
+				if absPath == g || strings.HasPrefix(absPath, g+sep) {
+					return true
+				}
 			}
 		}
 	}
 
 	return false
+}
+
+// homeDir is the user's home directory, normalized like the paths the policy
+// checks; "" when unknown.
+func homeDir(fold bool) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return policyName(filepath.ToSlash(longName(home)), fold, runtime.GOOS == "windows")
 }
 
 // containsComponent checks if path contains any of the given directory

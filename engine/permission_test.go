@@ -3,6 +3,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,6 +77,10 @@ func TestPermissionConfigCheck(t *testing.T) {
 }
 
 func TestIsProtectedPath(t *testing.T) {
+	// The token files outside dot directories count only in the home
+	// directory: the table's home is /home/u.
+	t.Setenv("HOME", "/home/u")
+	t.Setenv("USERPROFILE", "/home/u")
 	skipOnWindows(t, "POSIX paths")
 	tests := []struct {
 		path string
@@ -125,6 +130,24 @@ func TestIsProtectedPath(t *testing.T) {
 		{"/home/u/.config/rclone/rclone.conf", true},
 		{"/home/u/.password-store/x.gpg", true},
 		{"/home/u/.local/share/keyrings/login.keyring", true},
+		{"/home/u/.config/composer/auth.json", true},
+		{"/home/u/.composer/auth.json", true},
+		{"/home/u/.config/pip/pip.conf", true},
+		{"/home/u/.gem/credentials", true},
+		{"/home/u/.config/containers/auth.json", true},
+		{"/project/.yarnrc.yml", true},
+		{"/home/u/.s3cfg", true},
+		{"/home/u/.terraformrc", true},
+		{"/home/u/.config/hub", true},
+		{"/home/u/.config/glab-cli/config.yml", true},
+		{"/home/u/.mozilla/firefox/x/cookies.sqlite", true},
+		{"/home/u/.config/google-chrome/Default/Cookies", true},
+		{"/home/u/.local/share/kwalletd/kdewallet.kwl", true},
+		// The plain pairs are ordinary paths in a project.
+		{"/project/internal/git/credentials/store.go", false},
+		{"/project/debian/usr/share/keyrings/archive.gpg", false},
+		{"/project/src/uv/credentials/x.py", false},
+		{"/project/etc/npmrc", false},
 		{"/sys/kernel/notes", true},
 
 		// Protected directory names at ANY path level (absolute).
@@ -318,5 +341,26 @@ func TestSaveConfigAtKeepsTheProjectsOwnSandbox(t *testing.T) {
 	}
 	if sb := eng.Config().Tools.Bash.Sandbox; sb == nil || sb.Network == nil || !sb.Network.All {
 		t.Fatal("SaveConfigAt changed the running sandbox")
+	}
+}
+
+// With XDG_CONFIG_HOME a symlink, the real path of ouija's own config is
+// protected too: a project symlink reaches it by that path (#26).
+func TestOuijaConfigBehindASymlinkedConfigDir(t *testing.T) {
+	skipOnWindows(t, "XDG_CONFIG_HOME")
+	if runtime.GOOS != "linux" {
+		t.Skip("os.UserConfigDir reads XDG_CONFIG_HOME on Linux")
+	}
+	real := filepath.Join(t.TempDir(), "real-config")
+	if err := os.MkdirAll(filepath.Join(real, "ouija"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "cfg")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("no symlinks here:", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", link)
+	if !isProtectedPath(filepath.Join(real, "ouija", "config.json")) {
+		t.Fatal("the real path of ouija's config is not protected")
 	}
 }
