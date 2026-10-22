@@ -188,6 +188,11 @@ func (r *ToolRunner) Run(ctx context.Context, label string, call ToolCall, extra
 					return allowlistError()
 				}
 			}
+		} else {
+			// No permission config: bash, a write-tier tool, is refused
+			// outright, and lifting its sandbox must not be laxer.
+			span.SetError("denied (write tier)")
+			return errRejected("tool '" + call.Name + "' requires approval (write tier) and was denied")
 		}
 		if !sb.UnsandboxedAllowed() {
 			span.SetError("unsandboxed forbidden")

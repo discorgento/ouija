@@ -290,13 +290,20 @@ func buildSandboxPolicy(root string, sb *SandboxConfig) (sandboxPolicy, error) {
 		// Only when the home directory itself is out of reach (it always is:
 		// it holds .ssh): its toolchains, never the rest of it.
 		for _, d := range sandboxHomeReadDirs {
-			pattern := filepath.Join(home, filepath.FromSlash(d))
-			if !strings.Contains(d, "*") {
-				p.ReadDirs = append(p.ReadDirs, pattern)
-				continue
+			paths := []string{filepath.Join(home, filepath.FromSlash(d))}
+			if strings.Contains(d, "*") {
+				paths, _ = filepath.Glob(paths[0]) // the versions installed now
 			}
-			matches, _ := filepath.Glob(pattern) // the versions installed now
-			p.ReadDirs = append(p.ReadDirs, matches...)
+			for _, path := range paths {
+				// Landlock grants a symlink's target: ~/.local/lib linked to
+				// ~/.config would hand out what is there. Each grant is its
+				// real path, and one that reaches credentials is dropped.
+				real, err := filepath.EvalSymlinks(path)
+				if err != nil || checkSandboxGrant(real) != nil {
+					continue
+				}
+				p.ReadDirs = append(p.ReadDirs, real)
+			}
 		}
 		for _, f := range sandboxHomeReadFiles {
 			p.ReadFiles = append(p.ReadFiles, filepath.Join(home, filepath.FromSlash(f)))
