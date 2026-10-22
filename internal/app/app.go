@@ -92,7 +92,15 @@ func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
 	}
 
 	dir, _ := os.Getwd()
-	top := searchTop(dir)
+	// Not above the home directory when dir is inside it: above it are
+	// directories the user does not own — /home, / — where a config someone
+	// else put would apply to all of the user's projects. Compared as files,
+	// not names, so a symlink (macOS /Users under /System/Volumes/Data) or a
+	// Windows short name (RUNNER~1) cannot hide that the walk reached home.
+	var home os.FileInfo
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		home, _ = os.Stat(h)
+	}
 	for {
 		for _, rel := range []string{".ouija/config.json", ".ouija.json", "ouija.json"} {
 			p := filepath.Join(dir, rel)
@@ -112,35 +120,15 @@ func findConfigFile(explicit string) (*engine.Config, string, []byte, error) {
 			}
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir || dir == top {
+		if parent == dir {
+			break
+		}
+		if fi, err := os.Stat(dir); err == nil && home != nil && os.SameFile(fi, home) {
 			break
 		}
 		dir = parent
 	}
 	return nil, "", nil, nil
-}
-
-// searchTop is the highest directory discovery looks in from dir: the home
-// directory when dir is inside it, "" (the filesystem root) otherwise. Above
-// home are directories the user does not own — /home, / — where a config
-// someone else put would apply to all of the user's projects.
-func searchTop(dir string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ""
-	}
-	// The working directory may come back with symlinks resolved (macOS
-	// /Users under /System/Volumes/Data): match home in either form.
-	homes := []string{filepath.Clean(home)}
-	if real, err := filepath.EvalSymlinks(home); err == nil && real != homes[0] {
-		homes = append(homes, real)
-	}
-	for _, h := range homes {
-		if rel, err := filepath.Rel(h, dir); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return h
-		}
-	}
-	return ""
 }
 
 // staysInDir refuses a discovered config whose real file lies outside dir,
