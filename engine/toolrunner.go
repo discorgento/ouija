@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -511,9 +512,16 @@ func hiddenRune(r rune) bool {
 		return false
 	case r < 0x20, r == 0x7f, r >= 0x80 && r <= 0x9f:
 		return true
-	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069,
-		r == 0x200e, r == 0x200f, r == 0x061c,
-		r >= 0x200b && r <= 0x200d, r == 0x2060, r == 0xfeff:
+	// Format characters (Cf): the bidi controls, the zero-width ones, the
+	// soft hyphen and the tag characters U+E0000–E007F, which no terminal
+	// shows but a model reads as text. The Arabic number signs are Cf yet
+	// visible; a command has no use for them either.
+	case unicode.Is(unicode.Cf, r):
+		return true
+	case r >= 0xe0000 && r <= 0xe007f, // tags not assigned to Cf
+		r >= 0xfe00 && r <= 0xfe0f, r >= 0xe0100 && r <= 0xe01ef, // variation selectors
+		r == 0x2028, r == 0x2029, // line and paragraph separators
+		r == 0x115f, r == 0x1160, r == 0x3164, r == 0xffa0: // Hangul fillers, blank on screen
 		return true
 	}
 	return false
