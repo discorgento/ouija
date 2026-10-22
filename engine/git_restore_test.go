@@ -542,3 +542,41 @@ func TestRestoreCoversNodeModulesReposAndIncludedConfigs(t *testing.T) {
 		t.Errorf("git still reads core.fsmonitor = %s", out)
 	}
 }
+
+// The restore never deletes what the user keeps under .git/hooks: a
+// directory of helpers the hooks source stays, files and all, after an
+// ordinary command, and only what the command added there is removed.
+func TestRestoreKeepsTheUsersHookDirectories(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	if runtime.GOOS != "linux" {
+		t.Skip("the restore runs where .git is writable in the sandbox (Linux)")
+	}
+	if err := sandboxAvailable(); err != nil {
+		t.Skipf("no sandbox here: %v", err)
+	}
+	project, _, run := sandboxFixture(t, DefaultSandbox())
+	if out, err := exec.Command("git", "-C", project, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	lib := filepath.Join(project, ".git", "hooks", "lib")
+	if err := os.MkdirAll(filepath.Join(lib, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"helper.sh", "nested/more.sh"} {
+		if err := os.WriteFile(filepath.Join(lib, f), []byte("# mine\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res := run(`echo ok > notes.txt; echo planted > .git/hooks/lib/added.sh`)
+	for _, f := range []string{"helper.sh", "nested/more.sh"} {
+		if b, err := os.ReadFile(filepath.Join(lib, f)); err != nil || string(b) != "# mine\n" {
+			t.Errorf("the user's %s was lost (%v): %q\n%s", f, err, b, fmtData(res))
+		}
+	}
+	if _, err := os.Stat(filepath.Join(lib, "added.sh")); err == nil {
+		t.Error("a file the command added under .git/hooks survived")
+	}
+}
