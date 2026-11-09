@@ -14,7 +14,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.11.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	mvdan.cc/sh/v3 v3.14.1
 )
 
