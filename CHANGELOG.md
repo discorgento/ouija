@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/discorgento/ouija/compare/v0.8.0...v0.8.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* build release binaries with Go 1.26.11 (GO-2026-6859) ([#38](https://github.com/discorgento/ouija/issues/38)) ([ae7b33b](https://github.com/discorgento/ouija/commit/ae7b33b107ae6f3100a5ea283eba0b63592d79d8))
+
 ## [0.8.0](https://github.com/discorgento/ouija/compare/v0.7.0...v0.8.0) (2026-10-22)
 
 
